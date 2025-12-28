@@ -143,7 +143,7 @@ Esempio attuale (verifica dalle notizie):
 3. **INFLAZIONE** (scala -1 a +1) - ⚠️ Inflazione ALTA = POSITIVO! Chi ha inflazione sopra il 2%? (BC non può tagliare)
 4. **CRESCITA/PIL** (scala -1 a +1) - Chi cresce di più? USA I PMI!
 5. **RISK SENTIMENT** (scala -1 a +1) - Safe-haven vs cyclical nel contesto attuale
-6. **BILANCIA/FISCALE** (scala -1 a +1) - Current Account + Debt/GDP
+6. **BILANCIA/FISCALE** (scala -1 a +1) - Sostenibilità fiscale (Debt/GDP più basso = meglio)
 
 ## NOTA SUI PESI:
 - Solo ASPETTATIVE TASSI ha range -2/+2 (peso doppio!)
@@ -162,7 +162,6 @@ Esempio attuale (verifica dalle notizie):
             "unemployment": "valore",
             "manufacturing_pmi": "valore",
             "services_pmi": "valore",
-            "current_account_gdp": "valore",
             "debt_to_gdp": "valore"
         },
         ... (per tutte le 7 valute)
@@ -375,206 +374,137 @@ def format_datetime_display(datetime_str: str) -> str:
 
 # --- FUNZIONI RICERCA E ANALISI ---
 
-# URL specifici per ogni indicatore (più affidabili)
-INDICATORS_URLS = {
-    "EUR": {
-        "interest_rate": "https://tradingeconomics.com/euro-area/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/euro-area/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/euro-area/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/euro-area/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/euro-area/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/euro-area/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/euro-area/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/euro-area/government-debt-to-gdp",
-    },
-    "USD": {
-        "interest_rate": "https://tradingeconomics.com/united-states/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/united-states/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/united-states/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/united-states/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/united-states/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/united-states/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/united-states/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/united-states/government-debt-to-gdp",
-    },
-    "GBP": {
-        "interest_rate": "https://tradingeconomics.com/united-kingdom/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/united-kingdom/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/united-kingdom/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/united-kingdom/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/united-kingdom/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/united-kingdom/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/united-kingdom/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/united-kingdom/government-debt-to-gdp",
-    },
-    "JPY": {
-        "interest_rate": "https://tradingeconomics.com/japan/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/japan/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/japan/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/japan/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/japan/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/japan/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/japan/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/japan/government-debt-to-gdp",
-    },
-    "CHF": {
-        "interest_rate": "https://tradingeconomics.com/switzerland/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/switzerland/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/switzerland/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/switzerland/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/switzerland/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/switzerland/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/switzerland/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/switzerland/government-debt-to-gdp",
-    },
-    "AUD": {
-        "interest_rate": "https://tradingeconomics.com/australia/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/australia/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/australia/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/australia/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/australia/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/australia/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/australia/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/australia/government-debt-to-gdp",
-    },
-    "CAD": {
-        "interest_rate": "https://tradingeconomics.com/canada/interest-rate",
-        "inflation_rate": "https://tradingeconomics.com/canada/inflation-cpi",
-        "gdp_growth": "https://tradingeconomics.com/canada/gdp-growth",
-        "unemployment": "https://tradingeconomics.com/canada/unemployment-rate",
-        "manufacturing_pmi": "https://tradingeconomics.com/canada/manufacturing-pmi",
-        "services_pmi": "https://tradingeconomics.com/canada/services-pmi",
-        "current_account_gdp": "https://tradingeconomics.com/canada/current-account-to-gdp",
-        "debt_to_gdp": "https://tradingeconomics.com/canada/government-debt-to-gdp",
-    },
+# Indicatori richiesti per ogni valuta
+REQUIRED_INDICATORS = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment", "manufacturing_pmi", "services_pmi", "debt_to_gdp"]
+
+# Mappa valuta -> paese/area per le ricerche
+CURRENCY_TO_COUNTRY = {
+    "EUR": "Euro Area / Eurozone / ECB",
+    "USD": "United States / US / Federal Reserve",
+    "GBP": "United Kingdom / UK / Bank of England",
+    "JPY": "Japan / Bank of Japan",
+    "CHF": "Switzerland / Swiss National Bank",
+    "AUD": "Australia / Reserve Bank of Australia",
+    "CAD": "Canada / Bank of Canada",
 }
 
 
-def fetch_single_indicator(url: str) -> str:
-    """Scarica un singolo indicatore da TradingEconomics"""
-    import requests
-    from bs4 import BeautifulSoup
+def fetch_macro_data_via_claude(api_key: str) -> dict:
+    """
+    Usa Claude con web_search per cercare i dati macro aggiornati.
+    UNA SOLA chiamata API - Claude deve trovare TUTTI i dati prima di rispondere.
+    """
+    
+    client = anthropic.Anthropic(api_key=api_key)
+    today = datetime.now()
+    
+    prompt = f"""
+Oggi è {today.strftime('%d/%m/%Y')}. 
+
+MISSIONE: Devi cercare sul web i dati macroeconomici ATTUALI per queste 7 valute: EUR, USD, GBP, JPY, CHF, AUD, CAD.
+
+⚠️ REGOLA FONDAMENTALE: NON RISPONDERE finché non hai trovato TUTTI i valori per TUTTI gli indicatori di TUTTE le valute!
+Se non trovi un dato con una ricerca, cerca di nuovo con query diverse finché non lo trovi.
+NON È ACCETTABILE rispondere con "N/A" - devi trovare ogni singolo valore!
+
+Per OGNI valuta devi trovare TUTTI questi 7 indicatori:
+1. **interest_rate**: Tasso di interesse della banca centrale ATTUALE (%)
+2. **inflation_rate**: Tasso di inflazione CPI annuale più recente (%)
+3. **gdp_growth**: Crescita PIL trimestrale più recente (% QoQ)
+4. **unemployment**: Tasso di disoccupazione più recente (%)
+5. **manufacturing_pmi**: PMI manifatturiero più recente
+6. **services_pmi**: PMI servizi più recente
+7. **debt_to_gdp**: Debito pubblico in % del PIL
+
+Banche centrali e fonti di riferimento:
+- EUR: ECB deposit rate, Eurostat per altri dati
+- USD: Federal Reserve federal funds rate (limite superiore), BLS per altri dati
+- GBP: Bank of England bank rate, ONS per altri dati
+- JPY: Bank of Japan policy rate, Statistics Bureau per altri dati
+- CHF: Swiss National Bank policy rate, FSO per altri dati
+- AUD: Reserve Bank of Australia cash rate, ABS per altri dati
+- CAD: Bank of Canada overnight rate, Statistics Canada per altri dati
+
+STRATEGIA DI RICERCA:
+- Cerca su TradingEconomics (ha tutti i dati macro per paese)
+- Cerca sui siti delle banche centrali per i tassi
+- Cerca "country name + indicator name + 2024" o "2025" per dati recenti
+- Se una ricerca non trova il dato, prova con query alternative
+- CONTINUA A CERCARE finché non hai TUTTI i 49 valori (7 valute × 7 indicatori)
+
+FORMATO RISPOSTA - Solo JSON, nessun testo prima o dopo:
+{{
+    "EUR": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "USD": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "GBP": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "JPY": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "CHF": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "AUD": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}},
+    "CAD": {{"interest_rate": "X.XX", "inflation_rate": "X.X", "gdp_growth": "X.X", "unemployment": "X.X", "manufacturing_pmi": "XX.X", "services_pmi": "XX.X", "debt_to_gdp": "XX.X"}}
+}}
+
+RICORDA: Fai tutte le ricerche necessarie PRIMA di rispondere. Non rispondere finché non hai TUTTI i 49 valori!
+"""
     
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        # Singola chiamata API con molte web search disponibili
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4000,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 30  # Abbastanza ricerche per trovare tutto
+            }],
+            messages=[{"role": "user", "content": prompt}]
+        )
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Estrai risposta
+        response_text = ""
+        for block in message.content:
+            if hasattr(block, 'text'):
+                response_text += block.text
         
-        # Cerca il valore principale - di solito in un elemento con id="ticker"
-        # o in elementi con classe specifica
+        # Parsa JSON
+        response_text = response_text.strip()
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
         
-        # Metodo 1: cerca elemento con id ticker
-        ticker = soup.find(id='ticker')
-        if ticker:
-            value = ticker.get_text(strip=True)
-            # Pulisci il valore
-            value = value.replace('%', '').replace(',', '.').strip()
-            try:
-                float(value)
-                return value
-            except:
-                pass
+        start_idx = response_text.find('{')
+        end_idx = response_text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            response_text = response_text[start_idx:end_idx + 1]
         
-        # Metodo 2: cerca nel titolo della pagina
-        title = soup.find('title')
-        if title:
-            title_text = title.get_text()
-            # Es: "Japan Interest Rate - 0.75 percent" 
-            import re
-            match = re.search(r'[-–]\s*([-\d.]+)\s*(?:percent|%)?', title_text)
-            if match:
-                return match.group(1)
+        macro_data = json.loads(response_text)
         
-        # Metodo 3: cerca elementi con classe che contiene "last" o "value"
-        for selector in ['.last', '.value', '[class*="last"]', '[class*="value"]']:
-            elem = soup.select_one(selector)
-            if elem:
-                value = elem.get_text(strip=True)
-                value = value.replace('%', '').replace(',', '.').strip()
-                try:
-                    float(value)
-                    return value
-                except:
-                    continue
+        # Verifica completezza
+        missing = []
+        for curr in CURRENCY_TO_COUNTRY.keys():
+            if curr not in macro_data:
+                missing.append(f"{curr}: tutti")
+            else:
+                for ind in REQUIRED_INDICATORS:
+                    val = macro_data[curr].get(ind, "N/A")
+                    if not val or val == "N/A" or val == "":
+                        missing.append(f"{curr}-{ind}")
+        
+        if missing:
+            st.warning(f"⚠️ Alcuni dati potrebbero mancare: {', '.join(missing[:10])}")
+        else:
+            st.success(f"✅ Tutti i 49 dati macro recuperati con successo!")
+        
+        return macro_data
         
     except Exception as e:
-        pass
-    
-    return "N/A"
+        st.error(f"❌ Errore nella ricerca dati macro: {e}")
+        return {curr: {ind: "N/A" for ind in REQUIRED_INDICATORS} for curr in CURRENCY_TO_COUNTRY.keys()}
 
 
-def fetch_trading_economics_data(currency: str) -> dict:
-    """Scarica i dati macro da TradingEconomics per una valuta"""
-    
-    data = {
-        "interest_rate": "N/A",
-        "inflation_rate": "N/A",
-        "gdp_growth": "N/A",
-        "unemployment": "N/A",
-        "manufacturing_pmi": "N/A",
-        "services_pmi": "N/A",
-        "current_account_gdp": "N/A",
-        "debt_to_gdp": "N/A",
-    }
-    
-    urls = INDICATORS_URLS.get(currency, {})
-    if not urls:
-        return data
-    
-    # Scarica solo gli indicatori più importanti per velocità
-    # (tasso di interesse, inflazione, PIL, disoccupazione)
-    priority_indicators = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment", "manufacturing_pmi", "services_pmi"]
-    
-    for indicator in priority_indicators:
-        url = urls.get(indicator)
-        if url:
-            value = fetch_single_indicator(url)
-            if value != "N/A":
-                data[indicator] = value
-    
-    # Per current_account e debt_to_gdp, usa valori dalla pagina indicators (meno critici)
-    # Li saltiamo per ora per velocizzare
-    
-    return data
-
-
-def fetch_all_currencies_data() -> dict:
-    """Scarica i dati macro per tutte le valute da TradingEconomics (parallelizzato)"""
-    import concurrent.futures
-    
-    all_data = {}
-    currencies_list = list(CURRENCIES.keys())
-    
-    # Usa ThreadPoolExecutor per parallelizzare le richieste
-    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
-        # Sottometti tutte le richieste
-        future_to_currency = {
-            executor.submit(fetch_trading_economics_data, curr): curr 
-            for curr in currencies_list
-        }
-        
-        # Raccogli i risultati
-        for future in concurrent.futures.as_completed(future_to_currency):
-            currency = future_to_currency[future]
-            try:
-                all_data[currency] = future.result()
-            except Exception as e:
-                all_data[currency] = {
-                    "interest_rate": "N/A",
-                    "inflation_rate": "N/A",
-                    "gdp_growth": "N/A",
-                    "unemployment": "N/A",
-                    "manufacturing_pmi": "N/A",
-                    "services_pmi": "N/A",
-                    "current_account_gdp": "N/A",
-                    "debt_to_gdp": "N/A",
-                }
-    
-    return all_data
+def fetch_all_currencies_data(api_key: str) -> dict:
+    """Recupera i dati macro per tutte le valute via Claude web search"""
+    return fetch_macro_data_via_claude(api_key)
 
 
 def search_qualitative_data() -> str:
@@ -691,15 +621,15 @@ def search_qualitative_data() -> str:
     return "\n".join(all_results)
 
 
-def search_all_currencies_data() -> tuple[dict, str]:
-    """Cerca dati macro per TUTTE le valute - TradingEconomics + ricerche qualitative"""
+def search_all_currencies_data(api_key: str) -> tuple[dict, str]:
+    """Cerca dati macro per TUTTE le valute - Claude web search + ricerche qualitative."""
     
-    # 1. Scarica dati numerici da TradingEconomics (parallelizzato)
-    st.info("📊 Scaricamento dati da TradingEconomics (7 valute × 6 indicatori)...")
-    te_data = fetch_all_currencies_data()
+    # 1. FASE 1: Claude cerca i dati macro numerici via web search (singola chiamata)
+    st.info("📊 FASE 1: Claude sta cercando tutti i dati macro sul web (una sola chiamata API)...")
+    te_data = fetch_all_currencies_data(api_key)
     
-    # 2. Ricerche qualitative approfondite
-    st.info("🔍 Ricerca notizie, outlook e aspettative mercati...")
+    # 2. FASE 2: Ricerche qualitative approfondite (notizie, aspettative)
+    st.info("📰 FASE 2: Ricerca notizie, outlook e aspettative mercati...")
     qualitative_data = search_qualitative_data()
     
     return te_data, qualitative_data
@@ -851,8 +781,9 @@ def display_matrix(analysis: dict):
     else:
         st.caption(f"Analisi del {date_formatted}")
     
-    # Dati macro per valuta (dati da TradingEconomics)
-    with st.expander("📈 Dati Macro per Valuta (fonte: TradingEconomics)", expanded=False):
+    # Dati macro per valuta (cercati da Claude via web search)
+    with st.expander("📈 Dati Macro per Valuta (cercati da Claude sul web)", expanded=True):
+        st.caption("Fonti: Banche centrali, TradingEconomics, Reuters, Bloomberg")
         currencies_data = analysis.get("currencies_data", {})
         
         if currencies_data:
@@ -867,8 +798,7 @@ def display_matrix(analysis: dict):
                     "Disocc. %": data.get('unemployment', 'N/A'),
                     "PMI Manif.": data.get('manufacturing_pmi', 'N/A'),
                     "PMI Serv.": data.get('services_pmi', 'N/A'),
-                    "C/A % PIL": data.get('current_account_gdp', 'N/A'),
-                    "Debito/PIL": data.get('debt_to_gdp', 'N/A'),
+                    "Debito/PIL %": data.get('debt_to_gdp', 'N/A'),
                 })
             
             df_indicators = pd.DataFrame(indicators_table)
@@ -1263,10 +1193,10 @@ if 'current_analysis' not in st.session_state:
 if analyze_btn:
     progress = st.progress(0, text="Inizializzazione...")
     
-    progress.progress(5, text="🔍 Scaricamento dati da TradingEconomics...")
-    te_data, search_text = search_all_currencies_data()
+    progress.progress(5, text="📊 FASE 1: Claude sta cercando dati macro sul web...")
+    te_data, search_text = search_all_currencies_data(ANTHROPIC_API_KEY)
     
-    progress.progress(50, text="🧠 Claude Sonnet 4 sta analizzando...")
+    progress.progress(50, text="🧠 FASE 2: Claude sta analizzando le coppie forex...")
     analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text)
     
     if "error" not in analysis:
