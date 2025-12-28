@@ -26,9 +26,13 @@ SUPABASE_KEY = None
 try:
     ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
     API_KEY_LOADED = True
-    # Supabase credentials
-    SUPABASE_URL = st.secrets.get("SUPABASE_URL", None)
-    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", None)
+except (KeyError, FileNotFoundError):
+    pass
+
+# Supabase credentials da st.secrets
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 except (KeyError, FileNotFoundError):
     pass
 
