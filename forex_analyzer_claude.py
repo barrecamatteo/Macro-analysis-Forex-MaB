@@ -375,38 +375,140 @@ def format_datetime_display(datetime_str: str) -> str:
 
 # --- FUNZIONI RICERCA E ANALISI ---
 
-# URL TradingEconomics per ogni valuta
-TRADING_ECONOMICS_URLS = {
-    "EUR": "https://tradingeconomics.com/euro-area/indicators",
-    "USD": "https://tradingeconomics.com/united-states/indicators",
-    "GBP": "https://tradingeconomics.com/united-kingdom/indicators",
-    "JPY": "https://tradingeconomics.com/japan/indicators",
-    "CHF": "https://tradingeconomics.com/switzerland/indicators",
-    "AUD": "https://tradingeconomics.com/australia/indicators",
-    "CAD": "https://tradingeconomics.com/canada/indicators",
+# URL specifici per ogni indicatore (più affidabili)
+INDICATORS_URLS = {
+    "EUR": {
+        "interest_rate": "https://tradingeconomics.com/euro-area/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/euro-area/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/euro-area/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/euro-area/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/euro-area/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/euro-area/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/euro-area/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/euro-area/government-debt-to-gdp",
+    },
+    "USD": {
+        "interest_rate": "https://tradingeconomics.com/united-states/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/united-states/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/united-states/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/united-states/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/united-states/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/united-states/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/united-states/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/united-states/government-debt-to-gdp",
+    },
+    "GBP": {
+        "interest_rate": "https://tradingeconomics.com/united-kingdom/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/united-kingdom/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/united-kingdom/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/united-kingdom/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/united-kingdom/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/united-kingdom/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/united-kingdom/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/united-kingdom/government-debt-to-gdp",
+    },
+    "JPY": {
+        "interest_rate": "https://tradingeconomics.com/japan/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/japan/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/japan/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/japan/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/japan/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/japan/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/japan/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/japan/government-debt-to-gdp",
+    },
+    "CHF": {
+        "interest_rate": "https://tradingeconomics.com/switzerland/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/switzerland/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/switzerland/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/switzerland/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/switzerland/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/switzerland/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/switzerland/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/switzerland/government-debt-to-gdp",
+    },
+    "AUD": {
+        "interest_rate": "https://tradingeconomics.com/australia/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/australia/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/australia/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/australia/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/australia/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/australia/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/australia/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/australia/government-debt-to-gdp",
+    },
+    "CAD": {
+        "interest_rate": "https://tradingeconomics.com/canada/interest-rate",
+        "inflation_rate": "https://tradingeconomics.com/canada/inflation-cpi",
+        "gdp_growth": "https://tradingeconomics.com/canada/gdp-growth",
+        "unemployment": "https://tradingeconomics.com/canada/unemployment-rate",
+        "manufacturing_pmi": "https://tradingeconomics.com/canada/manufacturing-pmi",
+        "services_pmi": "https://tradingeconomics.com/canada/services-pmi",
+        "current_account_gdp": "https://tradingeconomics.com/canada/current-account-to-gdp",
+        "debt_to_gdp": "https://tradingeconomics.com/canada/government-debt-to-gdp",
+    },
 }
 
-# Mappatura nomi indicatori TradingEconomics -> nostri nomi
-INDICATORS_MAP = {
-    "Interest Rate": "interest_rate",
-    "Inflation Rate": "inflation_rate",
-    "GDP Growth Rate": "gdp_growth",
-    "Unemployment Rate": "unemployment",
-    "Manufacturing PMI": "manufacturing_pmi",
-    "Services PMI": "services_pmi",
-    "Current Account to GDP": "current_account_gdp",
-    "Government Debt to GDP": "debt_to_gdp",
-}
+
+def fetch_single_indicator(url: str) -> str:
+    """Scarica un singolo indicatore da TradingEconomics"""
+    import requests
+    from bs4 import BeautifulSoup
+    
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Cerca il valore principale - di solito in un elemento con id="ticker"
+        # o in elementi con classe specifica
+        
+        # Metodo 1: cerca elemento con id ticker
+        ticker = soup.find(id='ticker')
+        if ticker:
+            value = ticker.get_text(strip=True)
+            # Pulisci il valore
+            value = value.replace('%', '').replace(',', '.').strip()
+            try:
+                float(value)
+                return value
+            except:
+                pass
+        
+        # Metodo 2: cerca nel titolo della pagina
+        title = soup.find('title')
+        if title:
+            title_text = title.get_text()
+            # Es: "Japan Interest Rate - 0.75 percent" 
+            import re
+            match = re.search(r'[-–]\s*([-\d.]+)\s*(?:percent|%)?', title_text)
+            if match:
+                return match.group(1)
+        
+        # Metodo 3: cerca elementi con classe che contiene "last" o "value"
+        for selector in ['.last', '.value', '[class*="last"]', '[class*="value"]']:
+            elem = soup.select_one(selector)
+            if elem:
+                value = elem.get_text(strip=True)
+                value = value.replace('%', '').replace(',', '.').strip()
+                try:
+                    float(value)
+                    return value
+                except:
+                    continue
+        
+    except Exception as e:
+        pass
+    
+    return "N/A"
 
 
 def fetch_trading_economics_data(currency: str) -> dict:
     """Scarica i dati macro da TradingEconomics per una valuta"""
-    import requests
-    from bs4 import BeautifulSoup
-    
-    url = TRADING_ECONOMICS_URLS.get(currency)
-    if not url:
-        return {}
     
     data = {
         "interest_rate": "N/A",
@@ -419,121 +521,60 @@ def fetch_trading_economics_data(currency: str) -> dict:
         "debt_to_gdp": "N/A",
     }
     
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Cerca la tabella degli indicatori
-        # TradingEconomics usa tabelle con class "table"
-        tables = soup.find_all('table')
-        
-        for table in tables:
-            rows = table.find_all('tr')
-            for row in rows:
-                cells = row.find_all(['td', 'th'])
-                if len(cells) >= 2:
-                    # Prima cella = nome indicatore, seconda = valore
-                    indicator_name = cells[0].get_text(strip=True)
-                    value = cells[1].get_text(strip=True)
-                    
-                    # Cerca corrispondenza con i nostri indicatori
-                    for te_name, our_name in INDICATORS_MAP.items():
-                        if te_name.lower() in indicator_name.lower():
-                            # Pulisci il valore
-                            clean_value = value.replace('%', '').strip()
-                            try:
-                                # Prova a convertire in numero per validare
-                                float(clean_value)
-                                data[our_name] = clean_value
-                            except:
-                                data[our_name] = value
-                            break
-        
-    except Exception as e:
-        st.warning(f"⚠️ Errore fetch {currency}: {e}")
+    urls = INDICATORS_URLS.get(currency, {})
+    if not urls:
+        return data
+    
+    # Scarica solo gli indicatori più importanti per velocità
+    # (tasso di interesse, inflazione, PIL, disoccupazione)
+    priority_indicators = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment", "manufacturing_pmi", "services_pmi"]
+    
+    for indicator in priority_indicators:
+        url = urls.get(indicator)
+        if url:
+            value = fetch_single_indicator(url)
+            if value != "N/A":
+                data[indicator] = value
+    
+    # Per current_account e debt_to_gdp, usa valori dalla pagina indicators (meno critici)
+    # Li saltiamo per ora per velocizzare
     
     return data
 
 
 def fetch_all_currencies_data() -> dict:
-    """Scarica i dati macro per tutte le valute da TradingEconomics"""
+    """Scarica i dati macro per tutte le valute da TradingEconomics (parallelizzato)"""
+    import concurrent.futures
+    
     all_data = {}
+    currencies_list = list(CURRENCIES.keys())
     
-    for currency in CURRENCIES.keys():
-        all_data[currency] = fetch_trading_economics_data(currency)
-    
-    return all_data
-
-
-def fetch_economic_calendar_events() -> list:
-    """Scarica eventi dal calendario TradingEconomics API (gratuito)"""
-    events = []
-    
-    try:
-        # Paesi corrispondenti alle nostre valute
-        countries = "united%20states,euro%20area,united%20kingdom,japan,switzerland,australia,canada"
-        
-        # API gratuita TradingEconomics - importance=2 (medium+high) o 3 (solo high)
-        url = f"https://api.tradingeconomics.com/calendar/country/{countries}?c=guest:guest&importance=2"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
+    # Usa ThreadPoolExecutor per parallelizzare le richieste
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+        # Sottometti tutte le richieste
+        future_to_currency = {
+            executor.submit(fetch_trading_economics_data, curr): curr 
+            for curr in currencies_list
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Mappa paesi -> valute
-            country_to_currency = {
-                'united states': 'USD',
-                'euro area': 'EUR', 
-                'united kingdom': 'GBP',
-                'japan': 'JPY',
-                'switzerland': 'CHF',
-                'australia': 'AUD',
-                'canada': 'CAD',
-                'germany': 'EUR',
-                'france': 'EUR',
-                'italy': 'EUR',
-                'spain': 'EUR'
-            }
-            
-            for item in data[:30]:  # Limita a 30 eventi
-                country = item.get('Country', '').lower()
-                currency = country_to_currency.get(country, '')
-                
-                if currency:
-                    importance = item.get('Importance', 1)
-                    importance_str = 'high' if importance == 3 else 'medium'
-                    
-                    # Formatta data
-                    date_str = item.get('Date', '')[:10]  # YYYY-MM-DD
-                    
-                    events.append({
-                        'date': date_str,
-                        'event': item.get('Event', ''),
-                        'currency': currency,
-                        'importance': importance_str,
-                        'previous': item.get('Previous', ''),
-                        'forecast': item.get('Forecast', '')
-                    })
-            
-            # Ordina per data
-            events = sorted(events, key=lambda x: x.get('date', ''))
-            
-    except Exception as e:
-        # Se fallisce, ritorna lista vuota
-        pass
+        # Raccogli i risultati
+        for future in concurrent.futures.as_completed(future_to_currency):
+            currency = future_to_currency[future]
+            try:
+                all_data[currency] = future.result()
+            except Exception as e:
+                all_data[currency] = {
+                    "interest_rate": "N/A",
+                    "inflation_rate": "N/A",
+                    "gdp_growth": "N/A",
+                    "unemployment": "N/A",
+                    "manufacturing_pmi": "N/A",
+                    "services_pmi": "N/A",
+                    "current_account_gdp": "N/A",
+                    "debt_to_gdp": "N/A",
+                }
     
-    return events
+    return all_data
 
 
 def search_qualitative_data() -> str:
@@ -650,32 +691,21 @@ def search_qualitative_data() -> str:
     return "\n".join(all_results)
 
 
-def search_all_currencies_data() -> tuple[dict, str, list]:
-    """Cerca dati macro per TUTTE le valute - TradingEconomics + ricerche qualitative + calendario"""
+def search_all_currencies_data() -> tuple[dict, str]:
+    """Cerca dati macro per TUTTE le valute - TradingEconomics + ricerche qualitative"""
     
-    # 1. Scarica dati numerici da TradingEconomics
-    st.info("📊 Scaricamento dati da TradingEconomics...")
+    # 1. Scarica dati numerici da TradingEconomics (parallelizzato)
+    st.info("📊 Scaricamento dati da TradingEconomics (7 valute × 6 indicatori)...")
     te_data = fetch_all_currencies_data()
     
     # 2. Ricerche qualitative approfondite
     st.info("🔍 Ricerca notizie, outlook e aspettative mercati...")
     qualitative_data = search_qualitative_data()
     
-    # 3. Calendario economico da TradingEconomics API
-    st.info("📅 Scaricamento calendario economico...")
-    calendar_events = fetch_economic_calendar_events()
-    
-    # Aggiungi info eventi al testo qualitativo per Claude
-    if calendar_events:
-        events_text = "\n[ECONOMIC CALENDAR - PROSSIMI EVENTI HIGH/MEDIUM IMPACT]\n"
-        for e in calendar_events[:15]:
-            events_text += f"- {e.get('date', '')} | {e.get('currency', '')} | {e.get('event', '')} (impact: {e.get('importance', '')})\n"
-        qualitative_data += events_text
-    
-    return te_data, qualitative_data, calendar_events
+    return te_data, qualitative_data
 
 
-def analyze_all_pairs(api_key: str, te_data: dict, search_text: str, calendar_events: list = None) -> dict:
+def analyze_all_pairs(api_key: str, te_data: dict, search_text: str) -> dict:
     """Analizza TUTTE le coppie forex in una sola chiamata API"""
     
     client = anthropic.Anthropic(api_key=api_key)
@@ -926,44 +956,18 @@ def display_matrix(analysis: dict):
             st.markdown("---")
             display_pair_detail(pair_detail, analysis.get("currencies_data", {}))
     
-    # Calendario eventi (da TradingEconomics API)
+    # Calendario eventi (link esterni)
     st.markdown("---")
     st.markdown("### 📅 Calendario Economico")
-    st.caption("Fonte: TradingEconomics - Eventi High/Medium Impact")
+    st.info("📊 Consulta i calendari economici per gli eventi della settimana")
     
-    # Usa eventi reali da TradingEconomics se disponibili
-    events = analysis.get("real_calendar_events", [])
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("🔗 [**TradingEconomics Calendar**](https://tradingeconomics.com/calendar)")
+    with col2:
+        st.markdown("🔗 [**ForexFactory Calendar**](https://www.forexfactory.com/calendar)")
     
-    if events:
-        # Filtra solo high impact per visualizzazione più pulita
-        high_events = [e for e in events if e.get('importance') == 'high']
-        medium_events = [e for e in events if e.get('importance') == 'medium']
-        
-        # Mostra prima gli high impact
-        if high_events:
-            st.markdown("**🔴 High Impact:**")
-            for event in high_events[:8]:
-                date_str = event.get('date', 'TBD')
-                if len(date_str) == 10 and '-' in date_str:
-                    date_formatted = format_date_ita(date_str)
-                else:
-                    date_formatted = date_str
-                st.markdown(f"🔴 **{date_formatted}** - {event.get('event', '')} ({event.get('currency', '')})")
-        
-        # Poi medium impact (max 5)
-        if medium_events:
-            with st.expander(f"🟡 Medium Impact ({len(medium_events)} eventi)"):
-                for event in medium_events[:8]:
-                    date_str = event.get('date', 'TBD')
-                    if len(date_str) == 10 and '-' in date_str:
-                        date_formatted = format_date_ita(date_str)
-                    else:
-                        date_formatted = date_str
-                    st.markdown(f"🟡 {date_formatted} - {event.get('event', '')} ({event.get('currency', '')})")
-    else:
-        st.info("📊 Nessun evento caricato - verifica il calendario su TradingEconomics")
-    
-    st.markdown("🔗 [**TradingEconomics Calendar**](https://tradingeconomics.com/calendar) | [**ForexFactory**](https://www.forexfactory.com/calendar)")
+    st.caption("Filtra per impatto 2-3 stelle e per le valute: USD, EUR, GBP, JPY, CHF, AUD, CAD")
     
     # JSON Raw
     with st.expander("🔧 Dati Raw (JSON)"):
@@ -1260,15 +1264,13 @@ if analyze_btn:
     progress = st.progress(0, text="Inizializzazione...")
     
     progress.progress(5, text="🔍 Scaricamento dati da TradingEconomics...")
-    te_data, search_text, calendar_events = search_all_currencies_data()
+    te_data, search_text = search_all_currencies_data()
     
     progress.progress(50, text="🧠 Claude Sonnet 4 sta analizzando...")
-    analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text, calendar_events)
+    analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text)
     
     if "error" not in analysis:
         analysis["model_used"] = "Claude Sonnet 4"
-        # Salva gli eventi reali da TradingEconomics nell'analisi
-        analysis["real_calendar_events"] = calendar_events
         progress.progress(80, text="💾 Salvataggio analisi...")
         if save_analysis(analysis):
             st.session_state['current_analysis'] = analysis
