@@ -1,14 +1,14 @@
 """
-Macro Data Fetcher v6 - Hybrid Solution
-========================================
+Macro Data Fetcher v7 - Hybrid Solution (Fixed)
+================================================
 Soluzione ibrida gratuita:
-- Tassi interesse: global-rates.com (scraping)
+- Tassi interesse: global-rates.com (scraping) con fallback
 - Inflazione: global-rates.com (scraping) + ABS per Australia
 - PIL Growth: API Ninjas (gratuito)
 - Disoccupazione: API Ninjas (gratuito)
 
 Fonti:
-- global-rates.com: tassi interesse e inflazione (6 paesi)
+- global-rates.com: tassi interesse e inflazione
 - abs.gov.au: inflazione Australia (fonte ufficiale ABS)
 - api-ninjas.com: PIL e disoccupazione
 
@@ -31,7 +31,7 @@ class MacroDataFetcher:
     Usa API Ninjas per PIL e disoccupazione.
     """
     
-    def __init__(self, api_ninjas_key: str):
+    def __init__(self, api_ninjas_key: str = ""):
         self.api_ninjas_key = api_ninjas_key
         self.session = requests.Session()
         self.session.headers.update({
@@ -46,6 +46,9 @@ class MacroDataFetcher:
         self._inflation_cache = None
         self._cache_time = None
         self._cache_duration = 300  # 5 minuti
+        
+        # Debug mode
+        self.debug = True
         
         # Metadata
         self.currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD']
@@ -65,14 +68,14 @@ class MacroDataFetcher:
             'CAD': 'Canada',
         }
         
-        # Mapping per inflazione (CPI)
+        # Mapping per inflazione (CPI country names)
         self.inflation_country_mapping = {
             'USD': 'United States',
             'EUR': 'Europe',  # HICP
             'GBP': 'United Kingdom',
             'JPY': 'Japan',
             'CHF': 'Switzerland',
-            'AUD': 'Australia',
+            'AUD': 'Australia',  # Usiamo ABS
             'CAD': 'Canada',
         }
         
@@ -96,6 +99,22 @@ class MacroDataFetcher:
             'AUD': 'AU',
             'CAD': 'CA',
         }
+        
+        # Fallback data (ultimo aggiornamento: Dicembre 2025)
+        # Usato se lo scraping fallisce
+        self.fallback_rates = {
+            'USD': 3.75, 'EUR': 2.15, 'GBP': 3.75, 'JPY': 0.75,
+            'CHF': 0.00, 'AUD': 3.60, 'CAD': 2.25
+        }
+        self.fallback_inflation = {
+            'USD': 2.74, 'EUR': 2.14, 'GBP': 3.57, 'JPY': 2.91,
+            'CHF': 0.02, 'AUD': 3.8, 'CAD': 2.22
+        }
+
+    def _log(self, msg: str):
+        """Log per debug"""
+        if self.debug:
+            print(f"[MacroDataFetcher] {msg}")
 
     # =========================================================================
     # GLOBAL-RATES.COM - Scraping
@@ -106,36 +125,69 @@ class MacroDataFetcher:
         if self._rates_cache and self._cache_time:
             elapsed = (datetime.now() - self._cache_time).total_seconds()
             if elapsed < self._cache_duration:
+                self._log("Using cached interest rates")
                 return self._rates_cache
         
         url = "https://www.global-rates.com/en/interest-rates/central-banks/"
         rates = {}
         
         try:
+            self._log(f"Fetching interest rates from {url}")
             response = self.session.get(url, timeout=self.timeout)
+            self._log(f"Response status: {response.status_code}")
+            
             if response.status_code == 200:
                 text = response.text
+                self._log(f"Response length: {len(text)} chars")
                 
-                # Pattern per estrarre dalla tabella:
-                # | Country/Region | Current | Direction | Previous | Change |
-                # Cerca righe con: Country | X.XX % |
-                
+                # Pattern multipli per maggiore robustezza
                 for currency, country in self.rate_country_mapping.items():
-                    # Pattern specifico per ogni paese
-                    # Cerca: "United States" seguito da valore percentuale
-                    pattern = rf'{re.escape(country)}\s*\|\s*([\d.]+)\s*%'
-                    match = re.search(pattern, text, re.IGNORECASE)
+                    rate = None
                     
+                    # Pattern 1: "United States | 3.75 %"
+                    pattern1 = rf'{re.escape(country)}\s*\|\s*([\d.]+)\s*%'
+                    match = re.search(pattern1, text, re.IGNORECASE)
                     if match:
                         rate = float(match.group(1))
+                        self._log(f"  {currency}: {rate}% (pattern1)")
+                    
+                    # Pattern 2: cerca nella tabella markdown-style
+                    if rate is None:
+                        pattern2 = rf'\|\s*{re.escape(country)}\s*\|\s*([\d.]+)\s*%'
+                        match = re.search(pattern2, text, re.IGNORECASE)
+                        if match:
+                            rate = float(match.group(1))
+                            self._log(f"  {currency}: {rate}% (pattern2)")
+                    
+                    # Pattern 3: cerca "country" seguito da percentuale entro 50 chars
+                    if rate is None:
+                        pattern3 = rf'{re.escape(country)}[^%]{{1,50}}?([\d.]+)\s*%'
+                        match = re.search(pattern3, text, re.IGNORECASE)
+                        if match:
+                            rate = float(match.group(1))
+                            self._log(f"  {currency}: {rate}% (pattern3)")
+                    
+                    if rate is not None:
                         rates[currency] = rate
                 
                 if rates:
                     self._rates_cache = rates
                     self._cache_time = datetime.now()
+                    self._log(f"Scraped {len(rates)} interest rates")
+                else:
+                    self._log("WARNING: No rates extracted from page!")
+                    # Debug: mostra un sample del contenuto
+                    self._log(f"Sample content: {text[:500]}...")
+            else:
+                self._log(f"ERROR: HTTP {response.status_code}")
                     
         except Exception as e:
-            print(f"[Error] global-rates.com interest rates: {e}")
+            self._log(f"ERROR fetching rates: {e}")
+        
+        # Se scraping fallisce, usa fallback
+        if not rates:
+            self._log("Using FALLBACK interest rates")
+            rates = self.fallback_rates.copy()
         
         return rates
     
@@ -144,45 +196,75 @@ class MacroDataFetcher:
         if self._inflation_cache and self._cache_time:
             elapsed = (datetime.now() - self._cache_time).total_seconds()
             if elapsed < self._cache_duration:
+                self._log("Using cached inflation data")
                 return self._inflation_cache
         
         url = "https://www.global-rates.com/en/inflation/"
         inflation = {}
         
         try:
+            self._log(f"Fetching inflation from {url}")
             response = self.session.get(url, timeout=self.timeout)
+            self._log(f"Response status: {response.status_code}")
+            
             if response.status_code == 200:
                 text = response.text
+                self._log(f"Response length: {len(text)} chars")
                 
                 for currency, country in self.inflation_country_mapping.items():
                     # Salta Australia - usiamo ABS
                     if currency == 'AUD':
                         continue
                     
-                    # Per EUR usa HICP Europe
+                    infl = None
+                    
                     if currency == 'EUR':
-                        # Pattern per HICP Europe
-                        pattern = r'HICP Europe.*?\|\s*Europe\s*\|\s*HICP\s*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%'
+                        # Pattern per HICP Europe - cerca "Europe | HICP | ... | X.XX %"
+                        patterns = [
+                            r'HICP Europe.*?\|\s*Europe\s*\|\s*HICP\s*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%',
+                            r'Europe\s*\|\s*HICP\s*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%',
+                            r'HICP.*?Europe[^%]{1,100}?([\d.]+)\s*%',
+                        ]
                     else:
                         # Pattern per CPI altri paesi
-                        pattern = rf'CPI {re.escape(country)}.*?\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%'
+                        patterns = [
+                            rf'CPI {re.escape(country)}.*?\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%',
+                            rf'{re.escape(country)}\s*\|\s*CPI\s*\|[^|]*\|[^|]*\|\s*([\d.-]+)\s*%',
+                            rf'CPI.*?{re.escape(country)}[^%]{{1,100}}?([\d.]+)\s*%',
+                        ]
                     
-                    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+                    for i, pattern in enumerate(patterns):
+                        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+                        if match:
+                            infl = float(match.group(1))
+                            self._log(f"  {currency}: {infl}% (pattern{i+1})")
+                            break
                     
-                    if match:
-                        infl = float(match.group(1))
+                    if infl is not None:
                         inflation[currency] = infl
                 
                 if inflation:
                     self._inflation_cache = inflation
+                    self._log(f"Scraped {len(inflation)} inflation rates")
+                else:
+                    self._log("WARNING: No inflation data extracted!")
                     
         except Exception as e:
-            print(f"[Error] global-rates.com inflation: {e}")
+            self._log(f"ERROR fetching inflation: {e}")
         
         # Fetch Australia da ABS (fonte ufficiale)
+        self._log("Fetching AUD inflation from ABS...")
         aus_inflation = self._fetch_inflation_abs()
         if aus_inflation is not None:
             inflation['AUD'] = aus_inflation
+            self._log(f"  AUD: {aus_inflation}% (from ABS)")
+        
+        # Se scraping fallisce per alcune valute, usa fallback
+        for curr in self.inflation_country_mapping.keys():
+            if curr not in inflation:
+                if curr in self.fallback_inflation:
+                    inflation[curr] = self.fallback_inflation[curr]
+                    self._log(f"  {curr}: {inflation[curr]}% (FALLBACK)")
         
         return inflation
     
@@ -231,7 +313,7 @@ class MacroDataFetcher:
                     return float(match3.group(1))
                     
         except Exception as e:
-            print(f"[Error] ABS Australia inflation: {e}")
+            self._log(f"ERROR fetching ABS inflation: {e}")
         
         return None
 
@@ -241,6 +323,9 @@ class MacroDataFetcher:
     
     def _fetch_gdp_ninjas(self, currency: str) -> Optional[Dict]:
         """Recupera PIL da API Ninjas."""
+        if not self.api_ninjas_key:
+            return None
+            
         iso = self.iso_codes.get(currency)
         if not iso:
             return None
@@ -260,11 +345,14 @@ class MacroDataFetcher:
                         'source': 'API Ninjas'
                     }
         except Exception as e:
-            print(f"[Error] API Ninjas GDP {currency}: {e}")
+            self._log(f"ERROR API Ninjas GDP {currency}: {e}")
         return None
     
     def _fetch_unemployment_ninjas(self, currency: str) -> Optional[Dict]:
         """Recupera disoccupazione da API Ninjas."""
+        if not self.api_ninjas_key:
+            return None
+            
         country = self.country_names_ninjas.get(currency)
         if not country:
             return None
@@ -284,7 +372,7 @@ class MacroDataFetcher:
                             'source': 'API Ninjas'
                         }
         except Exception as e:
-            print(f"[Error] API Ninjas Unemployment {currency}: {e}")
+            self._log(f"ERROR API Ninjas Unemployment {currency}: {e}")
         return None
 
     # =========================================================================
@@ -339,14 +427,14 @@ class MacroDataFetcher:
         }
         
         # Fetch batch da global-rates
-        print("[1/4] Fetching interest rates from global-rates.com...")
+        self._log("[1/4] Fetching interest rates...")
         all_rates = self._fetch_interest_rates_globalrates()
         
-        print("[2/4] Fetching inflation from global-rates.com...")
+        self._log("[2/4] Fetching inflation...")
         all_inflation = self._fetch_inflation_globalrates()
         
         for currency in currencies:
-            print(f"[3/4] Processing {currency}...")
+            self._log(f"[3/4] Processing {currency}...")
             
             results['data'][currency] = {
                 'country': self.currency_names.get(currency, currency),
@@ -385,7 +473,7 @@ class MacroDataFetcher:
             
             time.sleep(0.3)  # Rate limiting
         
-        print("[4/4] Done!")
+        self._log("[4/4] Done!")
         return results
 
     def format_for_display(self, data: Dict = None) -> str:
@@ -394,15 +482,14 @@ class MacroDataFetcher:
             data = self.get_all_data()
         
         lines = []
-        lines.append("=" * 80)
+        lines.append("=" * 70)
         lines.append("📊 DATI MACROECONOMICI")
-        lines.append("=" * 80)
+        lines.append("=" * 70)
         lines.append(f"Timestamp: {data['timestamp'][:19]}")
-        lines.append(f"Fonti: global-rates.com (tassi) | global-rates.com + ABS (inflazione)")
-        lines.append(f"       API Ninjas (PIL, disoccupazione)")
+        lines.append(f"Fonti: global-rates.com (tassi/infl.) | ABS (AUD) | API Ninjas (PIL/disocc.)")
         lines.append("")
-        lines.append(f"{'Valuta':<8} {'Tasso%':<12} {'Inflaz%':<12} {'PIL%':<12} {'Disocc%':<12}")
-        lines.append("-" * 80)
+        lines.append(f"{'Valuta':<8} {'Tasso%':<10} {'Inflaz%':<10} {'PIL%':<10} {'Disocc%':<10}")
+        lines.append("-" * 70)
         
         for currency, info in data['data'].items():
             ind = info['indicators']
@@ -411,10 +498,10 @@ class MacroDataFetcher:
                 val = ind.get(key, {}).get('value')
                 return f"{val:.2f}" if val is not None else "N/A"
             
-            line = f"{currency:<8} {fmt('interest_rate'):<12} {fmt('inflation'):<12} {fmt('gdp_growth'):<12} {fmt('unemployment'):<12}"
+            line = f"{currency:<8} {fmt('interest_rate'):<10} {fmt('inflation'):<10} {fmt('gdp_growth'):<10} {fmt('unemployment'):<10}"
             lines.append(line)
         
-        lines.append("=" * 80)
+        lines.append("=" * 70)
         return "\n".join(lines)
 
 
@@ -428,15 +515,14 @@ if __name__ == "__main__":
     # API Key da variabile d'ambiente o config
     API_KEY = os.environ.get('API_NINJAS_KEY', '')
     
-    if not API_KEY:
-        print("⚠️  Imposta la variabile d'ambiente API_NINJAS_KEY")
-        print("   export API_NINJAS_KEY='tua_api_key'")
-        print("   Ottieni una API key gratuita su: https://api-ninjas.com")
-        exit(1)
+    print("=" * 70)
+    print("TEST MacroDataFetcher v7.0 - Hybrid Solution (Fixed)")
+    print("=" * 70)
     
-    print("=" * 80)
-    print("TEST MacroDataFetcher v6.0 - Hybrid Solution")
-    print("=" * 80)
+    if not API_KEY:
+        print("⚠️  API_NINJAS_KEY non impostata - PIL e disoccupazione saranno N/A")
+        print("   Per test completo: export API_NINJAS_KEY='tua_api_key'")
+        print("")
     
     fetcher = MacroDataFetcher(API_KEY)
     
