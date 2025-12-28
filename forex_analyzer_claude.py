@@ -24,7 +24,7 @@ ANTHROPIC_API_KEY = None
 API_KEY_LOADED = False
 SUPABASE_URL = None
 SUPABASE_KEY = None
-FRED_API_KEY = None
+API_NINJAS_KEY = None
 
 # Prima prova st.secrets (Streamlit Cloud)
 try:
@@ -40,9 +40,9 @@ try:
 except (KeyError, FileNotFoundError):
     pass
 
-# FRED API Key da st.secrets
+# API Ninjas Key da st.secrets
 try:
-    FRED_API_KEY = st.secrets["FRED_API_KEY"]
+    API_NINJAS_KEY = st.secrets["API_NINJAS_KEY"]
 except (KeyError, FileNotFoundError):
     pass
 
@@ -51,13 +51,13 @@ if not API_KEY_LOADED:
     try:
         from config import ANTHROPIC_API_KEY
         API_KEY_LOADED = True
-        # Prova a caricare anche Supabase e FRED da config
+        # Prova a caricare anche Supabase e API Ninjas da config
         try:
             from config import SUPABASE_URL, SUPABASE_KEY
         except ImportError:
             pass
         try:
-            from config import FRED_API_KEY
+            from config import API_NINJAS_KEY
         except ImportError:
             pass
     except ImportError:
@@ -66,8 +66,8 @@ if not API_KEY_LOADED:
 # Flag per Supabase
 SUPABASE_ENABLED = SUPABASE_URL is not None and SUPABASE_KEY is not None
 
-# Flag per FRED
-FRED_ENABLED = FRED_API_KEY is not None
+# Flag per API Ninjas (PIL e disoccupazione)
+API_NINJAS_ENABLED = API_NINJAS_KEY is not None
 
 # --- CARTELLA DATI ---
 DATA_FOLDER = Path("data")
@@ -107,7 +107,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 - Gli EVENTI da monitorare devono essere FUTURI (entro i prossimi 30 giorni)
 
 ### 3. DATI NUMERICI + CONTESTO QUALITATIVO
-- I DATI NUMERICI ti vengono forniti da API ufficiali (FRED/Banche Centrali/OECD)
+- I DATI NUMERICI ti vengono forniti da fonti ufficiali (global-rates.com/ABS/API Ninjas)
 - Le NOTIZIE e OUTLOOK ti vengono fornite dalle ricerche web
 - USA ENTRAMBI per l'analisi! I numeri da soli non bastano!
 
@@ -132,7 +132,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
   - Il target è ~2%, quindi inflazione sopra target = hawkish = valuta forte
 - **GDP Growth**: Momentum economico
 - **Unemployment**: Salute del mercato del lavoro
-- **Business Confidence (BCI)**: Sentiment imprese (>100 = ottimismo, <100 = pessimismo)
+- **Business Confidence**: Se disponibile nelle notizie (può essere N/A nei dati)
 
 ## COME VALUTARE LE ASPETTATIVE TASSI:
 - Banca centrale che TAGLIA → score NEGATIVO per quella valuta
@@ -388,24 +388,19 @@ CURRENCY_TO_COUNTRY = {
 
 def fetch_all_currencies_data() -> dict:
     """
-    Recupera dati macro da API ufficiali via FRED.
-    Fonte: Federal Reserve Economic Data (dati OECD/Banche Centrali aggregati)
+    Recupera dati macro da fonti gratuite:
+    - Tassi interesse: global-rates.com (scraping)
+    - Inflazione: global-rates.com + ABS Australia (scraping)
+    - PIL: API Ninjas (gratuito)
+    - Disoccupazione: API Ninjas (gratuito)
     """
-    if not FRED_ENABLED:
-        st.warning("⚠️ FRED API Key non configurata - usando dati di fallback")
-        # Fallback con dati di esempio se FRED non disponibile
-        return {
-            'USD': {'interest_rate': 4.50, 'inflation_rate': 2.7, 'gdp_growth': 2.8, 'unemployment': 4.2, 'business_confidence': 101.5},
-            'EUR': {'interest_rate': 3.00, 'inflation_rate': 2.4, 'gdp_growth': 0.4, 'unemployment': 6.3, 'business_confidence': 99.2},
-            'GBP': {'interest_rate': 4.75, 'inflation_rate': 2.6, 'gdp_growth': 0.1, 'unemployment': 4.3, 'business_confidence': 98.5},
-            'JPY': {'interest_rate': 0.25, 'inflation_rate': 2.9, 'gdp_growth': -0.2, 'unemployment': 2.5, 'business_confidence': 99.8},
-            'CHF': {'interest_rate': 0.50, 'inflation_rate': 0.7, 'gdp_growth': 0.4, 'unemployment': 2.3, 'business_confidence': 100.1},
-            'AUD': {'interest_rate': 4.35, 'inflation_rate': 2.8, 'gdp_growth': 0.3, 'unemployment': 4.1, 'business_confidence': 98.9},
-            'CAD': {'interest_rate': 3.25, 'inflation_rate': 2.0, 'gdp_growth': 0.3, 'unemployment': 6.8, 'business_confidence': 99.5},
-        }
+    
+    # Se API Ninjas non configurata, usa dati di fallback per PIL/disoccupazione
+    # ma prova comunque lo scraping per tassi e inflazione
+    api_key = API_NINJAS_KEY if API_NINJAS_ENABLED else ""
     
     try:
-        fetcher = MacroDataFetcher(FRED_API_KEY)
+        fetcher = MacroDataFetcher(api_key)
         raw_data = fetcher.get_all_data()
         
         # Converti nel formato atteso dal resto del codice
@@ -417,15 +412,27 @@ def fetch_all_currencies_data() -> dict:
                 'inflation_rate': indicators.get('inflation', {}).get('value', 'N/A'),
                 'gdp_growth': indicators.get('gdp_growth', {}).get('value', 'N/A'),
                 'unemployment': indicators.get('unemployment', {}).get('value', 'N/A'),
-                'business_confidence': indicators.get('business_confidence', {}).get('value', 'N/A'),
+                'business_confidence': 'N/A',  # Non più disponibile (escluso)
             }
+        
+        # Se API Ninjas non disponibile, avvisa ma continua con i dati di scraping
+        if not API_NINJAS_ENABLED:
+            st.warning("⚠️ API Ninjas non configurata - PIL e disoccupazione potrebbero essere N/A")
         
         return result
         
     except Exception as e:
-        st.error(f"Errore nel recupero dati FRED: {e}")
-        # Fallback con N/A
-        return {curr: {ind: 'N/A' for ind in REQUIRED_INDICATORS} for curr in CURRENCY_TO_COUNTRY.keys()}
+        st.error(f"Errore nel recupero dati: {e}")
+        # Fallback con dati di esempio
+        return {
+            'USD': {'interest_rate': 3.75, 'inflation_rate': 2.74, 'gdp_growth': 2.1, 'unemployment': 3.9, 'business_confidence': 'N/A'},
+            'EUR': {'interest_rate': 2.15, 'inflation_rate': 2.14, 'gdp_growth': 0.7, 'unemployment': 3.0, 'business_confidence': 'N/A'},
+            'GBP': {'interest_rate': 3.75, 'inflation_rate': 3.57, 'gdp_growth': 1.3, 'unemployment': 4.1, 'business_confidence': 'N/A'},
+            'JPY': {'interest_rate': 0.75, 'inflation_rate': 2.91, 'gdp_growth': 0.5, 'unemployment': 2.3, 'business_confidence': 'N/A'},
+            'CHF': {'interest_rate': 0.00, 'inflation_rate': 0.02, 'gdp_growth': 1.2, 'unemployment': 4.8, 'business_confidence': 'N/A'},
+            'AUD': {'interest_rate': 3.60, 'inflation_rate': 3.8, 'gdp_growth': 2.3, 'unemployment': 5.3, 'business_confidence': 'N/A'},
+            'CAD': {'interest_rate': 2.25, 'inflation_rate': 2.22, 'gdp_growth': 1.6, 'unemployment': 5.4, 'business_confidence': 'N/A'},
+        }
 
 
 def search_qualitative_data() -> str:
@@ -543,10 +550,10 @@ def search_qualitative_data() -> str:
 
 
 def search_all_currencies_data() -> tuple[dict, str]:
-    """Cerca dati macro per TUTTE le valute - API ufficiali + ricerche qualitative."""
+    """Cerca dati macro per TUTTE le valute - scraping + API Ninjas + ricerche qualitative."""
     
-    # 1. FASE 1: Scarica dati numerici da API ufficiali (FRED)
-    st.info("📊 FASE 1: Scaricamento dati da API ufficiali (FRED/OECD)...")
+    # 1. FASE 1: Scarica dati numerici da scraping + API Ninjas
+    st.info("📊 FASE 1: Scaricamento dati da global-rates.com + API Ninjas...")
     te_data = fetch_all_currencies_data()
     
     # Verifica completezza dati
@@ -557,7 +564,7 @@ def search_all_currencies_data() -> tuple[dict, str]:
                 missing_data.append(f"{curr}-{key}")
     
     if missing_data:
-        st.warning(f"⚠️ Alcuni dati potrebbero essere in ritardo: {', '.join(missing_data[:5])}")
+        st.warning(f"⚠️ Alcuni dati potrebbero essere mancanti: {', '.join(missing_data[:5])}")
     else:
         st.success("✅ Tutti i dati macro recuperati con successo!")
     
@@ -595,7 +602,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 ---
 
-## 📊 DATI NUMERICI DA API UFFICIALI (FRED/Banche Centrali/OECD):
+## 📊 DATI NUMERICI DA FONTI UFFICIALI (global-rates.com/ABS/API Ninjas):
 {te_formatted}
 
 ---
@@ -714,8 +721,8 @@ def display_matrix(analysis: dict):
     else:
         st.caption(f"Analisi del {date_formatted}")
     
-    # Dati macro per valuta (da API ufficiali FRED)
-    with st.expander("📈 Dati Macro per Valuta (fonte: API Ufficiali - FRED/OECD)", expanded=True):
+    # Dati macro per valuta (da global-rates.com + API Ninjas)
+    with st.expander("📈 Dati Macro per Valuta (fonte: global-rates.com + API Ninjas)", expanded=True):
         st.caption("Fonti: Federal Reserve, BCE, BoE, BoJ, SNB, RBA, BoC, Eurostat, OECD")
         currencies_data = analysis.get("currencies_data", {})
         
@@ -1028,10 +1035,10 @@ with st.sidebar:
     else:
         st.error("❌ API Key mancante")
     
-    if FRED_ENABLED:
-        st.success("📊 Dati FRED attivi")
+    if API_NINJAS_ENABLED:
+        st.success("📊 API Ninjas attiva")
     else:
-        st.warning("📊 FRED Key mancante")
+        st.warning("📊 API Ninjas Key mancante")
     
     if SUPABASE_ENABLED:
         st.success("☁️ Database cloud attivo")
@@ -1098,7 +1105,7 @@ with st.sidebar:
     st.markdown(f"**Coppie analizzate:** {len(FOREX_PAIRS)}")
     st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
     st.markdown(f"**Modello:** Claude Sonnet 4")
-    st.markdown(f"**Dati:** API Banche Centrali")
+    st.markdown(f"**Dati:** global-rates.com + API Ninjas")
     
     st.markdown("---")
     
@@ -1140,7 +1147,7 @@ if 'current_analysis' not in st.session_state:
 if analyze_btn:
     progress = st.progress(0, text="Inizializzazione...")
     
-    progress.progress(5, text="📊 FASE 1: Scaricamento dati da API ufficiali (Banche Centrali)...")
+    progress.progress(5, text="📊 FASE 1: Scaricamento dati da global-rates.com + API Ninjas...")
     te_data, search_text = search_all_currencies_data()
     
     # Mostra i dati recuperati
@@ -1227,19 +1234,15 @@ else:
         
         **Come funziona:**
         1. Clicca **"🔄 Nuova Analisi"** nella sidebar
-        2. I dati macro vengono scaricati dalle **API ufficiali (FRED/OECD)**
+        2. I dati macro vengono scaricati da **global-rates.com + API Ninjas**
         3. Claude analizza tutte le 19 coppie forex
         4. L'analisi viene **salvata automaticamente** con la data odierna
         
-        **Fonti Dati Ufficiali:**
-        - 🇺🇸 Federal Reserve (USD)
-        - 🇪🇺 BCE/Eurostat (EUR)
-        - 🇬🇧 Bank of England/ONS (GBP)
-        - 🇯🇵 Bank of Japan (JPY)
-        - 🇨🇭 SNB/BFS (CHF)
-        - 🇦🇺 RBA/ABS (AUD)
-        - 🇨🇦 Bank of Canada (CAD)
-        - 📊 OECD (Business Confidence Index)
+        **Fonti Dati:**
+        - 🌐 global-rates.com (Tassi interesse + Inflazione)
+        - 🇦🇺 ABS - Australian Bureau of Statistics (Inflazione AUD)
+        - 📊 API Ninjas (PIL + Disoccupazione)
+        - 📰 DuckDuckGo Search (Notizie + Outlook)
         
         ---
         
@@ -1256,7 +1259,7 @@ else:
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #6b7280; font-size: 0.8rem;">
-    📊 Forex Macro Analyst | Powered by Claude AI | Dati: FRED/OECD API<br>
+    📊 Forex Macro Analyst | Powered by Claude AI | Dati: global-rates.com + API Ninjas<br>
     ⚠️ Analisi qualitativa - Non costituisce consiglio di investimento
 </div>
 """, unsafe_allow_html=True)
