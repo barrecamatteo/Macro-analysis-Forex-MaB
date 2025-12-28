@@ -202,10 +202,14 @@ Esempio attuale (verifica dalle notizie):
         "top_bearish": [{"pair": "XXX/YYY", "diff": int}, ...]
     },
     "events_calendar": [
-        {"date": "YYYY-MM-DD", "event": "descrizione", "currency": "XXX", "importance": "high|medium"},
+        {"date": "data", "event": "descrizione", "currency": "XXX", "importance": "high|medium"},
         ...
     ]
 }
+
+## NOTA SU EVENTS_CALENDAR:
+⚠️ USA SOLO gli eventi forniti da ForexFactory nel prompt! NON inventare eventi!
+Copia esattamente gli eventi che ti vengono forniti.
 
 ## CHECKLIST FINALE:
 ✅ Tutti i testi in ITALIANO
@@ -213,7 +217,7 @@ Esempio attuale (verifica dalle notizie):
 ✅ Altri parametri: range -1/+1
 ✅ INFLAZIONE: ricorda che inflazione ALTA = POSITIVO per valuta (BC hawkish)!
 ✅ Sintesi che spiega il PERCHÉ del bias
-✅ Eventi futuri nei prossimi 30 giorni
+✅ events_calendar: USA SOLO eventi da ForexFactory, NON inventare!
 """
 
 
@@ -458,6 +462,112 @@ def fetch_all_currencies_data() -> dict:
     return all_data
 
 
+def fetch_forexfactory_calendar() -> list:
+    """Scarica il calendario economico da ForexFactory o cerca eventi con DuckDuckGo"""
+    events = []
+    
+    # Prova scraping ForexFactory
+    try:
+        url = "https://www.forexfactory.com/calendar?week=this"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Cerca le righe del calendario
+            calendar_rows = soup.select('tr.calendar__row')
+            
+            current_date = ""
+            for row in calendar_rows:
+                # Estrai data
+                date_cell = row.select_one('td.calendar__date')
+                if date_cell and date_cell.get_text(strip=True):
+                    current_date = date_cell.get_text(strip=True)
+                
+                # Estrai valuta
+                currency_cell = row.select_one('td.calendar__currency')
+                currency = currency_cell.get_text(strip=True) if currency_cell else ""
+                
+                # Estrai evento
+                event_cell = row.select_one('td.calendar__event')
+                event_name = event_cell.get_text(strip=True) if event_cell else ""
+                
+                # Estrai impatto
+                impact_cell = row.select_one('td.calendar__impact')
+                impact = "medium"
+                if impact_cell:
+                    impact_span = impact_cell.select_one('span')
+                    if impact_span:
+                        classes = str(impact_span.get('class', []))
+                        if 'high' in classes.lower() or 'red' in classes.lower():
+                            impact = "high"
+                        elif 'medium' in classes.lower() or 'ora' in classes.lower():
+                            impact = "medium"
+                
+                # Filtra eventi validi
+                valid_currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD']
+                if event_name and currency in valid_currencies:
+                    events.append({
+                        "date": current_date,
+                        "event": event_name,
+                        "currency": currency,
+                        "importance": impact
+                    })
+            
+            # Filtra solo high/medium e limita
+            events = [e for e in events if e.get('importance') in ['high', 'medium']][:15]
+    
+    except Exception as e:
+        pass
+    
+    # Se ForexFactory fallisce, cerca con DuckDuckGo
+    if not events:
+        try:
+            today = datetime.now()
+            week_ahead = (today + pd.DateOffset(days=7)).strftime('%Y-%m-%d')
+            
+            results = DDGS().text(f"forex economic calendar this week high impact events {today.strftime('%B %Y')}", max_results=5)
+            
+            for r in results:
+                snippet = r.get('body', '')
+                # Estrai menzioni di eventi comuni
+                common_events = [
+                    ('FOMC', 'USD'), ('Fed', 'USD'), ('NFP', 'USD'), ('Non-Farm', 'USD'),
+                    ('ECB', 'EUR'), ('CPI', 'USD'), ('GDP', 'USD'),
+                    ('BoE', 'GBP'), ('BoJ', 'JPY'), ('RBA', 'AUD'), ('BoC', 'CAD')
+                ]
+                for event, curr in common_events:
+                    if event.lower() in snippet.lower():
+                        events.append({
+                            "date": "This week",
+                            "event": f"{event} - verificare su forexfactory.com",
+                            "currency": curr,
+                            "importance": "high"
+                        })
+            
+            # Rimuovi duplicati
+            seen = set()
+            unique_events = []
+            for e in events:
+                key = e['event'][:20]
+                if key not in seen:
+                    seen.add(key)
+                    unique_events.append(e)
+            events = unique_events[:10]
+            
+        except Exception as e:
+            pass
+    
+    return events
+
+
 def search_qualitative_data() -> str:
     """Cerca notizie qualitative, outlook e aspettative per ogni valuta."""
     all_results = []
@@ -572,8 +682,8 @@ def search_qualitative_data() -> str:
     return "\n".join(all_results)
 
 
-def search_all_currencies_data() -> tuple[dict, str]:
-    """Cerca dati macro per TUTTE le valute - TradingEconomics + ricerche qualitative"""
+def search_all_currencies_data() -> tuple[dict, str, list]:
+    """Cerca dati macro per TUTTE le valute - TradingEconomics + ricerche qualitative + ForexFactory"""
     
     # 1. Scarica dati numerici da TradingEconomics
     st.info("📊 Scaricamento dati da TradingEconomics...")
@@ -583,10 +693,14 @@ def search_all_currencies_data() -> tuple[dict, str]:
     st.info("🔍 Ricerca notizie, outlook e aspettative mercati...")
     qualitative_data = search_qualitative_data()
     
-    return te_data, qualitative_data
+    # 3. Calendario ForexFactory
+    st.info("📅 Scaricamento calendario da ForexFactory...")
+    ff_events = fetch_forexfactory_calendar()
+    
+    return te_data, qualitative_data, ff_events
 
 
-def analyze_all_pairs(api_key: str, te_data: dict, search_text: str) -> dict:
+def analyze_all_pairs(api_key: str, te_data: dict, search_text: str, ff_events: list = None) -> dict:
     """Analizza TUTTE le coppie forex in una sola chiamata API"""
     
     client = anthropic.Anthropic(api_key=api_key)
@@ -602,7 +716,14 @@ def analyze_all_pairs(api_key: str, te_data: dict, search_text: str) -> dict:
     ])
     
     today = datetime.now()
-    events_limit = (today + pd.DateOffset(days=30)).strftime('%Y-%m-%d')
+    
+    # Formatta eventi ForexFactory
+    ff_formatted = ""
+    if ff_events:
+        ff_formatted = "\n## 📅 EVENTI REALI DA FOREXFACTORY (usa questi, NON inventare!):\n"
+        for event in ff_events:
+            importance_emoji = "🔴" if event.get("importance") == "high" else "🟡"
+            ff_formatted += f"{importance_emoji} {event.get('date', '')} - {event.get('currency', '')}: {event.get('event', '')}\n"
     
     user_prompt = f"""
 Analizza TUTTE queste coppie forex: {pairs_list}
@@ -623,6 +744,8 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 {search_text}
 
 ---
+{ff_formatted}
+---
 
 ## ⭐ ISTRUZIONI CRITICHE:
 
@@ -634,7 +757,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 3. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
 
-4. **events_calendar** = solo eventi tra {today.strftime('%Y-%m-%d')} e {events_limit}
+4. **events_calendar** = USA SOLO gli eventi da ForexFactory forniti sopra! NON inventare eventi!
 
 5. Ogni **summary** deve spiegare PERCHÉ quel bias basandosi sulle notizie
 
@@ -847,10 +970,17 @@ def display_matrix(analysis: dict):
         for event in events[:10]:
             importance = event.get("importance", "medium")
             icon = "🔴" if importance == "high" else "🟡"
-            date_formatted = format_date_ita(event.get('date', 'TBD'))
+            date_str = event.get('date', 'TBD')
+            # Non convertire se non è formato YYYY-MM-DD
+            if len(date_str) == 10 and '-' in date_str:
+                date_formatted = format_date_ita(date_str)
+            else:
+                date_formatted = date_str
             st.markdown(f"{icon} **{date_formatted}** - {event.get('event', '')} ({event.get('currency', '')})")
     else:
         st.info("Nessun evento trovato")
+    
+    st.caption("📊 [Verifica calendario completo su ForexFactory](https://www.forexfactory.com/calendar)")
     
     # JSON Raw
     with st.expander("🔧 Dati Raw (JSON)"):
@@ -1147,10 +1277,10 @@ if analyze_btn:
     progress = st.progress(0, text="Inizializzazione...")
     
     progress.progress(5, text="🔍 Scaricamento dati da TradingEconomics...")
-    te_data, search_text = search_all_currencies_data()
+    te_data, search_text, ff_events = search_all_currencies_data()
     
     progress.progress(50, text="🧠 Claude Sonnet 4 sta analizzando...")
-    analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text)
+    analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text, ff_events)
     
     if "error" not in analysis:
         analysis["model_used"] = "Claude Sonnet 4"
