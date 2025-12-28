@@ -132,7 +132,6 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
   - Il target è ~2%, quindi inflazione sopra target = hawkish = valuta forte
 - **GDP Growth**: Momentum economico
 - **Unemployment**: Salute del mercato del lavoro
-- **Business Confidence**: Se disponibile nelle notizie (può essere N/A nei dati)
 
 ## COME VALUTARE LE ASPETTATIVE TASSI:
 - Banca centrale che TAGLIA → score NEGATIVO per quella valuta
@@ -165,8 +164,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
             "interest_rate": "valore",
             "inflation_rate": "valore",
             "gdp_growth": "valore",
-            "unemployment": "valore",
-            "business_confidence": "valore"
+            "unemployment": "valore"
         },
         ... (per tutte le 7 valute)
     },
@@ -372,7 +370,7 @@ def format_datetime_display(datetime_str: str) -> str:
 # --- FUNZIONI RICERCA E ANALISI ---
 
 # Indicatori richiesti per ogni valuta
-REQUIRED_INDICATORS = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment", "business_confidence"]
+REQUIRED_INDICATORS = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment"]
 
 # Mappa valuta -> paese/area per le ricerche
 CURRENCY_TO_COUNTRY = {
@@ -412,7 +410,6 @@ def fetch_all_currencies_data() -> dict:
                 'inflation_rate': indicators.get('inflation', {}).get('value', 'N/A'),
                 'gdp_growth': indicators.get('gdp_growth', {}).get('value', 'N/A'),
                 'unemployment': indicators.get('unemployment', {}).get('value', 'N/A'),
-                'business_confidence': 'N/A',  # Non più disponibile (escluso)
             }
         
         # Se API Ninjas non disponibile, avvisa ma continua con i dati di scraping
@@ -425,13 +422,13 @@ def fetch_all_currencies_data() -> dict:
         st.error(f"Errore nel recupero dati: {e}")
         # Fallback con dati di esempio
         return {
-            'USD': {'interest_rate': 3.75, 'inflation_rate': 2.74, 'gdp_growth': 2.1, 'unemployment': 3.9, 'business_confidence': 'N/A'},
-            'EUR': {'interest_rate': 2.15, 'inflation_rate': 2.14, 'gdp_growth': 0.7, 'unemployment': 3.0, 'business_confidence': 'N/A'},
-            'GBP': {'interest_rate': 3.75, 'inflation_rate': 3.57, 'gdp_growth': 1.3, 'unemployment': 4.1, 'business_confidence': 'N/A'},
-            'JPY': {'interest_rate': 0.75, 'inflation_rate': 2.91, 'gdp_growth': 0.5, 'unemployment': 2.3, 'business_confidence': 'N/A'},
-            'CHF': {'interest_rate': 0.00, 'inflation_rate': 0.02, 'gdp_growth': 1.2, 'unemployment': 4.8, 'business_confidence': 'N/A'},
-            'AUD': {'interest_rate': 3.60, 'inflation_rate': 3.8, 'gdp_growth': 2.3, 'unemployment': 5.3, 'business_confidence': 'N/A'},
-            'CAD': {'interest_rate': 2.25, 'inflation_rate': 2.22, 'gdp_growth': 1.6, 'unemployment': 5.4, 'business_confidence': 'N/A'},
+            'USD': {'interest_rate': 3.75, 'inflation_rate': 2.74, 'gdp_growth': 2.1, 'unemployment': 3.9},
+            'EUR': {'interest_rate': 2.15, 'inflation_rate': 2.14, 'gdp_growth': 0.7, 'unemployment': 3.0},
+            'GBP': {'interest_rate': 3.75, 'inflation_rate': 3.57, 'gdp_growth': 1.3, 'unemployment': 4.1},
+            'JPY': {'interest_rate': 0.75, 'inflation_rate': 2.91, 'gdp_growth': 0.5, 'unemployment': 2.3},
+            'CHF': {'interest_rate': 0.00, 'inflation_rate': 0.02, 'gdp_growth': 1.2, 'unemployment': 4.8},
+            'AUD': {'interest_rate': 3.60, 'inflation_rate': 3.8, 'gdp_growth': 2.3, 'unemployment': 5.3},
+            'CAD': {'interest_rate': 2.25, 'inflation_rate': 2.22, 'gdp_growth': 1.6, 'unemployment': 5.4},
         }
 
 
@@ -736,13 +733,10 @@ def display_matrix(analysis: dict):
                     "Inflaz. %": data.get('inflation_rate', data.get('inflation_cpi', 'N/A')),
                     "PIL %": data.get('gdp_growth', 'N/A'),
                     "Disocc. %": data.get('unemployment', 'N/A'),
-                    "BCI": data.get('business_confidence', 'N/A'),
                 })
             
             df_indicators = pd.DataFrame(indicators_table)
             st.dataframe(df_indicators, use_container_width=True, hide_index=True)
-            
-            st.caption("📌 BCI = Business Confidence Index OECD (>100 = ottimismo, <100 = pessimismo)")
         else:
             st.info("Dati numerici non disponibili per questa analisi")
     
@@ -906,7 +900,6 @@ def display_pair_detail(pair_data: dict, currencies_data: dict):
 - 📊 Inflazione: **{data_a.get('inflation_rate', data_a.get('inflation_cpi', 'N/A'))}**
 - 📈 PIL: **{data_a.get('gdp_growth', 'N/A')}**
 - 👥 Disoccupazione: **{data_a.get('unemployment', 'N/A')}**
-- 📉 Business Confidence: **{data_a.get('business_confidence', 'N/A')}**
 """)
         
         st.markdown(f"**Punteggi {curr_a} vs {curr_b}:**")
@@ -938,7 +931,6 @@ def display_pair_detail(pair_data: dict, currencies_data: dict):
 - 📊 Inflazione: **{data_b.get('inflation_rate', data_b.get('inflation_cpi', 'N/A'))}**
 - 📈 PIL: **{data_b.get('gdp_growth', 'N/A')}**
 - 👥 Disoccupazione: **{data_b.get('unemployment', 'N/A')}**
-- 📉 Business Confidence: **{data_b.get('business_confidence', 'N/A')}**
 """)
         
         st.markdown(f"**Punteggi {curr_b} vs {curr_a}:**")
