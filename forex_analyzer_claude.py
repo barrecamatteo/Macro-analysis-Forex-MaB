@@ -111,13 +111,32 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 - Le NOTIZIE e OUTLOOK ti vengono fornite dalle ricerche web
 - USA ENTRAMBI per l'analisi! I numeri da soli non bastano!
 
-### 4. ⭐ ASPETTATIVE SUI TASSI (CRUCIALE!)
-- Questo è il fattore PIÙ IMPORTANTE per il forex!
-- Analizza le notizie per capire:
-  - Chi sta TAGLIANDO i tassi? (es. Fed, ECB, BoC → bearish per la valuta)
-  - Chi sta ALZANDO i tassi? (es. BoJ → bullish per la valuta)
-  - Quanti tagli/rialzi sono PREZZATI dal mercato per il 2026?
-- Il TREND dei tassi conta più del livello attuale!
+### 4. ⭐⭐⭐ ASPETTATIVE SUI TASSI - REGOLA FONDAMENTALE ⭐⭐⭐
+Questa è la sezione PIÙ IMPORTANTE dell'analisi forex!
+
+**DEVI OBBLIGATORIAMENTE:**
+1. LEGGERE ATTENTAMENTE tutte le notizie nella sezione [RATE EXPECTATIONS] e [MONETARY POLICY COMPARISON]
+2. ESTRARRE DATI CONCRETI dalle fonti, come:
+   - "Fed: mercato prezza X tagli nel 2025" (con fonte)
+   - "ECB: analisti prevedono tassi al X% entro fine 2025" (con fonte)
+   - "BoJ: possibile rialzo a X% secondo Reuters/Bloomberg"
+   - "BoC: già tagliato da 5% a 3.25%, previsti altri X tagli"
+3. CITARE LE FONTI quando fai affermazioni sulle aspettative tassi
+4. Se le fonti sono contrastanti, riportalo!
+5. Se NON trovi informazioni su una banca centrale, scrivi "dati insufficienti" - NON INVENTARE!
+
+**NON DEVI MAI:**
+- Inventare aspettative sui tassi senza fonte
+- Dire "BoE più cauta" o "BoC aggressivo" senza dati a supporto
+- Usare frasi generiche come "il mercato si aspetta tagli" senza specificare QUANTI e QUANDO
+
+**ESEMPIO DI ANALISI CORRETTA:**
+"Aspettative Tassi GBP +2: Secondo Reuters (dic 2024), la BoE ha tagliato solo 2 volte nel 2024 vs 5 tagli della BoC. 
+Il mercato prezza altri 2-3 tagli BoE nel 2025 vs BoC già al 3.25% con ulteriori tagli previsti. 
+Divergenza hawkish BoE vs dovish BoC supporta GBP."
+
+**ESEMPIO DI ANALISI SBAGLIATA:**
+"Aspettative Tassi GBP +2: BoE meno aggressiva nei tagli vs BoC" ← TROPPO GENERICO! Mancano numeri e fonti!
 
 ### 5. PUNTEGGI PER COPPIA
 - I punteggi devono essere calcolati PER OGNI COPPIA SPECIFICA
@@ -125,7 +144,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 
 ## INDICATORI DA CONSIDERARE:
 - **Interest Rate**: Tasso attuale (meno importante del trend!)
-- **Rate Expectations**: CRUCIALE - tagli o rialzi previsti?
+- **Rate Expectations**: CRUCIALE - tagli o rialzi previsti? CITA LE FONTI!
 - **Inflation Rate**: ⚠️ ATTENZIONE ALLA LOGICA!
   - Inflazione ALTA (>2.5%) → BC non può tagliare tassi → POSITIVO per valuta
   - Inflazione BASSA (<2%) → BC può tagliare tassi → NEGATIVO per valuta
@@ -138,6 +157,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 - Banca centrale che ALZA → score POSITIVO per quella valuta
 - Banca centrale che PAUSA ma pronta a tagliare → leggermente negativo
 - Banca centrale che PAUSA ma pronta ad alzare → leggermente positivo
+- ⚠️ SEMPRE con riferimento alle fonti trovate nella ricerca!
 
 ## COME VALUTARE L'INFLAZIONE (IMPORTANTE!):
 - Inflazione ALTA (es. 3-4%) → La BC deve mantenere tassi alti o alzarli → POSITIVO per valuta
@@ -150,7 +170,7 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 ## PARAMETRI DA VALUTARE (per ogni coppia A vs B):
 
 1. **TASSI ATTUALI** (scala -1 a +1) - Differenziale tassi attuale
-2. **ASPETTATIVE TASSI FUTURI** (scala -2 a +2) - ⭐⭐ IL PIÙ IMPORTANTE! Peso doppio! Chi taglia vs chi alza?
+2. **ASPETTATIVE TASSI FUTURI** (scala -2 a +2) - ⭐⭐ IL PIÙ IMPORTANTE! Peso doppio! Chi taglia vs chi alza? CITA FONTI!
 3. **INFLAZIONE** (scala -1 a +1) - ⚠️ Inflazione ALTA = POSITIVO! Chi ha inflazione sopra il 2%? (BC non può tagliare)
 4. **CRESCITA/PIL** (scala -1 a +1) - Chi cresce di più?
 5. **RISK SENTIMENT** (scala -1 a +1) - Safe-haven vs cyclical nel contesto attuale
@@ -433,113 +453,149 @@ def fetch_all_currencies_data() -> dict:
 
 
 def search_qualitative_data() -> str:
-    """Cerca notizie qualitative, outlook e aspettative per ogni valuta."""
+    """Cerca notizie qualitative, outlook e ASPETTATIVE TASSI per ogni valuta."""
     all_results = []
     
     today = datetime.now()
+    current_year = today.year
+    next_year = current_year + 1
     
     all_results.append(f"[DATE] Data odierna: {today.strftime('%d/%m/%Y')}")
     
-    # Ricerche specifiche per ogni banca centrale - POLITICA MONETARIA (in inglese)
-    central_bank_queries = {
+    # =========================================================================
+    # SEZIONE 1: ASPETTATIVE TASSI - LA PIÙ IMPORTANTE!
+    # Ricerche molto specifiche su quanti tagli/rialzi sono previsti
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[RATE EXPECTATIONS - SEZIONE CRUCIALE PER L'ANALISI]")
+    all_results.append(f"{'='*60}")
+    
+    rate_expectations_queries = {
         "USD": [
-            "Federal Reserve interest rate decision 2025",
-            "Fed rate cuts 2026 forecast expectations",
-            "FOMC December 2025 statement dovish hawkish",
-            "US economy outlook 2026",
+            f"Fed interest rate forecast {current_year} {next_year} how many cuts",
+            f"FOMC dot plot rate projections {current_year}",
+            "Fed funds futures rate expectations",
+            "Federal Reserve rate path outlook Reuters Bloomberg",
         ],
         "EUR": [
-            "ECB interest rate decision 2025",
-            "ECB rate cuts 2026 Lagarde forecast",
-            "Eurozone economy outlook 2026",
-            "Germany recession outlook",
+            f"ECB interest rate forecast {current_year} {next_year} how many cuts",
+            "ECB rate cuts expectations Lagarde",
+            f"Eurozone rates outlook {current_year} Reuters",
+            "ECB deposit rate forecast analysts",
         ],
         "GBP": [
-            "Bank of England rate decision 2025",
-            "BoE interest rate forecast 2026",
-            "UK economy inflation outlook 2026",
+            f"Bank of England rate forecast {current_year} {next_year} how many cuts",
+            "BoE MPC rate expectations UK",
+            "UK interest rates outlook Reuters Bloomberg",
+            "BoE rate path forecast analysts",
         ],
         "JPY": [
-            "Bank of Japan rate hike 2025 Ueda",
-            "BoJ monetary policy outlook 2026",
-            "Japan inflation wage growth",
-            "Yen intervention outlook",
+            f"Bank of Japan rate hike forecast {current_year} {next_year}",
+            "BoJ interest rate expectations Ueda",
+            "Japan rates outlook normalization",
+            "BoJ policy rate forecast Reuters",
         ],
         "CHF": [
-            "SNB Swiss National Bank rate decision 2025",
-            "Switzerland interest rate outlook 2026",
-            "Swiss franc safe haven",
+            f"SNB interest rate forecast {current_year} {next_year}",
+            "Swiss National Bank rate cuts expectations",
+            "Switzerland rates outlook",
+            "SNB policy rate forecast",
         ],
         "AUD": [
-            "RBA Reserve Bank Australia rate decision 2025",
-            "Australia interest rate forecast 2026",
-            "AUD China commodities outlook",
+            f"RBA interest rate forecast {current_year} {next_year} how many cuts",
+            "Reserve Bank Australia rate expectations",
+            "Australia rates outlook Bullock",
+            "RBA cash rate forecast analysts",
         ],
         "CAD": [
-            "Bank of Canada rate decision 2025",
-            "BoC interest rate forecast 2026",
-            "Canada economy oil outlook",
+            f"Bank of Canada rate forecast {current_year} {next_year} how many cuts",
+            "BoC interest rate expectations Macklem",
+            "Canada rates outlook Reuters Bloomberg",
+            "BoC overnight rate forecast analysts",
         ],
     }
     
-    for currency, queries in central_bank_queries.items():
-        all_results.append(f"\n[{currency} - MONETARY POLICY & OUTLOOK]")
+    for currency, queries in rate_expectations_queries.items():
+        all_results.append(f"\n[{currency} - RATE EXPECTATIONS ⭐]")
         for query in queries:
             try:
                 results = DDGS().text(query, max_results=3)
                 for r in results:
                     title = r.get('title', '')
                     snippet = r.get('body', '')
-                    all_results.append(f"[{currency}] {title}: {snippet[:400]}")
+                    all_results.append(f"[{currency}-RATES] {title}: {snippet[:500]}")
             except:
                 pass
     
-    # Ricerche GEOPOLITICHE e RISK SENTIMENT
-    geopolitical_queries = [
-        "geopolitical risk 2026 market forex",
-        "US China trade tariffs 2026",
-        "global recession risk 2026",
-        "risk sentiment forex 2025",
+    # =========================================================================
+    # SEZIONE 2: CONFRONTO DIRETTO POLITICHE MONETARIE
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[MONETARY POLICY COMPARISON]")
+    all_results.append(f"{'='*60}")
+    
+    comparison_queries = [
+        f"central banks rate cuts {current_year} comparison Fed ECB BoE",
+        f"which central bank cutting rates fastest {current_year}",
+        f"hawkish dovish central banks {current_year} ranking",
+        f"monetary policy divergence {current_year} forex",
+        f"Fed vs ECB vs BoE rate policy {current_year}",
+        f"BoJ rate hike vs Fed rate cut {current_year}",
     ]
     
-    all_results.append(f"\n[GEOPOLITICS & RISK SENTIMENT]")
+    for query in comparison_queries:
+        try:
+            results = DDGS().text(query, max_results=3)
+            for r in results:
+                all_results.append(f"[COMPARE] {r['title']}: {r['body'][:450]}")
+        except:
+            pass
+    
+    # =========================================================================
+    # SEZIONE 3: OUTLOOK ECONOMICO PER VALUTA
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[ECONOMIC OUTLOOK BY CURRENCY]")
+    all_results.append(f"{'='*60}")
+    
+    economic_outlook_queries = {
+        "USD": [f"US economy outlook {current_year} {next_year} growth inflation"],
+        "EUR": [f"Eurozone economy outlook {current_year} Germany recession"],
+        "GBP": [f"UK economy outlook {current_year} inflation growth"],
+        "JPY": [f"Japan economy outlook {current_year} inflation wages"],
+        "CHF": [f"Switzerland economy outlook {current_year}"],
+        "AUD": [f"Australia economy outlook {current_year} China commodities"],
+        "CAD": [f"Canada economy outlook {current_year} oil trade"],
+    }
+    
+    for currency, queries in economic_outlook_queries.items():
+        for query in queries:
+            try:
+                results = DDGS().text(query, max_results=2)
+                for r in results:
+                    all_results.append(f"[{currency}-ECON] {r['title']}: {r['body'][:400]}")
+            except:
+                pass
+    
+    # =========================================================================
+    # SEZIONE 4: GEOPOLITICA E RISK SENTIMENT
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[GEOPOLITICS & RISK SENTIMENT]")
+    all_results.append(f"{'='*60}")
+    
+    geopolitical_queries = [
+        f"geopolitical risk {current_year} market forex impact",
+        f"US China trade tariffs {current_year}",
+        f"global recession risk {current_year} probability",
+        f"risk on risk off market sentiment {current_year}",
+    ]
+    
     for query in geopolitical_queries:
         try:
             results = DDGS().text(query, max_results=2)
             for r in results:
                 all_results.append(f"[GEO] {r['title']}: {r['body'][:350]}")
-        except:
-            pass
-    
-    # Ricerche FOREX OUTLOOK specifiche
-    forex_queries = [
-        "EUR USD forecast 2026",
-        "USD JPY outlook 2026",
-        "major currencies forecast 2026",
-    ]
-    
-    all_results.append(f"\n[FOREX OUTLOOK]")
-    for query in forex_queries:
-        try:
-            results = DDGS().text(query, max_results=2)
-            for r in results:
-                all_results.append(f"[FX] {r['title']}: {r['body'][:350]}")
-        except:
-            pass
-    
-    # Calendario eventi prossimi 30 giorni
-    calendar_queries = [
-        "FOMC meeting January 2026",
-        "ECB meeting January 2026",
-        "central bank meetings 2026 calendar",
-    ]
-    
-    all_results.append(f"\n[ECONOMIC CALENDAR]")
-    for query in calendar_queries:
-        try:
-            results = DDGS().text(query, max_results=1)
-            for r in results:
-                all_results.append(f"[CAL] {r['title']}: {r['body'][:250]}")
         except:
             pass
     
