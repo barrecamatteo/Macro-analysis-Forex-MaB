@@ -6,6 +6,7 @@ import json
 import pandas as pd
 import os
 from pathlib import Path
+import requests
 
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(
@@ -18,11 +19,16 @@ st.set_page_config(
 # Supporta sia config.py (locale) che st.secrets (Streamlit Cloud)
 ANTHROPIC_API_KEY = None
 API_KEY_LOADED = False
+SUPABASE_URL = None
+SUPABASE_KEY = None
 
 # Prima prova st.secrets (Streamlit Cloud)
 try:
     ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
     API_KEY_LOADED = True
+    # Supabase credentials
+    SUPABASE_URL = st.secrets.get("SUPABASE_URL", None)
+    SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", None)
 except (KeyError, FileNotFoundError):
     pass
 
@@ -31,8 +37,16 @@ if not API_KEY_LOADED:
     try:
         from config import ANTHROPIC_API_KEY
         API_KEY_LOADED = True
+        # Prova a caricare anche Supabase da config
+        try:
+            from config import SUPABASE_URL, SUPABASE_KEY
+        except ImportError:
+            pass
     except ImportError:
         pass
+
+# Flag per Supabase
+SUPABASE_ENABLED = SUPABASE_URL is not None and SUPABASE_KEY is not None
 
 # --- CARTELLA DATI ---
 DATA_FOLDER = Path("data")
@@ -199,54 +213,102 @@ Esempio attuale (verifica dalle notizie):
 """
 
 
-# --- FUNZIONI SALVATAGGIO/CARICAMENTO ---
+# --- FUNZIONI SALVATAGGIO/CARICAMENTO (SUPABASE + LOCAL FALLBACK) ---
 
-def get_analysis_filename(datetime_str: str) -> Path:
-    """Restituisce il path del file per una data/ora specifica"""
-    # Formato: analysis_2025-12-28_14-30.json
-    return DATA_FOLDER / f"analysis_{datetime_str}.json"
+def supabase_request(method: str, endpoint: str, data: dict = None) -> dict | None:
+    """Esegue una richiesta a Supabase REST API"""
+    if not SUPABASE_ENABLED:
+        return None
+    
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
+    
+    try:
+        if method == "GET":
+            response = requests.get(url, headers=headers)
+        elif method == "POST":
+            response = requests.post(url, headers=headers, json=data)
+        elif method == "DELETE":
+            response = requests.delete(url, headers=headers)
+        else:
+            return None
+        
+        if response.status_code in [200, 201]:
+            return response.json() if response.text else {}
+        elif response.status_code == 204:
+            return {}
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Errore Supabase: {e}")
+        return None
 
 
 def save_analysis(analysis: dict) -> bool:
-    """Salva l'analisi su file con data e ora"""
+    """Salva l'analisi su Supabase (o locale come fallback)"""
     try:
-        # Usa il timestamp corrente per il nome file
         now = datetime.now()
         datetime_str = now.strftime("%Y-%m-%d_%H-%M")
         
-        # Aggiorna analysis_date con data e ora
         analysis["analysis_date"] = now.strftime("%Y-%m-%d")
         analysis["analysis_time"] = now.strftime("%H:%M")
         analysis["analysis_datetime"] = datetime_str
         
-        filename = get_analysis_filename(datetime_str)
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(analysis, f, ensure_ascii=False, indent=2)
-        return True
+        if SUPABASE_ENABLED:
+            # Salva su Supabase
+            data = {
+                "analysis_datetime": datetime_str,
+                "analysis_date": analysis["analysis_date"],
+                "analysis_time": analysis["analysis_time"],
+                "data": analysis
+            }
+            result = supabase_request("POST", "analyses", data)
+            return result is not None
+        else:
+            # Fallback locale
+            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(analysis, f, ensure_ascii=False, indent=2)
+            return True
     except Exception as e:
         st.error(f"Errore salvataggio: {e}")
         return False
 
 
 def load_analysis(datetime_str: str) -> dict | None:
-    """Carica un'analisi da file"""
+    """Carica un'analisi da Supabase (o locale come fallback)"""
     try:
-        filename = get_analysis_filename(datetime_str)
-        if filename.exists():
-            with open(filename, "r", encoding="utf-8") as f:
-                return json.load(f)
+        if SUPABASE_ENABLED:
+            result = supabase_request("GET", f"analyses?analysis_datetime=eq.{datetime_str}")
+            if result and len(result) > 0:
+                return result[0].get("data", {})
+        else:
+            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            if filename.exists():
+                with open(filename, "r", encoding="utf-8") as f:
+                    return json.load(f)
     except Exception as e:
         st.error(f"Errore caricamento: {e}")
     return None
 
 
 def delete_analysis(datetime_str: str) -> bool:
-    """Cancella un'analisi dall'archivio"""
+    """Cancella un'analisi da Supabase (o locale come fallback)"""
     try:
-        filename = get_analysis_filename(datetime_str)
-        if filename.exists():
-            filename.unlink()
-            return True
+        if SUPABASE_ENABLED:
+            result = supabase_request("DELETE", f"analyses?analysis_datetime=eq.{datetime_str}")
+            return result is not None
+        else:
+            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            if filename.exists():
+                filename.unlink()
+                return True
     except Exception as e:
         st.error(f"Errore cancellazione: {e}")
     return False
@@ -255,31 +317,21 @@ def delete_analysis(datetime_str: str) -> bool:
 def get_available_dates() -> list:
     """Restituisce le date/ore delle analisi disponibili (più recente prima)"""
     dates = []
-    for file in DATA_FOLDER.glob("analysis_*.json"):
-        try:
-            # Estrae datetime dal nome file: analysis_2025-12-28_14-30.json
-            datetime_str = file.stem.replace("analysis_", "")
-            dates.append(datetime_str)
-        except:
-            pass
-    return sorted(dates, reverse=True)
-
-
-def format_datetime_display(datetime_str: str) -> str:
-    """Formatta datetime per visualizzazione: 28/12/2025 14:30"""
-    try:
-        # Formato input: 2025-12-28_14-30
-        if "_" in datetime_str:
-            date_part, time_part = datetime_str.split("_")
-            date_obj = datetime.strptime(date_part, "%Y-%m-%d")
-            time_formatted = time_part.replace("-", ":")
-            return f"{date_obj.strftime('%d/%m/%Y')} {time_formatted}"
-        else:
-            # Vecchio formato senza ora
-            date_obj = datetime.strptime(datetime_str, "%Y-%m-%d")
-            return date_obj.strftime('%d/%m/%Y')
-    except:
-        return datetime_str
+    
+    if SUPABASE_ENABLED:
+        result = supabase_request("GET", "analyses?select=analysis_datetime&order=analysis_datetime.desc")
+        if result:
+            dates = [r.get("analysis_datetime") for r in result if r.get("analysis_datetime")]
+    else:
+        for file in DATA_FOLDER.glob("analysis_*.json"):
+            try:
+                datetime_str = file.stem.replace("analysis_", "")
+                dates.append(datetime_str)
+            except:
+                pass
+        dates = sorted(dates, reverse=True)
+    
+    return dates
 
 
 def get_latest_analysis() -> dict | None:
@@ -288,6 +340,21 @@ def get_latest_analysis() -> dict | None:
     if dates:
         return load_analysis(dates[0])
     return None
+
+
+def format_datetime_display(datetime_str: str) -> str:
+    """Formatta datetime per visualizzazione: 28/12/2025 14:30"""
+    try:
+        if "_" in datetime_str:
+            date_part, time_part = datetime_str.split("_")
+            date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+            time_formatted = time_part.replace("-", ":")
+            return f"{date_obj.strftime('%d/%m/%Y')} {time_formatted}"
+        else:
+            date_obj = datetime.strptime(datetime_str, "%Y-%m-%d")
+            return date_obj.strftime('%d/%m/%Y')
+    except:
+        return datetime_str
 
 
 # --- FUNZIONI RICERCA E ANALISI ---
@@ -981,8 +1048,12 @@ with st.sidebar:
     if API_KEY_LOADED:
         st.success("✅ API Key configurata")
     else:
-        st.error("❌ File config.py non trovato!")
-        st.warning("Crea un file `config.py` con:\n```\nANTHROPIC_API_KEY = 'tua-key'\n```")
+        st.error("❌ API Key mancante")
+    
+    if SUPABASE_ENABLED:
+        st.success("☁️ Database cloud attivo")
+    else:
+        st.info("💾 Salvataggio locale")
     
     st.markdown("---")
     
