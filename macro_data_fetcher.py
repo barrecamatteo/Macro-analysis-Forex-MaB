@@ -47,51 +47,109 @@ class MacroDataFetcher:
         # CODICI FRED (usati come FALLBACK)
         # =================================================================
         
+        # =================================================================
+        # CODICI FRED CORRETTI - Tutti in PERCENTUALE (non indici!)
+        # =================================================================
+        
         self.fred_codes = {
+            # Tassi di interesse (Policy Rates) - già in %
             'interest_rate': {
-                'USD': 'FEDFUNDS',
-                'EUR': 'ECBDFR',
-                'GBP': 'BOERUKM',
-                'JPY': 'IRSTCB01JPM156N',
-                'CHF': 'IRSTCB01CHM156N',
-                'AUD': 'IRSTCB01AUM156N',
-                'CAD': 'IRSTCB01CAM156N',
+                'USD': 'FEDFUNDS',           # Federal Funds Rate (%)
+                'EUR': 'ECBDFR',             # ECB Deposit Facility Rate (%)
+                'GBP': 'BOERUKM',            # BoE Bank Rate (%)
+                'JPY': 'IRSTCI01JPM156N',    # Japan Short-term rates (%)
+                'CHF': 'IRSTCI01CHM156N',    # Switzerland Short-term rates (%)
+                'AUD': 'IRSTCI01AUM156N',    # Australia Short-term rates (%)
+                'CAD': 'IRSTCI01CAM156N',    # Canada Short-term rates (%)
+            },
+            # Inflazione YoY (%) - Serie OECD "Growth Rate Previous Period"
+            'inflation': {
+                'USD': 'CPALTT01USM657N',    # USA CPI YoY (%)
+                'EUR': 'EA19CPALTT01GYM',    # Euro Area CPI YoY (%)
+                'GBP': 'CPALTT01GBM657N',    # UK CPI YoY (%)
+                'JPY': 'CPALTT01JPM657N',    # Japan CPI YoY (%)
+                'CHF': 'CPALTT01CHM657N',    # Switzerland CPI YoY (%)
+                'AUD': 'CPALTT01AUM657N',    # Australia CPI YoY (%)
+                'CAD': 'CPALTT01CAM657N',    # Canada CPI YoY (%)
+            },
+            # PIL Crescita QoQ (%) - Serie OECD GDP Growth Rate
+            'gdp_growth': {
+                'USD': 'A191RL1Q225SBEA',    # USA Real GDP Growth QoQ SAAR (%)
+                'EUR': 'CLVMNACSCAB1GQEA19', # Euro Area GDP Growth (index, needs calc)
+                'GBP': 'NAEXKP01GBQ657S',    # UK GDP Growth QoQ (%)
+                'JPY': 'NAEXKP01JPQ657S',    # Japan GDP Growth QoQ (%)
+                'CHF': 'NAEXKP01CHQ657S',    # Switzerland GDP Growth QoQ (%)
+                'AUD': 'NAEXKP01AUQ657S',    # Australia GDP Growth QoQ (%)
+                'CAD': 'NAEXKP01CAQ657S',    # Canada GDP Growth QoQ (%)
+            },
+            # Disoccupazione (%) - già in percentuale
+            'unemployment': {
+                'USD': 'UNRATE',              # US Unemployment Rate (%)
+                'EUR': 'LRHUTTTTEZM156S',     # Euro Area Unemployment (%)
+                'GBP': 'LRHUTTTTGBM156S',     # UK Unemployment (%)
+                'JPY': 'LRHUTTTTJPM156S',     # Japan Unemployment (%)
+                'CHF': 'LRHUTTTTCHM156S',     # Switzerland Unemployment (%)
+                'AUD': 'LRHUTTTTAUM156S',     # Australia Unemployment (%)
+                'CAD': 'LRHUTTTTCAM156S',     # Canada Unemployment (%)
+            },
+            # Business Confidence Index (indice, 100 = neutro)
+            'business_confidence': {
+                'USD': 'BSCICP03USM665S',     # OECD BCI USA
+                'EUR': 'BSCICP03EZM665S',     # OECD BCI Euro Area
+                'GBP': 'BSCICP03GBM665S',     # OECD BCI UK
+                'JPY': 'BSCICP03JPM665S',     # OECD BCI Japan
+                'CHF': 'BSCICP03CHM665S',     # OECD BCI Switzerland
+                'AUD': 'BSCICP03AUM665S',     # OECD BCI Australia
+                'CAD': 'BSCICP03CAM665S',     # OECD BCI Canada
+            }
+        }
+        
+        # Codici FALLBACK alternativi per ogni indicatore
+        self.fred_fallback_codes = {
+            'interest_rate': {
+                'USD': ['DFF', 'DFEDTARU'],
+                'EUR': ['ECBMRRFR', 'IR3TIB01EZM156N'],
+                'GBP': ['IR3TIB01GBM156N'],
+                'JPY': ['IR3TIB01JPM156N', 'INTDSRJPM193N'],
+                'CHF': ['IR3TIB01CHM156N', 'INTDSRCHM193N'],
+                'AUD': ['IR3TIB01AUM156N', 'INTDSRAUM193N'],
+                'CAD': ['IR3TIB01CAM156N', 'INTDSRCAM193N'],
             },
             'inflation': {
-                'USD': 'CPIAUCSL',
-                'EUR': 'EA19CPALTT01GYM',
-                'GBP': 'GBRCPIALLMINMEI',
-                'JPY': 'JPNCPIALLMINMEI',
-                'CHF': 'CHECPIALLMINMEI',
-                'AUD': 'AUSCPIALLQINMEI',
-                'CAD': 'CANCPIALLMINMEI',
+                'USD': ['PCEPILFE', 'CPILFESL'],  # Core PCE, Core CPI
+                'EUR': ['CP0000EZ19M086NEST'],
+                'GBP': ['CPGRLE01GBM659N'],
+                'JPY': ['CPGRLE01JPM659N'],
+                'CHF': ['CPGRLE01CHM659N'],
+                'AUD': ['CPGRLE01AUM659N'],
+                'CAD': ['CPGRLE01CAM659N'],
             },
             'gdp_growth': {
-                'USD': 'A191RL1Q225SBEA',
-                'EUR': 'CLVMNACSCAB1GQEA19',
-                'GBP': 'UKNGDP',
-                'JPY': 'JPNRGDPEXP',
-                'CHF': 'CLVMNACSCAB1GQCH',
-                'AUD': 'AUSGDPEXP',
-                'CAD': 'NGDPRSAXDCCAQ',
+                'USD': ['GDPC1', 'A191RP1Q027SBEA'],
+                'EUR': ['NAEXKP01EZQ657S', 'RGDPNAEZA666NRUG'],
+                'GBP': ['NAEXKP01GBQ661S', 'RGDPNAGBA666NRUG'],
+                'JPY': ['NAEXKP01JPQ661S', 'RGDPNAJPA666NRUG'],
+                'CHF': ['NAEXKP01CHQ661S', 'RGDPNACHA666NRUG'],
+                'AUD': ['NAEXKP01AUQ661S', 'RGDPNAAUA666NRUG'],
+                'CAD': ['NAEXKP01CAQ661S', 'RGDPNACAA666NRUG'],
             },
             'unemployment': {
-                'USD': 'UNRATE',
-                'EUR': 'LRHUTTTTEZM156S',
-                'GBP': 'LRHUTTTTGBM156S',
-                'JPY': 'LRHUTTTTJPM156S',
-                'CHF': 'LRHUTTTTCHM156S',
-                'AUD': 'LRHUTTTTAUM156S',
-                'CAD': 'LRHUTTTTCAM156S',
+                'USD': ['U3RATE', 'UNEMPLOY'],
+                'EUR': ['LRUN64TTEZM156S'],
+                'GBP': ['LRUN64TTGBM156S'],
+                'JPY': ['LRUN64TTJPM156S'],
+                'CHF': ['LRUN64TTCHM156S'],
+                'AUD': ['LRUN64TTAUM156S'],
+                'CAD': ['LRUN64TTCAM156S'],
             },
             'business_confidence': {
-                'USD': 'BSCICP03USM665S',
-                'EUR': 'BSCICP03EZM665S',
-                'GBP': 'BSCICP03GBM665S',
-                'JPY': 'BSCICP03JPM665S',
-                'CHF': 'BSCICP03CHM665S',
-                'AUD': 'BSCICP03AUM665S',
-                'CAD': 'BSCICP03CAM665S',
+                'USD': ['CSCICP03USM665S'],
+                'EUR': ['CSCICP03EZM665S'],
+                'GBP': ['CSCICP03GBM665S'],
+                'JPY': ['CSCICP03JPM665S'],
+                'CHF': ['CSCICP03CHM665S'],
+                'AUD': ['CSCICP03AUM665S'],
+                'CAD': ['CSCICP03CAM665S'],
             }
         }
         
@@ -141,14 +199,49 @@ class MacroDataFetcher:
                 
                 if value == '.' or value is None:
                     return None
-                    
+                
+                float_value = float(value)
+                
                 return {
-                    'value': float(value),
+                    'value': float_value,
                     'date': obs.get('date', ''),
                     'source': 'FRED'
                 }
         except Exception as e:
             print(f"[FRED Error] {series_id}: {e}")
+        return None
+    
+    def _validate_value(self, value: float, indicator: str) -> bool:
+        """Verifica che il valore sia sensato per l'indicatore."""
+        if value is None:
+            return False
+        
+        # Range sensati per ogni indicatore
+        ranges = {
+            'interest_rate': (-2, 25),      # -2% a 25%
+            'inflation': (-5, 30),          # -5% a 30%
+            'gdp_growth': (-15, 20),        # -15% a 20%
+            'unemployment': (0, 30),        # 0% a 30%
+            'business_confidence': (80, 120) # 80 a 120 (indice)
+        }
+        
+        min_val, max_val = ranges.get(indicator, (-1000, 1000))
+        return min_val <= value <= max_val
+    
+    def _fetch_fred_with_fallback(self, primary_code: str, fallback_codes: list, indicator: str) -> Optional[Dict]:
+        """Prova il codice primario, poi i fallback se il valore non è valido."""
+        # Prova codice primario
+        result = self._fetch_fred(primary_code)
+        if result and self._validate_value(result['value'], indicator):
+            return result
+        
+        # Prova fallback
+        for code in fallback_codes:
+            result = self._fetch_fred(code)
+            if result and self._validate_value(result['value'], indicator):
+                result['source'] = f"FRED (fallback: {code})"
+                return result
+        
         return None
     
     # =================================================================
@@ -509,62 +602,77 @@ class MacroDataFetcher:
         elif currency == 'CAD':
             result = self._fetch_boc_rate()
         
-        # Fallback a FRED
-        if result is None:
-            code = self.fred_codes['interest_rate'].get(currency)
-            if code:
-                result = self._fetch_fred(code)
-                if result:
-                    result['source'] = f"FRED ({result.get('source', '')})"
+        # Valida risultato API nativa
+        if result and self._validate_value(result['value'], 'interest_rate'):
+            return result
         
-        return result
+        # Fallback a FRED con codici alternativi
+        primary_code = self.fred_codes['interest_rate'].get(currency)
+        fallback_codes = self.fred_fallback_codes['interest_rate'].get(currency, [])
+        
+        if primary_code:
+            result = self._fetch_fred_with_fallback(primary_code, fallback_codes, 'interest_rate')
+            if result:
+                result['source'] = f"FRED"
+                return result
+        
+        return None
     
     def get_inflation(self, currency: str) -> Optional[Dict]:
         """Recupera inflazione con fallback a FRED."""
         result = None
         
-        # Prova API nativa
+        # Prova API nativa (Eurostat per EUR)
         if currency == 'EUR':
             result = self._fetch_eurostat_inflation()
-        # Per altri paesi, usa direttamente FRED (più affidabile per CPI)
+            if result and self._validate_value(result['value'], 'inflation'):
+                return result
         
-        # Fallback a FRED
-        if result is None:
-            code = self.fred_codes['inflation'].get(currency)
-            if code:
-                result = self._fetch_fred(code)
+        # Fallback a FRED con codici alternativi
+        primary_code = self.fred_codes['inflation'].get(currency)
+        fallback_codes = self.fred_fallback_codes['inflation'].get(currency, [])
+        
+        if primary_code:
+            result = self._fetch_fred_with_fallback(primary_code, fallback_codes, 'inflation')
         
         return result
     
     def get_gdp_growth(self, currency: str) -> Optional[Dict]:
         """Recupera crescita PIL con fallback a FRED."""
-        # PIL è tipicamente trimestrale, FRED ha buona copertura
-        code = self.fred_codes['gdp_growth'].get(currency)
-        if code:
-            return self._fetch_fred(code)
+        # PIL usa principalmente FRED (dati trimestrali più affidabili)
+        primary_code = self.fred_codes['gdp_growth'].get(currency)
+        fallback_codes = self.fred_fallback_codes['gdp_growth'].get(currency, [])
+        
+        if primary_code:
+            return self._fetch_fred_with_fallback(primary_code, fallback_codes, 'gdp_growth')
         return None
     
     def get_unemployment(self, currency: str) -> Optional[Dict]:
         """Recupera disoccupazione con fallback a FRED."""
         result = None
         
-        # Prova API nativa
+        # Prova API nativa (Eurostat per EUR)
         if currency == 'EUR':
             result = self._fetch_eurostat_unemployment()
+            if result and self._validate_value(result['value'], 'unemployment'):
+                return result
         
-        # Fallback a FRED
-        if result is None:
-            code = self.fred_codes['unemployment'].get(currency)
-            if code:
-                result = self._fetch_fred(code)
+        # Fallback a FRED con codici alternativi
+        primary_code = self.fred_codes['unemployment'].get(currency)
+        fallback_codes = self.fred_fallback_codes['unemployment'].get(currency, [])
+        
+        if primary_code:
+            result = self._fetch_fred_with_fallback(primary_code, fallback_codes, 'unemployment')
         
         return result
     
     def get_business_confidence(self, currency: str) -> Optional[Dict]:
         """Recupera BCI da FRED (fonte OECD)."""
-        code = self.fred_codes['business_confidence'].get(currency)
-        if code:
-            return self._fetch_fred(code)
+        primary_code = self.fred_codes['business_confidence'].get(currency)
+        fallback_codes = self.fred_fallback_codes['business_confidence'].get(currency, [])
+        
+        if primary_code:
+            return self._fetch_fred_with_fallback(primary_code, fallback_codes, 'business_confidence')
         return None
     
     # =================================================================
