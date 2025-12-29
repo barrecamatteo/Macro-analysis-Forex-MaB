@@ -114,29 +114,48 @@ SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi anal
 ### 4. ⭐⭐⭐ ASPETTATIVE SUI TASSI - REGOLA FONDAMENTALE ⭐⭐⭐
 Questa è la sezione PIÙ IMPORTANTE dell'analisi forex!
 
-**DEVI OBBLIGATORIAMENTE:**
-1. LEGGERE ATTENTAMENTE tutte le notizie nella sezione [RATE EXPECTATIONS] e [MONETARY POLICY COMPARISON]
-2. ESTRARRE DATI CONCRETI dalle fonti, come:
-   - "Fed: mercato prezza X tagli nel 2025" (con fonte)
-   - "ECB: analisti prevedono tassi al X% entro fine 2025" (con fonte)
-   - "BoJ: possibile rialzo a X% secondo Reuters/Bloomberg"
-   - "BoC: già tagliato da 5% a 3.25%, previsti altri X tagli"
-3. CITARE LE FONTI quando fai affermazioni sulle aspettative tassi
-4. Se le fonti sono contrastanti, riportalo!
-5. Se NON trovi informazioni su una banca centrale, scrivi "dati insufficienti" - NON INVENTARE!
+**DEVI OBBLIGATORIAMENTE per OGNI banca centrale (Fed, ECB, BoE, BoJ, SNB, RBA, BoC):**
+
+1. **PROSSIMO MEETING**: Trova e riporta la DATA del prossimo meeting (es: "Fed: FOMC 28-29 Gennaio 2026")
+
+2. **PROBABILITÀ DEL MERCATO**: Estrai le probabilità concrete dalle fonti:
+   - Esempio: "Fed: 87% hold, 13% cut da 25bp (fonte: Polymarket/CME FedWatch)"
+   - Esempio: "RBA: 30% probabilità hike a Febbraio (fonte: ASX/Reuters)"
+   - Se non trovi percentuali esatte, riporta il sentiment: "mercato prezza hold" o "analisti divisi"
+
+3. **STORICO RECENTE**: Quanti tagli/rialzi negli ultimi 6-12 mesi?
+   - Esempio: "BoC: 5 tagli nel 2024-2025, da 5.00% a 2.25%"
+   - Esempio: "BoJ: 2 rialzi nel 2024-2025, da 0% a 0.50%"
+
+4. **PROIEZIONE A 6-12 MESI**: Quanti tagli/rialzi previsti?
+   - Esempio: "Fed: mercato prezza 2 tagli nel 2026 (Goldman Sachs)"
+   - Esempio: "ECB: previsto hold per tutto il 2026 (ING, Vanguard)"
+
+5. **STANCE DELLA BC**: Hawkish/Neutrale/Dovish con motivazione
+   - Esempio: "Fed: Hawkish - Powell ha indicato cautela sui tagli futuri"
+   - Esempio: "RBA: Potenzialmente Hawkish - inflazione sopra target al 3.8%"
+
+**FORMATO OUTPUT RICHIESTO per rates_future:**
+Nel campo "comment" di rates_future, USA QUESTO FORMATO STRUTTURATO:
+"[PROSSIMO MEETING: data] | [MERCATO: X% hold/cut/hike] | [STORICO: N tagli/rialzi in X mesi] | [OUTLOOK: N tagli/rialzi previsti in Y] | [STANCE: Hawkish/Neutrale/Dovish] | [FONTE: nome fonte]"
+
+**ESEMPIO CONCRETO:**
+rates_future.comment = "Fed: FOMC 29 Gen 2026 | Mercato: 87% hold, 13% cut | Storico: 3 tagli nel 2024-2025 (da 5.50% a 3.50%) | Outlook: 2 tagli previsti nel 2026 | Stance: Hawkish-Neutrale | Fonte: CME FedWatch, Goldman Sachs"
 
 **NON DEVI MAI:**
 - Inventare aspettative sui tassi senza fonte
 - Dire "BoE più cauta" o "BoC aggressivo" senza dati a supporto
-- Usare frasi generiche come "il mercato si aspetta tagli" senza specificare QUANTI e QUANDO
+- Usare frasi generiche come "il mercato si aspetta tagli" senza specificare QUANTI, QUANDO e FONTE
+- Omettere la data del prossimo meeting se disponibile nelle fonti
 
 **ESEMPIO DI ANALISI CORRETTA:**
-"Aspettative Tassi GBP +2: Secondo Reuters (dic 2024), la BoE ha tagliato solo 2 volte nel 2024 vs 5 tagli della BoC. 
-Il mercato prezza altri 2-3 tagli BoE nel 2025 vs BoC già al 3.25% con ulteriori tagli previsti. 
-Divergenza hawkish BoE vs dovish BoC supporta GBP."
+"Aspettative Tassi GBP vs CAD: 
+GBP - BoE MPC 6 Feb 2026 | 60% hold, 40% cut | Storico: 2 tagli nel 2024 | Outlook: 2-3 tagli nel 2026 | Stance: Neutrale-Dovish | Reuters
+CAD - BoC 28 Gen 2026 | 80% hold | Storico: 5 tagli nel 2024-2025 (5.00%→2.25%) | Outlook: hold tutto 2026 | Stance: Neutrale | TD Bank
+→ Score GBP +2: BoE ha ancora spazio per tagliare, BoC ha già tagliato molto e ora in pausa"
 
 **ESEMPIO DI ANALISI SBAGLIATA:**
-"Aspettative Tassi GBP +2: BoE meno aggressiva nei tagli vs BoC" ← TROPPO GENERICO! Mancano numeri e fonti!
+"Aspettative Tassi GBP +2: BoE meno aggressiva nei tagli vs BoC" ← TROPPO GENERICO! Mancano date, probabilità, numeri e fonti!
 
 ### 5. PUNTEGGI PER COPPIA
 - I punteggi devono essere calcolati PER OGNI COPPIA SPECIFICA
@@ -188,6 +207,18 @@ Divergenza hawkish BoE vs dovish BoC supporta GBP."
         },
         ... (per tutte le 7 valute)
     },
+    "rate_outlook": {
+        "USD": {
+            "current_rate": "X.XX%",
+            "next_meeting": "YYYY-MM-DD",
+            "market_probability": "X% hold | Y% cut | Z% hike",
+            "recent_moves": "N tagli/rialzi negli ultimi X mesi (da X% a Y%)",
+            "outlook_12m": "N tagli/rialzi previsti",
+            "stance": "Hawkish|Neutrale|Dovish",
+            "source": "nome fonte principale"
+        },
+        ... (per tutte le 7 valute: USD, EUR, GBP, JPY, CHF, AUD, CAD)
+    },
     "pairs_analysis": [
         {
             "pair": "USD/JPY",
@@ -195,7 +226,7 @@ Divergenza hawkish BoE vs dovish BoC supporta GBP."
             "currency_b": "JPY",
             "scores_a": {
                 "rates_now": {"score": -1|0|+1, "comment": "confronto tassi attuali"},
-                "rates_future": {"score": -2|-1|0|+1|+2, "comment": "⭐⭐ PESO DOPPIO! Fed taglia vs BoJ alza"},
+                "rates_future": {"score": -2|-1|0|+1|+2, "comment": "FORMATO: [MEETING: data] | [MERCATO: prob%] | [STORICO: N moves] | [OUTLOOK: previsione] | [STANCE] | [FONTE]"},
                 "inflation": {"score": -1|0|+1, "comment": "⚠️ Inflazione ALTA = POSITIVO!"},
                 "growth": {"score": -1|0|+1, "comment": "confronto crescita"},
                 "risk_sentiment": {"score": -1|0|+1, "comment": "contesto risk on/off"},
@@ -470,48 +501,59 @@ def search_qualitative_data() -> str:
     all_results.append(f"[RATE EXPECTATIONS - SEZIONE CRUCIALE PER L'ANALISI]")
     all_results.append(f"{'='*60}")
     
+    # Query per cercare informazioni su MEETING e PROBABILITÀ per ogni BC
+    # Struttura: ogni query è progettata per trovare info sul prossimo meeting,
+    # probabilità di cut/hike/hold, e previsioni degli analisti
+    
     rate_expectations_queries = {
         "USD": [
-            f"Fed interest rate forecast {current_year} {next_year} how many cuts",
-            f"FOMC dot plot rate projections {current_year}",
-            "Fed funds futures rate expectations",
-            "Federal Reserve rate path outlook Reuters Bloomberg",
+            f"Fed FOMC next meeting {current_year} rate decision probability",
+            f"Federal Reserve rate probability cut hold hike percent {current_year}",
+            f"CME FedWatch tool Fed rate expectations {current_year}",
+            f"Fed interest rate forecast {current_year} {next_year} how many cuts analysts",
+            "FOMC meeting schedule rate decision outlook Reuters Bloomberg",
         ],
         "EUR": [
-            f"ECB interest rate forecast {current_year} {next_year} how many cuts",
-            "ECB rate cuts expectations Lagarde",
-            f"Eurozone rates outlook {current_year} Reuters",
-            "ECB deposit rate forecast analysts",
+            f"ECB next meeting {current_year} rate decision probability",
+            f"ECB interest rate cut hold hike probability percent {current_year}",
+            f"ECB rate forecast {current_year} {next_year} how many cuts Lagarde",
+            "ECB governing council meeting schedule rate outlook Reuters",
+            f"Eurozone deposit rate expectations analysts {current_year}",
         ],
         "GBP": [
-            f"Bank of England rate forecast {current_year} {next_year} how many cuts",
-            "BoE MPC rate expectations UK",
-            "UK interest rates outlook Reuters Bloomberg",
-            "BoE rate path forecast analysts",
+            f"Bank of England MPC next meeting {current_year} rate decision",
+            f"BoE rate cut probability percent {current_year}",
+            f"UK interest rate forecast {current_year} {next_year} how many cuts",
+            "BoE MPC meeting schedule rate outlook Reuters Bloomberg",
+            f"Bank of England rate expectations analysts {current_year}",
         ],
         "JPY": [
-            f"Bank of Japan rate hike forecast {current_year} {next_year}",
-            "BoJ interest rate expectations Ueda",
-            "Japan rates outlook normalization",
-            "BoJ policy rate forecast Reuters",
+            f"Bank of Japan BOJ next meeting {current_year} rate decision",
+            f"BoJ rate hike probability percent {current_year}",
+            f"Japan interest rate forecast {current_year} {next_year} Ueda",
+            "BoJ policy board meeting schedule rate outlook Reuters",
+            f"Bank of Japan rate expectations analysts {current_year}",
         ],
         "CHF": [
-            f"SNB interest rate forecast {current_year} {next_year}",
-            "Swiss National Bank rate cuts expectations",
-            "Switzerland rates outlook",
-            "SNB policy rate forecast",
+            f"SNB Swiss National Bank next meeting {current_year} rate decision",
+            f"SNB rate cut probability percent {current_year}",
+            f"Switzerland interest rate forecast {current_year} {next_year}",
+            "SNB quarterly assessment rate outlook",
+            f"Swiss National Bank rate expectations analysts {current_year}",
         ],
         "AUD": [
-            f"RBA interest rate forecast {current_year} {next_year} how many cuts",
-            "Reserve Bank Australia rate expectations",
-            "Australia rates outlook Bullock",
-            "RBA cash rate forecast analysts",
+            f"RBA Reserve Bank Australia next meeting {current_year} rate decision",
+            f"RBA rate cut hike probability percent {current_year}",
+            f"Australia interest rate forecast {current_year} {next_year} Bullock",
+            "RBA board meeting schedule rate outlook Reuters",
+            f"ASX RBA rate tracker expectations {current_year}",
         ],
         "CAD": [
-            f"Bank of Canada rate forecast {current_year} {next_year} how many cuts",
-            "BoC interest rate expectations Macklem",
-            "Canada rates outlook Reuters Bloomberg",
-            "BoC overnight rate forecast analysts",
+            f"Bank of Canada BoC next meeting {current_year} rate decision",
+            f"BoC rate cut probability percent {current_year}",
+            f"Canada interest rate forecast {current_year} {next_year} Macklem",
+            "BoC announcement schedule rate outlook Reuters Bloomberg",
+            f"Bank of Canada rate expectations analysts {current_year}",
         ],
     }
     
@@ -526,6 +568,33 @@ def search_qualitative_data() -> str:
                     all_results.append(f"[{currency}-RATES] {title}: {snippet[:500]}")
             except:
                 pass
+    
+    # =========================================================================
+    # SEZIONE 1B: CALENDARI MEETING BANCHE CENTRALI
+    # Per trovare le date esatte dei prossimi meeting
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[CENTRAL BANK MEETING SCHEDULES]")
+    all_results.append(f"{'='*60}")
+    
+    meeting_calendar_queries = [
+        f"FOMC meeting schedule dates {current_year} {next_year}",
+        f"ECB governing council meeting dates {current_year} {next_year}",
+        f"Bank of England MPC meeting dates {current_year} {next_year}",
+        f"Bank of Japan BOJ policy meeting dates {current_year} {next_year}",
+        f"RBA Reserve Bank Australia board meeting dates {current_year} {next_year}",
+        f"Bank of Canada BoC announcement dates {current_year} {next_year}",
+        f"SNB Swiss National Bank quarterly assessment dates {current_year} {next_year}",
+        f"central banks meeting calendar {current_year} {next_year}",
+    ]
+    
+    for query in meeting_calendar_queries:
+        try:
+            results = DDGS().text(query, max_results=2)
+            for r in results:
+                all_results.append(f"[CALENDAR] {r['title']}: {r['body'][:400]}")
+        except:
+            pass
     
     # =========================================================================
     # SEZIONE 2: CONFRONTO DIRETTO POLITICHE MONETARIE
@@ -795,6 +864,33 @@ def display_matrix(analysis: dict):
             st.dataframe(df_indicators, use_container_width=True, hide_index=True)
         else:
             st.info("Dati numerici non disponibili per questa analisi")
+    
+    # ====== NUOVA SEZIONE: PROIEZIONI TASSI DI INTERESSE ======
+    rate_outlook = analysis.get("rate_outlook", {})
+    if rate_outlook:
+        with st.expander("🏦 Proiezioni Tassi Banche Centrali", expanded=True):
+            st.caption("⭐ Sezione cruciale per l'analisi forex - Dati estratti dalle ricerche web")
+            
+            # Crea tabella rate outlook
+            rate_table = []
+            for curr, outlook in rate_outlook.items():
+                if isinstance(outlook, dict):
+                    rate_table.append({
+                        "BC": curr,
+                        "Tasso": outlook.get('current_rate', 'N/A'),
+                        "Prossimo Meeting": outlook.get('next_meeting', 'N/A'),
+                        "Probabilità Mercato": outlook.get('market_probability', 'N/A'),
+                        "Mosse Recenti": outlook.get('recent_moves', 'N/A'),
+                        "Outlook 12M": outlook.get('outlook_12m', 'N/A'),
+                        "Stance": outlook.get('stance', 'N/A'),
+                        "Fonte": outlook.get('source', 'N/A'),
+                    })
+            
+            if rate_table:
+                df_rates = pd.DataFrame(rate_table)
+                st.dataframe(df_rates, use_container_width=True, hide_index=True)
+            else:
+                st.info("Formato rate_outlook non valido")
     
     st.markdown("---")
     
