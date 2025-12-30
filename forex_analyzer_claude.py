@@ -483,6 +483,102 @@ def fetch_all_currencies_data() -> dict:
         }
 
 
+def fetch_additional_resources(urls: list) -> str:
+    """
+    Fetcha e estrae il contenuto testuale da una lista di URL.
+    Usato per integrare risorse aggiuntive fornite dall'utente.
+    
+    Args:
+        urls: Lista di URL da fetchare
+        
+    Returns:
+        Stringa formattata con il contenuto estratto da ogni URL
+    """
+    if not urls:
+        return ""
+    
+    results = []
+    results.append("\n" + "="*70)
+    results.append("📎 RISORSE AGGIUNTIVE FORNITE DALL'UTENTE - ANALIZZA CON ATTENZIONE")
+    results.append("="*70)
+    results.append("⚠️ Queste fonti sono state inserite manualmente dall'utente.")
+    results.append("   Integrare con le altre informazioni, NON sostituire l'analisi standard.\n")
+    
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+    })
+    
+    for i, url in enumerate(urls[:10], 1):  # Max 10 URL
+        url = url.strip()
+        if not url or not url.startswith(('http://', 'https://')):
+            continue
+            
+        try:
+            response = session.get(url, timeout=15, allow_redirects=True)
+            response.raise_for_status()
+            
+            # Estrai il testo dalla pagina
+            html = response.text
+            
+            # Rimuovi script, style, nav, footer, aside
+            import re
+            # Rimuovi tag problematici
+            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<nav[^>]*>.*?</nav>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<footer[^>]*>.*?</footer>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<aside[^>]*>.*?</aside>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<header[^>]*>.*?</header>', '', html, flags=re.DOTALL | re.IGNORECASE)
+            html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+            
+            # Estrai titolo
+            title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
+            title = title_match.group(1).strip() if title_match else "Titolo non disponibile"
+            title = re.sub(r'<[^>]+>', '', title)  # Rimuovi tag HTML dal titolo
+            
+            # Rimuovi tutti i tag HTML
+            text = re.sub(r'<[^>]+>', ' ', html)
+            
+            # Pulisci il testo
+            text = re.sub(r'\s+', ' ', text)  # Normalizza spazi
+            text = re.sub(r'&nbsp;', ' ', text)
+            text = re.sub(r'&amp;', '&', text)
+            text = re.sub(r'&lt;', '<', text)
+            text = re.sub(r'&gt;', '>', text)
+            text = re.sub(r'&quot;', '"', text)
+            text = re.sub(r'&#\d+;', '', text)  # Rimuovi entità numeriche
+            
+            # Tronca a 4000 caratteri per URL
+            text = text.strip()[:4000]
+            
+            if len(text) > 100:  # Solo se c'è contenuto significativo
+                results.append(f"\n[FONTE {i}: {url}]")
+                results.append(f"📰 Titolo: {title[:200]}")
+                results.append(f"📄 Contenuto:")
+                results.append(text)
+                results.append("-" * 50)
+            else:
+                results.append(f"\n[FONTE {i}: {url}]")
+                results.append(f"⚠️ Contenuto non estraibile (pagina dinamica o protetta)")
+                
+        except requests.exceptions.Timeout:
+            results.append(f"\n[FONTE {i}: {url}]")
+            results.append(f"⚠️ Timeout - la pagina non ha risposto in 15 secondi")
+        except requests.exceptions.RequestException as e:
+            results.append(f"\n[FONTE {i}: {url}]")
+            results.append(f"⚠️ Errore nel recupero: {str(e)[:100]}")
+        except Exception as e:
+            results.append(f"\n[FONTE {i}: {url}]")
+            results.append(f"⚠️ Errore: {str(e)[:100]}")
+    
+    results.append("\n" + "="*70 + "\n")
+    
+    return "\n".join(results)
+
+
 def search_qualitative_data() -> str:
     """Cerca notizie qualitative, outlook e ASPETTATIVE TASSI per ogni valuta."""
     all_results = []
@@ -492,6 +588,35 @@ def search_qualitative_data() -> str:
     next_year = current_year + 1
     
     all_results.append(f"[DATE] Data odierna: {today.strftime('%d/%m/%Y')}")
+    
+    # =========================================================================
+    # SEZIONE 0: FOREX FACTORY BREAKING NEWS
+    # Le ultime news market-moving dal principale sito di news forex
+    # =========================================================================
+    all_results.append(f"\n{'='*60}")
+    all_results.append(f"[FOREX FACTORY - BREAKING NEWS]")
+    all_results.append(f"{'='*60}")
+    all_results.append("⚠️ Queste sono le ultime notizie market-moving da Forex Factory")
+    
+    # Query specifiche per Forex Factory news
+    forex_factory_queries = [
+        "site:forexfactory.com/news forex breaking news today",
+        "site:forexfactory.com USD EUR GBP JPY news",
+        "site:forexfactory.com central bank rate decision",
+        "site:forexfactory.com forex market news this week",
+    ]
+    
+    for query in forex_factory_queries:
+        try:
+            results = DDGS().text(query, max_results=5)
+            for r in results:
+                title = r.get('title', '')
+                body = r.get('body', '')
+                # Filtra solo news rilevanti (escludi analisi tecniche generiche)
+                if any(kw in body.lower() for kw in ['dollar', 'euro', 'yen', 'pound', 'fed', 'ecb', 'boe', 'boj', 'rate', 'inflation', 'gdp', 'employment', 'tariff', 'trade']):
+                    all_results.append(f"[FF-NEWS] {title}: {body[:500]}")
+        except:
+            pass
     
     # =========================================================================
     # SEZIONE 1: ASPETTATIVE TASSI - LA PIÙ IMPORTANTE!
@@ -697,8 +822,15 @@ def search_all_currencies_data() -> tuple[dict, str]:
     return te_data, qualitative_data
 
 
-def analyze_all_pairs(api_key: str, te_data: dict, search_text: str) -> dict:
-    """Analizza TUTTE le coppie forex in una sola chiamata API"""
+def analyze_all_pairs(api_key: str, te_data: dict, search_text: str, additional_resources: str = "") -> dict:
+    """Analizza TUTTE le coppie forex in una sola chiamata API
+    
+    Args:
+        api_key: Chiave API Anthropic
+        te_data: Dati macroeconomici
+        search_text: Risultati delle ricerche web automatiche
+        additional_resources: Contenuto estratto da URL forniti dall'utente (opzionale)
+    """
     
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -713,6 +845,15 @@ def analyze_all_pairs(api_key: str, te_data: dict, search_text: str) -> dict:
     ])
     
     today = datetime.now()
+    
+    # Sezione risorse aggiuntive (solo se presenti)
+    additional_section = ""
+    if additional_resources.strip():
+        additional_section = f"""
+---
+
+{additional_resources}
+"""
     
     user_prompt = f"""
 Analizza TUTTE queste coppie forex: {pairs_list}
@@ -731,7 +872,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 ## 📰 NOTIZIE, OUTLOOK, ASPETTATIVE E CALENDARIO ECONOMICO:
 {search_text}
-
+{additional_section}
 ---
 
 ## ⭐ ISTRUZIONI CRITICHE:
@@ -747,6 +888,9 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 4. **events_calendar** = Lascia un array VUOTO []. Gli eventi verranno mostrati separatamente.
 
 5. Ogni **summary** deve spiegare PERCHÉ quel bias basandosi sulle notizie
+
+6. **RISORSE AGGIUNTIVE**: Se presenti sopra, considerale con PRIORITÀ ma INTEGRA con tutti gli altri dati.
+   NON basare l'analisi SOLO sulle risorse aggiuntive!
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -1267,6 +1411,28 @@ with st.sidebar:
     
     st.markdown("---")
     
+    # ====== NUOVA SEZIONE: RISORSE AGGIUNTIVE ======
+    st.markdown("### 📎 Risorse Aggiuntive")
+    st.caption("Inserisci link a fonti extra (comunicati stampa, news, report)")
+    
+    additional_urls = st.text_area(
+        "URL (uno per riga)",
+        height=120,
+        placeholder="https://federalreserve.gov/newsevents/...\nhttps://ecb.europa.eu/press/...\nhttps://reuters.com/markets/...",
+        help="Max 10 URL. Queste fonti verranno analizzate INSIEME ai dati standard, non li sostituiscono.",
+        key="additional_urls"
+    )
+    
+    # Conta URL validi
+    if additional_urls.strip():
+        url_list = [u.strip() for u in additional_urls.strip().split('\n') if u.strip().startswith(('http://', 'https://'))]
+        if url_list:
+            st.info(f"📌 {len(url_list)} URL verranno analizzati")
+            if len(url_list) > 10:
+                st.warning("⚠️ Max 10 URL - verranno usati solo i primi 10")
+    
+    st.markdown("---")
+    
     # Pulsante nuova analisi
     analyze_btn = st.button(
         "🔄 Nuova Analisi" if enable_claude_analysis else "🔄 Test Recupero Dati",
@@ -1293,6 +1459,16 @@ if analyze_btn:
     
     progress.progress(5, text="📊 FASE 1: Scaricamento dati da global-rates.com + API Ninjas...")
     te_data, search_text = search_all_currencies_data()
+    
+    # ====== FASE 1B: RISORSE AGGIUNTIVE (se presenti) ======
+    additional_content = ""
+    if additional_urls and additional_urls.strip():
+        url_list = [u.strip() for u in additional_urls.strip().split('\n') if u.strip().startswith(('http://', 'https://'))]
+        if url_list:
+            progress.progress(20, text=f"📎 FASE 1B: Recupero {len(url_list)} risorse aggiuntive...")
+            additional_content = fetch_additional_resources(url_list)
+            if additional_content:
+                st.info(f"✅ Recuperate {len(url_list)} risorse aggiuntive")
     
     # Mostra i dati recuperati
     st.markdown("---")
@@ -1325,11 +1501,14 @@ if analyze_btn:
     # Se analisi Claude abilitata, procedi
     if enable_claude_analysis:
         progress.progress(50, text="🧠 FASE 2: Claude sta analizzando le coppie forex...")
-        analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text)
+        analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text, additional_content)
         
         if "error" not in analysis:
             analysis["model_used"] = "Claude Sonnet 4"
             analysis["data_source"] = "API Ufficiali Banche Centrali"
+            # Salva info sulle risorse aggiuntive usate
+            if additional_content:
+                analysis["additional_resources_used"] = True
             progress.progress(80, text="💾 Salvataggio analisi...")
             if save_analysis(analysis):
                 st.session_state['current_analysis'] = analysis
