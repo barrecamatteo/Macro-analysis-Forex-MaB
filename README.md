@@ -42,6 +42,16 @@ Per ogni BC (Fed, ECB, BoE, BoJ, SNB, RBA, BoC):
 - Query dinamiche per ogni banca centrale
 - Aggiornate automaticamente con anno corrente
 - Fonti: Reuters, Bloomberg, CME, ASX, ING, Goldman Sachs, etc.
+- **Forex Factory Breaking News** (NUOVO!) - News market-moving automatiche
+
+### 📎 Risorse Aggiuntive
+Inserisci manualmente link a fonti extra che Claude analizzerà:
+- **Comunicati stampa BC** (Fed statements, ECB press releases)
+- **Breaking news** su Reuters, Bloomberg
+- **Report analisti** (Goldman Sachs, JPMorgan, etc.)
+- **Dati economici** appena rilasciati (NFP, CPI)
+
+> ⚠️ Le risorse aggiuntive **integrano** l'analisi, non la sostituiscono!
 
 ### 📊 Analisi per Coppia
 Per ognuna delle 19 coppie:
@@ -146,6 +156,33 @@ streamlit run forex_analyzer_claude.py
 
 ---
 
+## 📎 Come Usare le Risorse Aggiuntive
+
+Nella sidebar trovi una sezione "Risorse Aggiuntive" dove puoi incollare URL:
+
+```
+https://federalreserve.gov/newsevents/pressreleases/monetary20251210a.htm
+https://ecb.europa.eu/press/pr/date/2025/html/ecb.mp251218.en.html
+https://reuters.com/markets/rates-bonds/...
+```
+
+**Quando usarle:**
+| Scenario | Esempio URL |
+|----------|-------------|
+| Post-FOMC | Link al comunicato stampa Fed |
+| Post-ECB | Link alla conferenza stampa Lagarde |
+| Breaking News | Articolo Reuters/Bloomberg su evento importante |
+| Report Analisti | Research note da banca d'investimento |
+| Dati Economici | Link a release NFP/CPI su BLS/Eurostat |
+
+**Note importanti:**
+- Max **10 URL** per analisi
+- Max **4000 caratteri** estratti per URL
+- Siti con **paywall** (WSJ, FT) potrebbero non funzionare
+- Le risorse **integrano** i dati standard, non li sostituiscono
+
+---
+
 ## 🔄 Frequenza Aggiornamento Consigliata
 
 | Evento | Quando aggiornare |
@@ -219,6 +256,17 @@ Le query di ricerca sono in `search_qualitative_data()` nel file `forex_analyzer
 ---
 
 ## 📝 Changelog
+
+### v2.3.0 (Dicembre 2025)
+- 📰 **Forex Factory News**: Ricerca automatica breaking news da forexfactory.com
+- 🔍 **Query site-specific**: 4 query dedicate per news market-moving
+- 🎯 **Filtro smart**: Solo news rilevanti (USD, EUR, Fed, ECB, tariff, etc.)
+
+### v2.2.0 (Dicembre 2025)
+- ✨ **Risorse Aggiuntive**: Inserisci URL custom (comunicati BC, news, report)
+- 📎 **Fetch intelligente**: Estrae testo da pagine web automaticamente
+- 🔗 **Max 10 URL**: Con troncamento a 4000 char per URL
+- ⚡ **Integrazione smart**: Le fonti custom si AGGIUNGONO ai dati standard
 
 ### v2.1.0 (Dicembre 2025)
 - ✨ **Nuova sezione rate_outlook**: Proiezioni tassi per ogni BC
