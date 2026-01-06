@@ -1270,7 +1270,10 @@ def display_analysis_matrix(analysis: dict):
             "Sintesi": st.column_config.TextColumn("Sintesi", width=None),  # Prende tutto lo spazio rimanente
         }
         
-        # Usa dataframe con selezione singola riga (senza altezza fissa)
+        # Altezza calcolata: 35px per riga × numero righe + header
+        table_height = (len(rows) * 35) + 38
+        
+        # Usa dataframe con selezione singola riga
         selection = st.dataframe(
             df,
             use_container_width=True,
@@ -1278,6 +1281,7 @@ def display_analysis_matrix(analysis: dict):
             on_select="rerun",
             selection_mode="single-row",
             column_config=column_config,
+            height=table_height,
             key="pair_table_selection"
         )
         
