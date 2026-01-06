@@ -1250,7 +1250,7 @@ def display_analysis_matrix(analysis: dict):
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                "Sintesi": summary[:100] + "..." if len(summary) > 100 else summary
+                "Sintesi": summary
             })
         
         # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
@@ -1262,9 +1262,38 @@ def display_analysis_matrix(analysis: dict):
         
         df = pd.DataFrame(rows)
         
-        # Calcola altezza per mostrare tutte le righe senza scroll
-        # Circa 35px per riga + 40px header
-        table_height = len(rows) * 35 + 40
+        # CSS per aumentare l'altezza delle righe e permettere text wrap
+        st.markdown("""
+        <style>
+        .stDataFrame [data-testid="stDataFrameResizable"] {
+            min-height: auto !important;
+        }
+        .stDataFrame td {
+            white-space: pre-wrap !important;
+            word-wrap: break-word !important;
+            min-height: 80px !important;
+            vertical-align: top !important;
+            padding: 10px !important;
+            line-height: 1.4 !important;
+        }
+        .stDataFrame tr {
+            min-height: 80px !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Calcola altezza per mostrare tutte le righe
+        # Righe più alte (80px) per mostrare più testo nella sintesi
+        row_height = 80
+        table_height = len(rows) * row_height + 50
+        
+        # Configura colonne per mostrare testo completo
+        column_config = {
+            "Coppia": st.column_config.TextColumn("Coppia", width="small"),
+            "Bias": st.column_config.TextColumn("Bias", width="medium"),
+            "Diff": st.column_config.NumberColumn("Diff", width="small"),
+            "Sintesi": st.column_config.TextColumn("Sintesi", width="large", help="Clicca sulla riga per vedere il dettaglio completo"),
+        }
         
         # Usa dataframe con selezione singola riga
         selection = st.dataframe(
@@ -1274,6 +1303,7 @@ def display_analysis_matrix(analysis: dict):
             on_select="rerun",
             selection_mode="single-row",
             height=table_height,
+            column_config=column_config,
             key="pair_table_selection"
         )
         
