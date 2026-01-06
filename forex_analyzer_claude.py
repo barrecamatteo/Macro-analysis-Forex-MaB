@@ -1262,12 +1262,12 @@ def display_analysis_matrix(analysis: dict):
         
         df = pd.DataFrame(rows)
         
-        # Configura colonne
+        # Configura colonne (larghezze ottimizzate)
         column_config = {
-            "Coppia": st.column_config.TextColumn("Coppia", width="small"),
-            "Bias": st.column_config.TextColumn("Bias", width="medium"),
-            "Diff": st.column_config.NumberColumn("Diff", width="small"),
-            "Sintesi": st.column_config.TextColumn("Sintesi", width="large"),
+            "Coppia": st.column_config.TextColumn("Coppia", width=85),
+            "Bias": st.column_config.TextColumn("Bias", width=120),
+            "Diff": st.column_config.NumberColumn("Diff", width=50),
+            "Sintesi": st.column_config.TextColumn("Sintesi", width=None),  # Prende tutto lo spazio rimanente
         }
         
         # Usa dataframe con selezione singola riga (senza altezza fissa)
