@@ -7,6 +7,8 @@ import pandas as pd
 import os
 from pathlib import Path
 import requests
+import hashlib
+import re
 
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
@@ -73,206 +75,22 @@ API_NINJAS_ENABLED = API_NINJAS_KEY is not None
 DATA_FOLDER = Path("data")
 DATA_FOLDER.mkdir(exist_ok=True)
 
-# --- LISTA VALUTE ---
-CURRENCIES = {
-    "EUR": {"name": "Euro", "central_bank": "ECB", "type": "semi-cyclical"},
-    "USD": {"name": "US Dollar", "central_bank": "Federal Reserve", "type": "safe-haven"},
-    "GBP": {"name": "British Pound", "central_bank": "Bank of England", "type": "cyclical"},
-    "JPY": {"name": "Japanese Yen", "central_bank": "Bank of Japan", "type": "safe-haven"},
-    "CHF": {"name": "Swiss Franc", "central_bank": "SNB", "type": "safe-haven"},
-    "AUD": {"name": "Australian Dollar", "central_bank": "RBA", "type": "commodity/cyclical"},
-    "CAD": {"name": "Canadian Dollar", "central_bank": "Bank of Canada", "type": "commodity/cyclical"},
-}
 
-# --- COPPIE FOREX PREDEFINITE ---
-FOREX_PAIRS = [
-    "USD/JPY", "GBP/JPY", "AUD/JPY", "EUR/JPY", "CAD/JPY",
-    "AUD/USD", "AUD/CAD", "GBP/AUD", "EUR/AUD", "EUR/CAD",
-    "GBP/CAD", "USD/CHF", "EUR/CHF", "GBP/CHF", "CAD/CHF",
-    "AUD/CHF", "EUR/USD", "EUR/GBP", "GBP/USD",
-]
+# ============================================================================
+# SISTEMA AUTENTICAZIONE SUPABASE
+# ============================================================================
 
-# --- SYSTEM PROMPT PER ANALISI GLOBALE ---
-SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare TUTTE le coppie forex fornite.
-
-## ⚠️ REGOLE CRITICHE:
-
-### 1. LINGUA: TUTTO IN ITALIANO
-- Tutti i commenti, sintesi, driver, eventi DEVONO essere in ITALIANO
-- Mai usare inglese
-
-### 2. DATA ODIERNA
-- La DATA ODIERNA ti viene fornita nel prompt - USALA come riferimento!
-- L'analisi DEVE essere datata con la data odierna fornita
-- Gli EVENTI da monitorare devono essere FUTURI (entro i prossimi 30 giorni)
-
-### 3. DATI NUMERICI + CONTESTO QUALITATIVO
-- I DATI NUMERICI ti vengono forniti da fonti ufficiali (global-rates.com/ABS/API Ninjas)
-- Le NOTIZIE e OUTLOOK ti vengono fornite dalle ricerche web
-- USA ENTRAMBI per l'analisi! I numeri da soli non bastano!
-
-### 4. ⭐⭐⭐ ASPETTATIVE SUI TASSI - REGOLA FONDAMENTALE ⭐⭐⭐
-Questa è la sezione PIÙ IMPORTANTE dell'analisi forex!
-
-**DEVI OBBLIGATORIAMENTE per OGNI banca centrale (Fed, ECB, BoE, BoJ, SNB, RBA, BoC):**
-
-1. **PROSSIMO MEETING**: Trova e riporta la DATA del prossimo meeting (es: "Fed: FOMC 28-29 Gennaio 2026")
-
-2. **PROBABILITÀ DEL MERCATO**: Estrai le probabilità concrete dalle fonti:
-   - Esempio: "Fed: 87% hold, 13% cut da 25bp (fonte: Polymarket/CME FedWatch)"
-   - Esempio: "RBA: 30% probabilità hike a Febbraio (fonte: ASX/Reuters)"
-   - Se non trovi percentuali esatte, riporta il sentiment: "mercato prezza hold" o "analisti divisi"
-
-3. **STORICO RECENTE**: Quanti tagli/rialzi negli ultimi 6-12 mesi?
-   - Esempio: "BoC: 5 tagli nel 2024-2025, da 5.00% a 2.25%"
-   - Esempio: "BoJ: 2 rialzi nel 2024-2025, da 0% a 0.50%"
-
-4. **PROIEZIONE A 6-12 MESI**: Quanti tagli/rialzi previsti?
-   - Esempio: "Fed: mercato prezza 2 tagli nel 2026 (Goldman Sachs)"
-   - Esempio: "ECB: previsto hold per tutto il 2026 (ING, Vanguard)"
-
-5. **STANCE DELLA BC**: Hawkish/Neutrale/Dovish con motivazione
-   - Esempio: "Fed: Hawkish - Powell ha indicato cautela sui tagli futuri"
-   - Esempio: "RBA: Potenzialmente Hawkish - inflazione sopra target al 3.8%"
-
-**FORMATO OUTPUT RICHIESTO per rates_future:**
-Nel campo "comment" di rates_future, USA QUESTO FORMATO STRUTTURATO:
-"[PROSSIMO MEETING: data] | [MERCATO: X% hold/cut/hike] | [STORICO: N tagli/rialzi in X mesi] | [OUTLOOK: N tagli/rialzi previsti in Y] | [STANCE: Hawkish/Neutrale/Dovish] | [FONTE: nome fonte]"
-
-**ESEMPIO CONCRETO:**
-rates_future.comment = "Fed: FOMC 29 Gen 2026 | Mercato: 87% hold, 13% cut | Storico: 3 tagli nel 2024-2025 (da 5.50% a 3.50%) | Outlook: 2 tagli previsti nel 2026 | Stance: Hawkish-Neutrale | Fonte: CME FedWatch, Goldman Sachs"
-
-**NON DEVI MAI:**
-- Inventare aspettative sui tassi senza fonte
-- Dire "BoE più cauta" o "BoC aggressivo" senza dati a supporto
-- Usare frasi generiche come "il mercato si aspetta tagli" senza specificare QUANTI, QUANDO e FONTE
-- Omettere la data del prossimo meeting se disponibile nelle fonti
-
-**ESEMPIO DI ANALISI CORRETTA:**
-"Aspettative Tassi GBP vs CAD: 
-GBP - BoE MPC 6 Feb 2026 | 60% hold, 40% cut | Storico: 2 tagli nel 2024 | Outlook: 2-3 tagli nel 2026 | Stance: Neutrale-Dovish | Reuters
-CAD - BoC 28 Gen 2026 | 80% hold | Storico: 5 tagli nel 2024-2025 (5.00%→2.25%) | Outlook: hold tutto 2026 | Stance: Neutrale | TD Bank
-→ Score GBP +2: BoE ha ancora spazio per tagliare, BoC ha già tagliato molto e ora in pausa"
-
-**ESEMPIO DI ANALISI SBAGLIATA:**
-"Aspettative Tassi GBP +2: BoE meno aggressiva nei tagli vs BoC" ← TROPPO GENERICO! Mancano date, probabilità, numeri e fonti!
-
-### 5. PUNTEGGI PER COPPIA
-- I punteggi devono essere calcolati PER OGNI COPPIA SPECIFICA
-- Lo stesso USD può avere punteggi DIVERSI in USD/JPY vs USD/EUR
-
-## INDICATORI DA CONSIDERARE:
-- **Interest Rate**: Tasso attuale (meno importante del trend!)
-- **Rate Expectations**: CRUCIALE - tagli o rialzi previsti? CITA LE FONTI!
-- **Inflation Rate**: ⚠️ ATTENZIONE ALLA LOGICA!
-  - Inflazione ALTA (>2.5%) → BC non può tagliare tassi → POSITIVO per valuta
-  - Inflazione BASSA (<2%) → BC può tagliare tassi → NEGATIVO per valuta
-  - Il target è ~2%, quindi inflazione sopra target = hawkish = valuta forte
-- **GDP Growth**: Momentum economico
-- **Unemployment**: Salute del mercato del lavoro
-
-## COME VALUTARE LE ASPETTATIVE TASSI:
-- Banca centrale che TAGLIA → score NEGATIVO per quella valuta
-- Banca centrale che ALZA → score POSITIVO per quella valuta
-- Banca centrale che PAUSA ma pronta a tagliare → leggermente negativo
-- Banca centrale che PAUSA ma pronta ad alzare → leggermente positivo
-- ⚠️ SEMPRE con riferimento alle fonti trovate nella ricerca!
-
-## COME VALUTARE L'INFLAZIONE (IMPORTANTE!):
-- Inflazione ALTA (es. 3-4%) → La BC deve mantenere tassi alti o alzarli → POSITIVO per valuta
-- Inflazione sotto target (es. 0-1.5%) → La BC può tagliare tassi → NEGATIVO per valuta
-- Esempio: AUD inflazione 3.3% vs USD inflazione 0.2%
-  - AUD: inflazione alta = RBA non può tagliare = POSITIVO per AUD
-  - USD: inflazione bassa = Fed può tagliare = NEGATIVO per USD
-  - Quindi su INFLAZIONE: AUD score POSITIVO, USD score NEGATIVO
-
-## PARAMETRI DA VALUTARE (per ogni coppia A vs B):
-
-1. **TASSI ATTUALI** (scala -1 a +1) - Differenziale tassi attuale
-2. **ASPETTATIVE TASSI FUTURI** (scala -2 a +2) - ⭐⭐ IL PIÙ IMPORTANTE! Peso doppio! Chi taglia vs chi alza? CITA FONTI!
-3. **INFLAZIONE** (scala -1 a +1) - ⚠️ Inflazione ALTA = POSITIVO! Chi ha inflazione sopra il 2%? (BC non può tagliare)
-4. **CRESCITA/PIL** (scala -1 a +1) - Chi cresce di più?
-5. **RISK SENTIMENT** (scala -1 a +1) - Safe-haven vs cyclical nel contesto attuale
-6. **BILANCIA/FISCALE** (scala -1 a +1) - Sostenibilità fiscale
-
-## OUTPUT RICHIESTO (JSON):
-{
-    "analysis_date": "YYYY-MM-DD",
-    "currencies_data": {
-        "EUR": {
-            "interest_rate": "valore",
-            "inflation_rate": "valore",
-            "gdp_growth": "valore",
-            "unemployment": "valore"
-        },
-        ... (per tutte le 7 valute)
-    },
-    "rate_outlook": {
-        "USD": {
-            "current_rate": "X.XX%",
-            "next_meeting": "YYYY-MM-DD",
-            "market_probability": "X% hold | Y% cut | Z% hike",
-            "recent_moves": "N tagli/rialzi negli ultimi X mesi (da X% a Y%)",
-            "outlook_12m": "N tagli/rialzi previsti",
-            "stance": "Hawkish|Neutrale|Dovish",
-            "source": "nome fonte principale"
-        },
-        ... (per tutte le 7 valute: USD, EUR, GBP, JPY, CHF, AUD, CAD)
-    },
-    "pairs_analysis": [
-        {
-            "pair": "USD/JPY",
-            "currency_a": "USD",
-            "currency_b": "JPY",
-            "scores_a": {
-                "rates_now": {"score": -1|0|+1, "comment": "confronto tassi attuali"},
-                "rates_future": {"score": -2|-1|0|+1|+2, "comment": "FORMATO: [MEETING: data] | [MERCATO: prob%] | [STORICO: N moves] | [OUTLOOK: previsione] | [STANCE] | [FONTE]"},
-                "inflation": {"score": -1|0|+1, "comment": "⚠️ Inflazione ALTA = POSITIVO!"},
-                "growth": {"score": -1|0|+1, "comment": "confronto crescita"},
-                "risk_sentiment": {"score": -1|0|+1, "comment": "contesto risk on/off"},
-                "balance_fiscal": {"score": -1|0|+1, "comment": "confronto bilancia e debito"}
-            },
-            "scores_b": { ... },
-            "total_a": int,
-            "total_b": int,
-            "differential": int,
-            "bias": "bullish|bearish|neutral",
-            "bias_strength": "strong|moderate|slight|neutral",
-            "summary": "sintesi in italiano che SPIEGA il perché del bias basandosi su tassi futuri, outlook, etc.",
-            "current_price": float,
-            "scenarios": {
-                "base": {"low": float, "high": float},
-                "bullish": {"low": float, "high": float},
-                "bearish": {"low": float, "high": float}
-            },
-            "key_drivers": ["driver1", "driver2"]
-        },
-        ... (per tutte le 19 coppie)
-    ],
-    "ranking": {
-        "top_bullish": [{"pair": "XXX/YYY", "diff": int}, ...],
-        "top_bearish": [{"pair": "XXX/YYY", "diff": int}, ...]
-    },
-    "events_calendar": []
-}
-
-## CHECKLIST FINALE:
-✅ Tutti i testi in ITALIANO
-✅ Aspettative tassi: range -2/+2 (peso doppio!)
-✅ Altri parametri: range -1/+1
-✅ INFLAZIONE: ricorda che inflazione ALTA = POSITIVO per valuta (BC hawkish)!
-✅ Sintesi che spiega il PERCHÉ del bias
-✅ events_calendar: lascia array VUOTO []
-"""
+def hash_password(password: str) -> str:
+    """Hash password con SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
 
-# --- FUNZIONI SALVATAGGIO/CARICAMENTO (SUPABASE + LOCAL FALLBACK) ---
-
-def supabase_request(method: str, endpoint: str, data: dict = None) -> dict | None:
-    """Esegue una richiesta a Supabase REST API"""
+def supabase_request(method: str, endpoint: str, data: dict = None) -> dict | list | None:
+    """Esegue una richiesta REST a Supabase"""
     if not SUPABASE_ENABLED:
         return None
     
+    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -280,77 +98,209 @@ def supabase_request(method: str, endpoint: str, data: dict = None) -> dict | No
         "Prefer": "return=representation"
     }
     
-    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-    
     try:
         if method == "GET":
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
         elif method == "POST":
-            response = requests.post(url, headers=headers, json=data)
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+        elif method == "PATCH":
+            response = requests.patch(url, headers=headers, json=data, timeout=30)
         elif method == "DELETE":
-            response = requests.delete(url, headers=headers)
+            headers["Prefer"] = "return=minimal"
+            response = requests.delete(url, headers=headers, timeout=30)
         else:
             return None
         
-        if response.status_code in [200, 201]:
-            return response.json() if response.text else {}
-        elif response.status_code == 204:
+        if response.status_code in [200, 201, 204]:
+            if response.text:
+                return response.json()
             return {}
         else:
             return None
+            
     except Exception as e:
         st.error(f"Errore Supabase: {e}")
         return None
 
 
-def get_italy_time():
-    """Restituisce l'ora italiana (UTC+1, o UTC+2 con ora legale)"""
-    from datetime import timezone, timedelta
-    # Italia è UTC+1 (inverno) - per semplicità usiamo +1
-    italy_tz = timezone(timedelta(hours=1))
-    return datetime.now(italy_tz)
+def authenticate_user(username: str, password: str) -> dict | None:
+    """
+    Autentica un utente verificando username e password.
+    Restituisce i dati utente se autenticato, None altrimenti.
+    """
+    if not SUPABASE_ENABLED:
+        # Fallback locale per testing
+        local_users = {
+            "MBARRECA": {"password": hash_password("mbarreca"), "id": "local-admin", "is_active": True}
+        }
+        if username in local_users:
+            if local_users[username]["password"] == hash_password(password):
+                return {"id": local_users[username]["id"], "username": username, "is_active": True}
+        return None
+    
+    # Query Supabase
+    password_hash = hash_password(password)
+    result = supabase_request(
+        "GET", 
+        f"users?username=eq.{username}&password_hash=eq.{password_hash}&is_active=eq.true"
+    )
+    
+    if result and len(result) > 0:
+        return result[0]
+    return None
 
 
-def save_analysis(analysis: dict) -> bool:
-    """Salva l'analisi su Supabase (o locale come fallback)"""
-    try:
-        now = get_italy_time()
-        datetime_str = now.strftime("%Y-%m-%d_%H-%M")
+def get_user_by_id(user_id: str) -> dict | None:
+    """Recupera utente per ID"""
+    if not SUPABASE_ENABLED:
+        return None
+    
+    result = supabase_request("GET", f"users?id=eq.{user_id}")
+    if result and len(result) > 0:
+        return result[0]
+    return None
+
+
+def create_user(username: str, password: str, email: str = None) -> bool:
+    """
+    Crea un nuovo utente (per uso futuro con registrazione).
+    """
+    if not SUPABASE_ENABLED:
+        return False
+    
+    data = {
+        "username": username,
+        "password_hash": hash_password(password),
+        "email": email,
+        "is_active": True,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    result = supabase_request("POST", "users", data)
+    return result is not None
+
+
+def show_login_page():
+    """Mostra la pagina di login"""
+    st.markdown("""
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 40px;
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        .login-title {
+            text-align: center;
+            color: white;
+            font-size: 2rem;
+            margin-bottom: 30px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("## 🔐 Forex Macro Analyst")
+        st.markdown("### Login")
         
-        analysis["analysis_date"] = now.strftime("%Y-%m-%d")
-        analysis["analysis_time"] = now.strftime("%H:%M")
+        with st.form("login_form"):
+            username = st.text_input("👤 Username", placeholder="Inserisci username")
+            password = st.text_input("🔑 Password", type="password", placeholder="Inserisci password")
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                submit = st.form_submit_button("🚀 Accedi", use_container_width=True, type="primary")
+            
+            if submit:
+                if username and password:
+                    user = authenticate_user(username, password)
+                    if user:
+                        st.session_state['authenticated'] = True
+                        st.session_state['user'] = user
+                        st.session_state['user_id'] = user.get('id')
+                        st.success("✅ Accesso effettuato!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Credenziali non valide")
+                else:
+                    st.warning("⚠️ Inserisci username e password")
+        
+        st.markdown("---")
+        st.caption("💡 Contatta l'amministratore per ottenere le credenziali")
+        
+        if not SUPABASE_ENABLED:
+            st.info("🔧 Modalità locale: usa MBARRECA/mbarreca")
+
+
+def logout():
+    """Effettua il logout"""
+    for key in ['authenticated', 'user', 'user_id', 'current_analysis']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+
+# ============================================================================
+# FUNZIONI DATABASE ANALISI (aggiornate per multi-utente)
+# ============================================================================
+
+def save_analysis(analysis: dict, user_id: str, analysis_type: str, options_selected: dict) -> bool:
+    """
+    Salva un'analisi su Supabase con informazioni utente e tipo.
+    
+    Args:
+        analysis: Dati dell'analisi
+        user_id: ID utente
+        analysis_type: Tipo di analisi (es: "full", "macro_only", "news_only", "custom")
+        options_selected: Dict con le opzioni selezionate
+    """
+    try:
+        datetime_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         analysis["analysis_datetime"] = datetime_str
         
         if SUPABASE_ENABLED:
-            # Salva su Supabase
             data = {
                 "analysis_datetime": datetime_str,
-                "analysis_date": analysis["analysis_date"],
-                "analysis_time": analysis["analysis_time"],
+                "user_id": user_id,
+                "analysis_type": analysis_type,
+                "options_selected": json.dumps(options_selected),
                 "data": analysis
             }
             result = supabase_request("POST", "analyses", data)
             return result is not None
         else:
             # Fallback locale
-            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            filename = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
+            save_data = {
+                "user_id": user_id,
+                "analysis_type": analysis_type,
+                "options_selected": options_selected,
+                "data": analysis
+            }
             with open(filename, "w", encoding="utf-8") as f:
-                json.dump(analysis, f, ensure_ascii=False, indent=2)
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
             return True
     except Exception as e:
         st.error(f"Errore salvataggio: {e}")
         return False
 
 
-def load_analysis(datetime_str: str) -> dict | None:
-    """Carica un'analisi da Supabase (o locale come fallback)"""
+def load_analysis(datetime_str: str, user_id: str) -> dict | None:
+    """Carica un'analisi da Supabase per un utente specifico"""
     try:
         if SUPABASE_ENABLED:
-            result = supabase_request("GET", f"analyses?analysis_datetime=eq.{datetime_str}")
+            result = supabase_request(
+                "GET", 
+                f"analyses?analysis_datetime=eq.{datetime_str}&user_id=eq.{user_id}"
+            )
             if result and len(result) > 0:
-                return result[0].get("data", {})
+                return result[0]
         else:
-            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            filename = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
             if filename.exists():
                 with open(filename, "r", encoding="utf-8") as f:
                     return json.load(f)
@@ -359,14 +309,17 @@ def load_analysis(datetime_str: str) -> dict | None:
     return None
 
 
-def delete_analysis(datetime_str: str) -> bool:
-    """Cancella un'analisi da Supabase (o locale come fallback)"""
+def delete_analysis(datetime_str: str, user_id: str) -> bool:
+    """Cancella un'analisi da Supabase per un utente specifico"""
     try:
         if SUPABASE_ENABLED:
-            result = supabase_request("DELETE", f"analyses?analysis_datetime=eq.{datetime_str}")
+            result = supabase_request(
+                "DELETE", 
+                f"analyses?analysis_datetime=eq.{datetime_str}&user_id=eq.{user_id}"
+            )
             return result is not None
         else:
-            filename = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            filename = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
             if filename.exists():
                 filename.unlink()
                 return True
@@ -375,32 +328,31 @@ def delete_analysis(datetime_str: str) -> bool:
     return False
 
 
-def get_available_dates() -> list:
-    """Restituisce le date/ore delle analisi disponibili (più recente prima)"""
-    dates = []
+def get_user_analyses(user_id: str, limit: int = 50) -> list:
+    """
+    Restituisce tutte le analisi di un utente (più recente prima).
+    Include metadati come tipo e opzioni selezionate.
+    """
+    analyses = []
     
     if SUPABASE_ENABLED:
-        result = supabase_request("GET", "analyses?select=analysis_datetime&order=analysis_datetime.desc")
+        result = supabase_request(
+            "GET", 
+            f"analyses?user_id=eq.{user_id}&order=analysis_datetime.desc&limit={limit}"
+        )
         if result:
-            dates = [r.get("analysis_datetime") for r in result if r.get("analysis_datetime")]
+            analyses = result
     else:
-        for file in DATA_FOLDER.glob("analysis_*.json"):
+        for file in DATA_FOLDER.glob(f"analysis_{user_id}_*.json"):
             try:
-                datetime_str = file.stem.replace("analysis_", "")
-                dates.append(datetime_str)
+                with open(file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    analyses.append(data)
             except:
                 pass
-        dates = sorted(dates, reverse=True)
+        analyses = sorted(analyses, key=lambda x: x.get("data", {}).get("analysis_datetime", ""), reverse=True)
     
-    return dates
-
-
-def get_latest_analysis() -> dict | None:
-    """Carica l'ultima analisi disponibile"""
-    dates = get_available_dates()
-    if dates:
-        return load_analysis(dates[0])
-    return None
+    return analyses[:limit]
 
 
 def format_datetime_display(datetime_str: str) -> str:
@@ -418,12 +370,110 @@ def format_datetime_display(datetime_str: str) -> str:
         return datetime_str
 
 
-# --- FUNZIONI RICERCA E ANALISI ---
+def get_analysis_type_label(analysis_type: str) -> str:
+    """Restituisce etichetta leggibile per tipo analisi"""
+    labels = {
+        "full": "🔄 Completa",
+        "macro_only": "📊 Solo Macro",
+        "news_only": "📰 Solo Notizie",
+        "links_only": "📎 Solo Link",
+        "macro_news": "📊📰 Macro + Notizie",
+        "macro_links": "📊📎 Macro + Link",
+        "news_links": "📰📎 Notizie + Link",
+        "claude_only": "🤖 Solo Claude",
+        "custom": "⚙️ Personalizzata"
+    }
+    return labels.get(analysis_type, "📋 Analisi")
 
-# Indicatori richiesti per ogni valuta
+
+# ============================================================================
+# LISTA VALUTE E COPPIE FOREX
+# ============================================================================
+
+CURRENCIES = {
+    "EUR": {"name": "Euro", "central_bank": "ECB", "type": "semi-cyclical"},
+    "USD": {"name": "US Dollar", "central_bank": "Federal Reserve", "type": "safe-haven"},
+    "GBP": {"name": "British Pound", "central_bank": "Bank of England", "type": "cyclical"},
+    "JPY": {"name": "Japanese Yen", "central_bank": "Bank of Japan", "type": "safe-haven"},
+    "CHF": {"name": "Swiss Franc", "central_bank": "SNB", "type": "safe-haven"},
+    "AUD": {"name": "Australian Dollar", "central_bank": "RBA", "type": "commodity/cyclical"},
+    "CAD": {"name": "Canadian Dollar", "central_bank": "Bank of Canada", "type": "commodity/cyclical"},
+}
+
+FOREX_PAIRS = [
+    "USD/JPY", "GBP/JPY", "AUD/JPY", "EUR/JPY", "CAD/JPY",
+    "AUD/USD", "AUD/CAD", "GBP/AUD", "EUR/AUD", "EUR/CAD",
+    "GBP/CAD", "USD/CHF", "EUR/CHF", "GBP/CHF", "CAD/CHF",
+    "AUD/CHF", "EUR/USD", "EUR/GBP", "GBP/USD",
+]
+
+
+# ============================================================================
+# SYSTEM PROMPT PER ANALISI GLOBALE
+# ============================================================================
+
+SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare TUTTE le coppie forex fornite.
+
+## ⚠️ REGOLE CRITICHE:
+
+### 1. LINGUA: TUTTO IN ITALIANO
+Ogni parola della tua risposta deve essere in italiano. Non usare mai termini inglesi se esiste un equivalente italiano.
+
+### 2. STRUTTURA JSON OBBLIGATORIA
+Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
+
+### 3. ANALISI DEL BIAS
+Per ogni coppia forex:
+- **BULLISH** = la valuta BASE si rafforza (es: EUR/USD bullish = EUR forte)
+- **BEARISH** = la valuta BASE si indebolisce (es: EUR/USD bearish = EUR debole)
+- **NEUTRAL** = equilibrio o incertezza
+
+### 4. FATTORI DA CONSIDERARE (in ordine di importanza):
+1. **ASPETTATIVE sui tassi** (+ importante dei tassi attuali!)
+2. **Comunicazioni delle banche centrali** (hawkish/dovish)
+3. **Dati macro attuali** (inflazione, PIL, disoccupazione)
+4. **Risk sentiment globale** (risk-on/risk-off)
+5. **Fattori geopolitici**
+
+### 5. FORMATO OUTPUT JSON:
+{
+    "analysis_date": "YYYY-MM-DD",
+    "summary": "Breve riassunto del contesto macro globale in italiano",
+    "currency_analysis": {
+        "EUR": {"outlook": "bullish/bearish/neutral", "key_factors": ["fattore1", "fattore2"]},
+        ...per ogni valuta
+    },
+    "pair_analysis": {
+        "EUR/USD": {
+            "bias": "bullish/bearish/neutral",
+            "strength": 1-5,
+            "summary": "Spiegazione in italiano del perché questo bias",
+            "key_drivers": ["driver1", "driver2"]
+        },
+        ...per ogni coppia
+    },
+    "rate_outlook": {
+        "USD": {"current_rate": "X.XX%", "next_meeting": "data", "expectation": "hold/cut/hike", "probability": "XX%"},
+        ...per ogni valuta
+    },
+    "risk_sentiment": "risk-on/risk-off/neutral",
+    "events_calendar": []
+}
+
+### 6. REGOLE SPECIALI:
+- JPY: ricorda che è safe-haven, si rafforza in risk-off
+- CHF: idem, safe-haven
+- AUD/CAD: valute commodity, sensibili a Cina e materie prime
+- Usa SEMPRE dati recenti dalle notizie, non solo i numeri
+"""
+
+
+# ============================================================================
+# FUNZIONI RICERCA E ANALISI
+# ============================================================================
+
 REQUIRED_INDICATORS = ["interest_rate", "inflation_rate", "gdp_growth", "unemployment"]
 
-# Mappa valuta -> paese/area per le ricerche
 CURRENCY_TO_COUNTRY = {
     "EUR": "Euro Area / Eurozone / ECB",
     "USD": "United States / US / Federal Reserve",
@@ -435,24 +485,16 @@ CURRENCY_TO_COUNTRY = {
 }
 
 
-def fetch_all_currencies_data() -> dict:
+def fetch_macro_data() -> dict:
     """
-    Recupera dati macro da fonti gratuite:
-    - Tassi interesse: global-rates.com (scraping)
-    - Inflazione: global-rates.com + ABS Australia (scraping)
-    - PIL: API Ninjas (gratuito)
-    - Disoccupazione: API Ninjas (gratuito)
+    Recupera solo i dati macro da fonti gratuite (senza ricerche web).
     """
-    
-    # Se API Ninjas non configurata, usa dati di fallback per PIL/disoccupazione
-    # ma prova comunque lo scraping per tassi e inflazione
     api_key = API_NINJAS_KEY if API_NINJAS_ENABLED else ""
     
     try:
         fetcher = MacroDataFetcher(api_key)
         raw_data = fetcher.get_all_data()
         
-        # Converti nel formato atteso dal resto del codice
         result = {}
         for currency, info in raw_data['data'].items():
             indicators = info['indicators']
@@ -463,14 +505,10 @@ def fetch_all_currencies_data() -> dict:
                 'unemployment': indicators.get('unemployment', {}).get('value', 'N/A'),
             }
         
-        # Se API Ninjas non disponibile, avvisa ma continua con i dati di scraping
-        if not API_NINJAS_ENABLED:
-            st.warning("⚠️ API Ninjas non configurata - PIL e disoccupazione potrebbero essere N/A")
-        
         return result
         
     except Exception as e:
-        st.error(f"Errore nel recupero dati: {e}")
+        st.error(f"Errore nel recupero dati macro: {e}")
         # Fallback con dati di esempio
         return {
             'USD': {'interest_rate': 3.75, 'inflation_rate': 2.74, 'gdp_growth': 2.1, 'unemployment': 3.9},
@@ -483,105 +521,20 @@ def fetch_all_currencies_data() -> dict:
         }
 
 
-def fetch_additional_resources(urls: list) -> str:
+def search_web_news() -> tuple[str, dict]:
     """
-    Fetcha e estrae il contenuto testuale da una lista di URL.
-    Usato per integrare risorse aggiuntive fornite dall'utente.
-    
-    Args:
-        urls: Lista di URL da fetchare
-        
-    Returns:
-        Stringa formattata con il contenuto estratto da ogni URL
+    Esegue le ricerche web con DuckDuckGo.
+    Restituisce: (testo completo per Claude, dizionario strutturato per riepilogo)
     """
-    if not urls:
-        return ""
-    
-    results = []
-    results.append("\n" + "="*70)
-    results.append("📎 RISORSE AGGIUNTIVE FORNITE DALL'UTENTE - ANALIZZA CON ATTENZIONE")
-    results.append("="*70)
-    results.append("⚠️ Queste fonti sono state inserite manualmente dall'utente.")
-    results.append("   Integrare con le altre informazioni, NON sostituire l'analisi standard.\n")
-    
-    session = requests.Session()
-    session.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-    })
-    
-    for i, url in enumerate(urls[:10], 1):  # Max 10 URL
-        url = url.strip()
-        if not url or not url.startswith(('http://', 'https://')):
-            continue
-            
-        try:
-            response = session.get(url, timeout=15, allow_redirects=True)
-            response.raise_for_status()
-            
-            # Estrai il testo dalla pagina
-            html = response.text
-            
-            # Rimuovi script, style, nav, footer, aside
-            import re
-            # Rimuovi tag problematici
-            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<nav[^>]*>.*?</nav>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<footer[^>]*>.*?</footer>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<aside[^>]*>.*?</aside>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<header[^>]*>.*?</header>', '', html, flags=re.DOTALL | re.IGNORECASE)
-            html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
-            
-            # Estrai titolo
-            title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.IGNORECASE | re.DOTALL)
-            title = title_match.group(1).strip() if title_match else "Titolo non disponibile"
-            title = re.sub(r'<[^>]+>', '', title)  # Rimuovi tag HTML dal titolo
-            
-            # Rimuovi tutti i tag HTML
-            text = re.sub(r'<[^>]+>', ' ', html)
-            
-            # Pulisci il testo
-            text = re.sub(r'\s+', ' ', text)  # Normalizza spazi
-            text = re.sub(r'&nbsp;', ' ', text)
-            text = re.sub(r'&amp;', '&', text)
-            text = re.sub(r'&lt;', '<', text)
-            text = re.sub(r'&gt;', '>', text)
-            text = re.sub(r'&quot;', '"', text)
-            text = re.sub(r'&#\d+;', '', text)  # Rimuovi entità numeriche
-            
-            # Tronca a 4000 caratteri per URL
-            text = text.strip()[:4000]
-            
-            if len(text) > 100:  # Solo se c'è contenuto significativo
-                results.append(f"\n[FONTE {i}: {url}]")
-                results.append(f"📰 Titolo: {title[:200]}")
-                results.append(f"📄 Contenuto:")
-                results.append(text)
-                results.append("-" * 50)
-            else:
-                results.append(f"\n[FONTE {i}: {url}]")
-                results.append(f"⚠️ Contenuto non estraibile (pagina dinamica o protetta)")
-                
-        except requests.exceptions.Timeout:
-            results.append(f"\n[FONTE {i}: {url}]")
-            results.append(f"⚠️ Timeout - la pagina non ha risposto in 15 secondi")
-        except requests.exceptions.RequestException as e:
-            results.append(f"\n[FONTE {i}: {url}]")
-            results.append(f"⚠️ Errore nel recupero: {str(e)[:100]}")
-        except Exception as e:
-            results.append(f"\n[FONTE {i}: {url}]")
-            results.append(f"⚠️ Errore: {str(e)[:100]}")
-    
-    results.append("\n" + "="*70 + "\n")
-    
-    return "\n".join(results)
-
-
-def search_qualitative_data() -> str:
-    """Cerca notizie qualitative, outlook e ASPETTATIVE TASSI per ogni valuta."""
     all_results = []
+    structured_results = {
+        "forex_factory": [],
+        "rate_expectations": [],
+        "meeting_calendar": [],
+        "policy_comparison": [],
+        "economic_outlook": [],
+        "geopolitics": []
+    }
     
     today = datetime.now()
     current_year = today.year
@@ -591,14 +544,11 @@ def search_qualitative_data() -> str:
     
     # =========================================================================
     # SEZIONE 0: FOREX FACTORY BREAKING NEWS
-    # Le ultime news market-moving dal principale sito di news forex
     # =========================================================================
     all_results.append(f"\n{'='*60}")
     all_results.append(f"[FOREX FACTORY - BREAKING NEWS]")
     all_results.append(f"{'='*60}")
-    all_results.append("⚠️ Queste sono le ultime notizie market-moving da Forex Factory")
     
-    # Query specifiche per Forex Factory news
     forex_factory_queries = [
         "site:forexfactory.com/news forex breaking news today",
         "site:forexfactory.com USD EUR GBP JPY news",
@@ -612,117 +562,78 @@ def search_qualitative_data() -> str:
             for r in results:
                 title = r.get('title', '')
                 body = r.get('body', '')
-                # Filtra solo news rilevanti (escludi analisi tecniche generiche)
                 if any(kw in body.lower() for kw in ['dollar', 'euro', 'yen', 'pound', 'fed', 'ecb', 'boe', 'boj', 'rate', 'inflation', 'gdp', 'employment', 'tariff', 'trade']):
                     all_results.append(f"[FF-NEWS] {title}: {body[:500]}")
+                    structured_results["forex_factory"].append({
+                        "title": title,
+                        "body": body[:300]
+                    })
         except:
             pass
     
     # =========================================================================
-    # SEZIONE 1: ASPETTATIVE TASSI - LA PIÙ IMPORTANTE!
-    # Ricerche molto specifiche su quanti tagli/rialzi sono previsti
+    # SEZIONE 1: ASPETTATIVE TASSI
     # =========================================================================
     all_results.append(f"\n{'='*60}")
-    all_results.append(f"[RATE EXPECTATIONS - SEZIONE CRUCIALE PER L'ANALISI]")
+    all_results.append(f"[RATE EXPECTATIONS - SEZIONE CRUCIALE]")
     all_results.append(f"{'='*60}")
     
-    # Query per cercare informazioni su MEETING e PROBABILITÀ per ogni BC
-    # Struttura: ogni query è progettata per trovare info sul prossimo meeting,
-    # probabilità di cut/hike/hold, e previsioni degli analisti
-    
-    rate_expectations_queries = {
-        "USD": [
-            f"Fed FOMC next meeting {current_year} rate decision probability",
-            f"Federal Reserve rate probability cut hold hike percent {current_year}",
-            f"CME FedWatch tool Fed rate expectations {current_year}",
-            f"Fed interest rate forecast {current_year} {next_year} how many cuts analysts",
-            "FOMC meeting schedule rate decision outlook Reuters Bloomberg",
-        ],
-        "EUR": [
-            f"ECB next meeting {current_year} rate decision probability",
-            f"ECB interest rate cut hold hike probability percent {current_year}",
-            f"ECB rate forecast {current_year} {next_year} how many cuts Lagarde",
-            "ECB governing council meeting schedule rate outlook Reuters",
-            f"Eurozone deposit rate expectations analysts {current_year}",
-        ],
-        "GBP": [
-            f"Bank of England MPC next meeting {current_year} rate decision",
-            f"BoE rate cut probability percent {current_year}",
-            f"UK interest rate forecast {current_year} {next_year} how many cuts",
-            "BoE MPC meeting schedule rate outlook Reuters Bloomberg",
-            f"Bank of England rate expectations analysts {current_year}",
-        ],
-        "JPY": [
-            f"Bank of Japan BOJ next meeting {current_year} rate decision",
-            f"BoJ rate hike probability percent {current_year}",
-            f"Japan interest rate forecast {current_year} {next_year} Ueda",
-            "BoJ policy board meeting schedule rate outlook Reuters",
-            f"Bank of Japan rate expectations analysts {current_year}",
-        ],
-        "CHF": [
-            f"SNB Swiss National Bank next meeting {current_year} rate decision",
-            f"SNB rate cut probability percent {current_year}",
-            f"Switzerland interest rate forecast {current_year} {next_year}",
-            "SNB quarterly assessment rate outlook",
-            f"Swiss National Bank rate expectations analysts {current_year}",
-        ],
-        "AUD": [
-            f"RBA Reserve Bank Australia next meeting {current_year} rate decision",
-            f"RBA rate cut hike probability percent {current_year}",
-            f"Australia interest rate forecast {current_year} {next_year} Bullock",
-            "RBA board meeting schedule rate outlook Reuters",
-            f"ASX RBA rate tracker expectations {current_year}",
-        ],
-        "CAD": [
-            f"Bank of Canada BoC next meeting {current_year} rate decision",
-            f"BoC rate cut probability percent {current_year}",
-            f"Canada interest rate forecast {current_year} {next_year} Macklem",
-            "BoC announcement schedule rate outlook Reuters Bloomberg",
-            f"Bank of Canada rate expectations analysts {current_year}",
-        ],
+    rate_queries = {
+        "USD": [f"Fed FOMC next meeting {current_year} rate decision probability", f"CME FedWatch tool Fed rate expectations {current_year}"],
+        "EUR": [f"ECB next meeting {current_year} rate decision probability", f"ECB rate forecast {current_year} {next_year}"],
+        "GBP": [f"Bank of England MPC next meeting {current_year} rate decision", f"BoE rate forecast {current_year}"],
+        "JPY": [f"Bank of Japan BOJ meeting {current_year} rate hike probability", f"BOJ policy outlook {current_year}"],
+        "CHF": [f"SNB Swiss National Bank meeting {current_year} rate decision"],
+        "AUD": [f"RBA Reserve Bank Australia meeting {current_year} rate decision", f"RBA rate forecast {current_year}"],
+        "CAD": [f"Bank of Canada BoC meeting {current_year} rate decision", f"BoC rate forecast {current_year}"],
     }
     
-    for currency, queries in rate_expectations_queries.items():
-        all_results.append(f"\n[{currency} - RATE EXPECTATIONS ⭐]")
+    for currency, queries in rate_queries.items():
         for query in queries:
             try:
                 results = DDGS().text(query, max_results=3)
                 for r in results:
                     title = r.get('title', '')
-                    snippet = r.get('body', '')
-                    all_results.append(f"[{currency}-RATES] {title}: {snippet[:500]}")
+                    body = r.get('body', '')
+                    all_results.append(f"[{currency}-RATE] {title}: {body[:400]}")
+                    structured_results["rate_expectations"].append({
+                        "currency": currency,
+                        "title": title,
+                        "body": body[:250]
+                    })
             except:
                 pass
     
     # =========================================================================
-    # SEZIONE 1B: CALENDARI MEETING BANCHE CENTRALI
-    # Per trovare le date esatte dei prossimi meeting
+    # SEZIONE 2: CALENDARIO MEETING BC
     # =========================================================================
     all_results.append(f"\n{'='*60}")
-    all_results.append(f"[CENTRAL BANK MEETING SCHEDULES]")
+    all_results.append(f"[CENTRAL BANK MEETING CALENDAR]")
     all_results.append(f"{'='*60}")
     
-    meeting_calendar_queries = [
+    calendar_queries = [
         f"FOMC meeting schedule dates {current_year} {next_year}",
-        f"ECB governing council meeting dates {current_year} {next_year}",
-        f"Bank of England MPC meeting dates {current_year} {next_year}",
-        f"Bank of Japan BOJ policy meeting dates {current_year} {next_year}",
-        f"RBA Reserve Bank Australia board meeting dates {current_year} {next_year}",
-        f"Bank of Canada BoC announcement dates {current_year} {next_year}",
-        f"SNB Swiss National Bank quarterly assessment dates {current_year} {next_year}",
-        f"central banks meeting calendar {current_year} {next_year}",
+        f"ECB governing council meeting dates {current_year}",
+        f"Bank of England MPC meeting dates {current_year}",
+        f"central banks meeting calendar {current_year}",
     ]
     
-    for query in meeting_calendar_queries:
+    for query in calendar_queries:
         try:
             results = DDGS().text(query, max_results=2)
             for r in results:
-                all_results.append(f"[CALENDAR] {r['title']}: {r['body'][:400]}")
+                title = r.get('title', '')
+                body = r.get('body', '')
+                all_results.append(f"[CALENDAR] {title}: {body[:400]}")
+                structured_results["meeting_calendar"].append({
+                    "title": title,
+                    "body": body[:250]
+                })
         except:
             pass
     
     # =========================================================================
-    # SEZIONE 2: CONFRONTO DIRETTO POLITICHE MONETARIE
+    # SEZIONE 3: CONFRONTO POLITICHE MONETARIE
     # =========================================================================
     all_results.append(f"\n{'='*60}")
     all_results.append(f"[MONETARY POLICY COMPARISON]")
@@ -730,46 +641,23 @@ def search_qualitative_data() -> str:
     
     comparison_queries = [
         f"central banks rate cuts {current_year} comparison Fed ECB BoE",
-        f"which central bank cutting rates fastest {current_year}",
         f"hawkish dovish central banks {current_year} ranking",
         f"monetary policy divergence {current_year} forex",
-        f"Fed vs ECB vs BoE rate policy {current_year}",
-        f"BoJ rate hike vs Fed rate cut {current_year}",
     ]
     
     for query in comparison_queries:
         try:
             results = DDGS().text(query, max_results=3)
             for r in results:
-                all_results.append(f"[COMPARE] {r['title']}: {r['body'][:450]}")
+                title = r.get('title', '')
+                body = r.get('body', '')
+                all_results.append(f"[COMPARE] {title}: {body[:450]}")
+                structured_results["policy_comparison"].append({
+                    "title": title,
+                    "body": body[:250]
+                })
         except:
             pass
-    
-    # =========================================================================
-    # SEZIONE 3: OUTLOOK ECONOMICO PER VALUTA
-    # =========================================================================
-    all_results.append(f"\n{'='*60}")
-    all_results.append(f"[ECONOMIC OUTLOOK BY CURRENCY]")
-    all_results.append(f"{'='*60}")
-    
-    economic_outlook_queries = {
-        "USD": [f"US economy outlook {current_year} {next_year} growth inflation"],
-        "EUR": [f"Eurozone economy outlook {current_year} Germany recession"],
-        "GBP": [f"UK economy outlook {current_year} inflation growth"],
-        "JPY": [f"Japan economy outlook {current_year} inflation wages"],
-        "CHF": [f"Switzerland economy outlook {current_year}"],
-        "AUD": [f"Australia economy outlook {current_year} China commodities"],
-        "CAD": [f"Canada economy outlook {current_year} oil trade"],
-    }
-    
-    for currency, queries in economic_outlook_queries.items():
-        for query in queries:
-            try:
-                results = DDGS().text(query, max_results=2)
-                for r in results:
-                    all_results.append(f"[{currency}-ECON] {r['title']}: {r['body'][:400]}")
-            except:
-                pass
     
     # =========================================================================
     # SEZIONE 4: GEOPOLITICA E RISK SENTIMENT
@@ -778,82 +666,162 @@ def search_qualitative_data() -> str:
     all_results.append(f"[GEOPOLITICS & RISK SENTIMENT]")
     all_results.append(f"{'='*60}")
     
-    geopolitical_queries = [
-        f"geopolitical risk {current_year} market forex impact",
-        f"US China trade tariffs {current_year}",
-        f"global recession risk {current_year} probability",
-        f"risk on risk off market sentiment {current_year}",
+    geopolitics_queries = [
+        "forex market risk sentiment today",
+        "US China trade war tariffs impact forex",
+        "geopolitical risk currency markets",
     ]
     
-    for query in geopolitical_queries:
+    for query in geopolitics_queries:
         try:
-            results = DDGS().text(query, max_results=2)
+            results = DDGS().text(query, max_results=3)
             for r in results:
-                all_results.append(f"[GEO] {r['title']}: {r['body'][:350]}")
+                title = r.get('title', '')
+                body = r.get('body', '')
+                all_results.append(f"[GEOPOLITICS] {title}: {body[:400]}")
+                structured_results["geopolitics"].append({
+                    "title": title,
+                    "body": body[:250]
+                })
         except:
             pass
     
-    return "\n".join(all_results)
+    return "\n".join(all_results), structured_results
 
 
-def search_all_currencies_data() -> tuple[dict, str]:
-    """Cerca dati macro per TUTTE le valute - scraping + API Ninjas + ricerche qualitative."""
+def fetch_additional_resources(urls: list) -> tuple[str, list]:
+    """
+    Fetcha e estrae il contenuto testuale da una lista di URL.
+    Restituisce: (testo per Claude, lista strutturata per riepilogo)
+    """
+    if not urls:
+        return "", []
     
-    # 1. FASE 1: Scarica dati numerici da scraping + API Ninjas
-    st.info("📊 FASE 1: Scaricamento dati da global-rates.com + API Ninjas...")
-    te_data = fetch_all_currencies_data()
+    results = []
+    structured = []
     
-    # Verifica completezza dati
-    missing_data = []
-    for curr, data in te_data.items():
-        for key, value in data.items():
-            if value == 'N/A' or value is None:
-                missing_data.append(f"{curr}-{key}")
+    results.append("\n" + "="*70)
+    results.append("📎 RISORSE AGGIUNTIVE FORNITE DALL'UTENTE")
+    results.append("="*70)
     
-    if missing_data:
-        st.warning(f"⚠️ Alcuni dati potrebbero essere mancanti: {', '.join(missing_data[:5])}")
-    else:
-        st.success("✅ Tutti i dati macro recuperati con successo!")
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    })
     
-    # 2. FASE 2: Ricerche qualitative approfondite (notizie, aspettative)
-    st.info("📰 FASE 2: Ricerca notizie, outlook e aspettative mercati...")
-    qualitative_data = search_qualitative_data()
+    for i, url in enumerate(urls[:10], 1):
+        url = url.strip()
+        if not url or not url.startswith(('http://', 'https://')):
+            continue
+        
+        try:
+            response = session.get(url, timeout=15, allow_redirects=True)
+            
+            if response.status_code == 200:
+                html = response.text
+                
+                # Estrai titolo
+                title_match = re.search(r'<title[^>]*>([^<]+)</title>', html, re.IGNORECASE)
+                title = title_match.group(1).strip() if title_match else url
+                
+                # Rimuovi script, style, nav, footer
+                for tag in ['script', 'style', 'nav', 'footer', 'aside', 'header']:
+                    html = re.sub(f'<{tag}[^>]*>.*?</{tag}>', '', html, flags=re.DOTALL | re.IGNORECASE)
+                
+                # Estrai testo
+                text = re.sub(r'<[^>]+>', ' ', html)
+                text = re.sub(r'\s+', ' ', text).strip()
+                
+                # Decodifica entità HTML
+                text = text.replace('&nbsp;', ' ').replace('&amp;', '&')
+                text = text.replace('&lt;', '<').replace('&gt;', '>')
+                text = text.replace('&quot;', '"')
+                
+                # Limita lunghezza
+                text = text[:4000]
+                
+                results.append(f"\n[FONTE {i}: {url}]")
+                results.append(f"Titolo: {title}")
+                results.append(f"Contenuto: {text}")
+                
+                structured.append({
+                    "url": url,
+                    "title": title,
+                    "content_preview": text[:500],
+                    "status": "success"
+                })
+            else:
+                results.append(f"\n[FONTE {i}: {url}] - Errore: HTTP {response.status_code}")
+                structured.append({
+                    "url": url,
+                    "title": "Errore",
+                    "content_preview": f"HTTP {response.status_code}",
+                    "status": "error"
+                })
+                
+        except Exception as e:
+            results.append(f"\n[FONTE {i}: {url}] - Errore: {str(e)[:100]}")
+            structured.append({
+                "url": url,
+                "title": "Errore",
+                "content_preview": str(e)[:100],
+                "status": "error"
+            })
     
-    return te_data, qualitative_data
+    return "\n".join(results), structured
 
 
-def analyze_all_pairs(api_key: str, te_data: dict, search_text: str, additional_resources: str = "") -> dict:
-    """Analizza TUTTE le coppie forex in una sola chiamata API
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "") -> dict:
+    """
+    Esegue l'analisi con Claude AI.
     
     Args:
         api_key: Chiave API Anthropic
-        te_data: Dati macroeconomici
-        search_text: Risultati delle ricerche web automatiche
-        additional_resources: Contenuto estratto da URL forniti dall'utente (opzionale)
+        macro_data: Dati macroeconomici (opzionale)
+        news_text: Testo delle notizie web (opzionale)
+        additional_text: Testo delle risorse aggiuntive (opzionale)
     """
-    
     client = anthropic.Anthropic(api_key=api_key)
     
     pairs_list = ", ".join(FOREX_PAIRS)
     currencies_info = "\n".join([f"- {k}: {v['name']} ({v['central_bank']}) - Tipo: {v['type']}" 
                                   for k, v in CURRENCIES.items()])
     
-    # Formatta i dati macro
-    te_formatted = "\n\n".join([
-        f"**{curr}:**\n" + "\n".join([f"  - {k}: {v}" for k, v in data.items()])
-        for curr, data in te_data.items()
-    ])
+    # Formatta i dati macro (se presenti)
+    macro_section = ""
+    if macro_data:
+        macro_formatted = "\n\n".join([
+            f"**{curr}:**\n" + "\n".join([f"  - {k}: {v}" for k, v in data.items()])
+            for curr, data in macro_data.items()
+        ])
+        macro_section = f"""
+## 📊 DATI NUMERICI DA FONTI UFFICIALI:
+{macro_formatted}
+
+---
+"""
+    
+    # Sezione notizie (se presente)
+    news_section = ""
+    if news_text:
+        news_section = f"""
+## 📰 NOTIZIE, OUTLOOK, ASPETTATIVE:
+{news_text}
+
+---
+"""
+    
+    # Sezione risorse aggiuntive (se presente)
+    additional_section = ""
+    if additional_text:
+        additional_section = f"""
+{additional_text}
+
+---
+"""
     
     today = datetime.now()
-    
-    # Sezione risorse aggiuntive (solo se presenti)
-    additional_section = ""
-    if additional_resources.strip():
-        additional_section = f"""
----
-
-{additional_resources}
-"""
     
     user_prompt = f"""
 Analizza TUTTE queste coppie forex: {pairs_list}
@@ -865,32 +833,18 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 ---
 
-## 📊 DATI NUMERICI DA FONTI UFFICIALI (global-rates.com/ABS/API Ninjas):
-{te_formatted}
-
----
-
-## 📰 NOTIZIE, OUTLOOK, ASPETTATIVE E CALENDARIO ECONOMICO:
-{search_text}
+{macro_section}
+{news_section}
 {additional_section}
----
 
-## ⭐ ISTRUZIONI CRITICHE:
+## ⭐ ISTRUZIONI:
 
-1. **USA LE NOTIZIE** per capire chi sta tagliando/alzando i tassi!
-   - Se leggi "Fed cuts rates" o "Fed dovish" → USD tendenzialmente debole
-   - Se leggi "BoJ raises rates" o "BoJ hawkish" → JPY tendenzialmente forte
-   
-2. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI, non indietro!
-
+1. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il bias
+2. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
 3. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
-
-4. **events_calendar** = Lascia un array VUOTO []. Gli eventi verranno mostrati separatamente.
-
-5. Ogni **summary** deve spiegare PERCHÉ quel bias basandosi sulle notizie
-
-6. **RISORSE AGGIUNTIVE**: Se presenti sopra, considerale con PRIORITÀ ma INTEGRA con tutti gli altri dati.
-   NON basare l'analisi SOLO sulle risorse aggiuntive!
+4. **events_calendar** = []
+5. Ogni **summary** deve spiegare PERCHÉ quel bias
+6. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -906,683 +860,551 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
         
         response_text = message.content[0].text
         
-        # Pulisci JSON - rimuovi markdown
+        # Pulisci JSON
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0]
         
-        # Trova l'inizio e la fine del JSON
         response_text = response_text.strip()
-        
-        # Cerca il primo { e l'ultimo }
         start_idx = response_text.find('{')
         end_idx = response_text.rfind('}')
         
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            response_text = response_text[start_idx:end_idx + 1]
+        if start_idx != -1 and end_idx != -1:
+            response_text = response_text[start_idx:end_idx+1]
         
         analysis = json.loads(response_text)
-        
-        # Se currencies_data manca o è incompleto, usa i dati API
-        if "currencies_data" not in analysis or not analysis["currencies_data"]:
-            analysis["currencies_data"] = te_data
+        analysis["pairs_analyzed"] = FOREX_PAIRS
+        analysis["currencies"] = list(CURRENCIES.keys())
         
         return analysis
         
     except json.JSONDecodeError as e:
-        # Mostra più contesto per debug
-        error_pos = e.pos if hasattr(e, 'pos') else 0
-        context_start = max(0, error_pos - 100)
-        context_end = min(len(response_text), error_pos + 100)
-        context = response_text[context_start:context_end] if response_text else "N/A"
-        return {
-            "error": f"Errore parsing JSON: {e}",
-            "raw": response_text[:3000] if response_text else "Risposta vuota",
-            "context": f"...{context}..."
-        }
+        return {"error": f"Errore parsing JSON: {e}"}
     except Exception as e:
-        return {"error": f"Errore API: {e}"}
+        return {"error": f"Errore API Claude: {e}"}
 
 
-# --- FUNZIONI VISUALIZZAZIONE ---
+# ============================================================================
+# FUNZIONI VISUALIZZAZIONE
+# ============================================================================
 
-def format_date_ita(date_str: str) -> str:
-    """Converte data da YYYY-MM-DD a gg/mm/aaaa"""
-    try:
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-        return date_obj.strftime("%d/%m/%Y")
-    except:
-        return date_str
-
-
-def get_bias_color(bias: str, diff: int) -> str:
-    """Restituisce emoji in base al bias"""
-    if bias == "bullish":
-        return "🟢🟢" if abs(diff) >= 4 else "🟢"
-    elif bias == "bearish":
-        return "🔴🔴" if abs(diff) >= 4 else "🔴"
-    return "⚪"
-
-
-def display_matrix(analysis: dict):
-    """Visualizza la matrice overview di tutte le coppie"""
+def display_news_summary(news_structured: dict, links_structured: list = None):
+    """Mostra il riepilogo delle notizie trovate"""
     
-    if "error" in analysis:
-        st.error(f"❌ {analysis['error']}")
-        if "raw" in analysis:
-            with st.expander("Risposta raw"):
-                st.code(analysis["raw"])
-        return
+    st.markdown("### 📰 Riepilogo Notizie Trovate")
     
-    st.markdown("---")
+    # Forex Factory
+    if news_structured.get("forex_factory"):
+        with st.expander(f"🔴 FOREX FACTORY ({len(news_structured['forex_factory'])} news)", expanded=True):
+            for item in news_structured["forex_factory"][:5]:
+                st.markdown(f"• **{item['title'][:80]}...**")
+                st.caption(item['body'][:150] + "...")
     
-    # Header
-    st.markdown("## 📊 FOREX MACRO MATRIX")
-    date_formatted = format_date_ita(analysis.get('analysis_date', 'N/A'))
-    time_formatted = analysis.get('analysis_time', '')
-    
-    if time_formatted:
-        st.caption(f"Analisi del {date_formatted} alle {time_formatted}")
-    else:
-        st.caption(f"Analisi del {date_formatted}")
-    
-    # Dati macro per valuta (da global-rates.com + API Ninjas)
-    with st.expander("📈 Dati Macro per Valuta (fonte: global-rates.com + API Ninjas)", expanded=True):
-        st.caption("Fonti: Federal Reserve, BCE, BoE, BoJ, SNB, RBA, BoC, Eurostat, OECD")
-        currencies_data = analysis.get("currencies_data", {})
-        
-        if currencies_data:
-            # Crea una tabella con tutti gli indicatori
-            indicators_table = []
-            for curr, data in currencies_data.items():
-                indicators_table.append({
-                    "Valuta": curr,
-                    "Tasso %": data.get('interest_rate', 'N/A'),
-                    "Inflaz. %": data.get('inflation_rate', data.get('inflation_cpi', 'N/A')),
-                    "PIL %": data.get('gdp_growth', 'N/A'),
-                    "Disocc. %": data.get('unemployment', 'N/A'),
-                })
+    # Rate Expectations
+    if news_structured.get("rate_expectations"):
+        with st.expander(f"🏦 ASPETTATIVE TASSI ({len(news_structured['rate_expectations'])} risultati)"):
+            by_currency = {}
+            for item in news_structured["rate_expectations"]:
+                curr = item.get("currency", "OTHER")
+                if curr not in by_currency:
+                    by_currency[curr] = []
+                by_currency[curr].append(item)
             
-            df_indicators = pd.DataFrame(indicators_table)
-            st.dataframe(df_indicators, use_container_width=True, hide_index=True)
-        else:
-            st.info("Dati numerici non disponibili per questa analisi")
+            for curr, items in by_currency.items():
+                st.markdown(f"**{curr}:**")
+                for item in items[:2]:
+                    st.caption(f"• {item['title'][:60]}...")
     
-    # ====== NUOVA SEZIONE: PROIEZIONI TASSI DI INTERESSE ======
-    rate_outlook = analysis.get("rate_outlook", {})
-    if rate_outlook:
-        with st.expander("🏦 Proiezioni Tassi Banche Centrali", expanded=True):
-            st.caption("⭐ Sezione cruciale per l'analisi forex - Dati estratti dalle ricerche web")
-            
-            # Crea tabella rate outlook
-            rate_table = []
-            for curr, outlook in rate_outlook.items():
-                if isinstance(outlook, dict):
-                    rate_table.append({
-                        "BC": curr,
-                        "Tasso": outlook.get('current_rate', 'N/A'),
-                        "Prossimo Meeting": outlook.get('next_meeting', 'N/A'),
-                        "Probabilità Mercato": outlook.get('market_probability', 'N/A'),
-                        "Mosse Recenti": outlook.get('recent_moves', 'N/A'),
-                        "Outlook 12M": outlook.get('outlook_12m', 'N/A'),
-                        "Stance": outlook.get('stance', 'N/A'),
-                        "Fonte": outlook.get('source', 'N/A'),
-                    })
-            
-            if rate_table:
-                df_rates = pd.DataFrame(rate_table)
-                st.dataframe(df_rates, use_container_width=True, hide_index=True)
-            else:
-                st.info("Formato rate_outlook non valido")
+    # Meeting Calendar
+    if news_structured.get("meeting_calendar"):
+        with st.expander(f"📅 CALENDARIO MEETING ({len(news_structured['meeting_calendar'])} risultati)"):
+            for item in news_structured["meeting_calendar"][:3]:
+                st.markdown(f"• {item['title'][:80]}")
     
-    st.markdown("---")
+    # Geopolitics
+    if news_structured.get("geopolitics"):
+        with st.expander(f"🌍 GEOPOLITICA ({len(news_structured['geopolitics'])} risultati)"):
+            for item in news_structured["geopolitics"][:3]:
+                st.markdown(f"• {item['title'][:80]}")
     
-    # Ranking migliori/peggiori
-    ranking = analysis.get("ranking", {})
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### 🏆 TOP BULLISH (Long)")
-        for item in ranking.get("top_bullish", [])[:5]:
-            pair = item.get("pair", "")
-            diff = item.get("diff", 0)
-            st.markdown(f"**{pair}** → Diff: **+{diff}**")
-    
-    with col2:
-        st.markdown("### 📉 TOP BEARISH (Short)")
-        for item in ranking.get("top_bearish", [])[:5]:
-            pair = item.get("pair", "")
-            diff = item.get("diff", 0)
-            st.markdown(f"**{pair}** → Diff: **{diff}**")
-    
-    st.markdown("---")
-    
-    # Tabella principale con selezione
-    st.markdown("### 📋 Tutte le Coppie")
-    st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
-    
-    pairs_data = analysis.get("pairs_analysis", [])
-    
-    # Crea DataFrame
-    table_data = []
-    for pair_info in pairs_data:
-        pair = pair_info.get("pair", "")
-        diff = pair_info.get("differential", 0)
-        bias = pair_info.get("bias", "neutral")
-        total_a = pair_info.get("total_a", 0)
-        total_b = pair_info.get("total_b", 0)
-        summary = pair_info.get("summary", "")
-        
-        bias_icon = get_bias_color(bias, diff)
-        
-        table_data.append({
-            "Coppia": pair,
-            "Bias": f"{bias_icon} {bias.upper()}",
-            "Diff": diff,
-            "A": total_a,
-            "B": total_b,
-            "Sintesi": summary,
-        })
-    
-    df = pd.DataFrame(table_data)
-    df_sorted = df.sort_values("Diff", ascending=False).reset_index(drop=True)
-    
-    # Mostra tabella con selezione
-    selection = st.dataframe(
-        df_sorted,
-        use_container_width=True,
-        hide_index=True,
-        height=700,
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={
-            "Coppia": st.column_config.TextColumn("Coppia", width=85),
-            "Bias": st.column_config.TextColumn("Bias", width=120),
-            "Diff": st.column_config.NumberColumn("Diff", width=55),
-            "A": st.column_config.NumberColumn("A", width=45),
-            "B": st.column_config.NumberColumn("B", width=45),
-            "Sintesi": st.column_config.TextColumn("Sintesi", width=500),
-        }
-    )
-    
-    # Se una riga è selezionata, mostra il dettaglio
-    if selection and selection.selection and selection.selection.rows:
-        selected_idx = selection.selection.rows[0]
-        selected_pair_name = df_sorted.iloc[selected_idx]["Coppia"]
-        
-        pair_detail = next((p for p in pairs_data if p.get("pair") == selected_pair_name), None)
-        if pair_detail:
-            st.markdown("---")
-            display_pair_detail(pair_detail, analysis.get("currencies_data", {}))
-    
-    # Calendario eventi (link esterni)
-    st.markdown("---")
-    st.markdown("### 📅 Calendario Economico")
-    st.info("📊 Consulta i calendari economici per gli eventi della settimana")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("🔗 [**TradingEconomics Calendar**](https://tradingeconomics.com/calendar)")
-    with col2:
-        st.markdown("🔗 [**ForexFactory Calendar**](https://www.forexfactory.com/calendar)")
-    
-    st.caption("Filtra per impatto 2-3 stelle e per le valute: USD, EUR, GBP, JPY, CHF, AUD, CAD")
-    
-    # JSON Raw
-    with st.expander("🔧 Dati Raw (JSON)"):
-        st.json(analysis)
+    # Link aggiuntivi processati
+    if links_structured:
+        with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=True):
+            for item in links_structured:
+                status_icon = "✅" if item['status'] == 'success' else "❌"
+                st.markdown(f"{status_icon} **{item['title'][:60]}**")
+                st.caption(f"URL: {item['url'][:50]}...")
+                if item['status'] == 'success':
+                    st.caption(item['content_preview'][:200] + "...")
 
 
-def display_pair_detail(pair_data: dict, currencies_data: dict):
-    """Visualizza il dettaglio di una singola coppia"""
+def display_macro_data(macro_data: dict):
+    """Mostra i dati macro in formato tabella"""
+    st.markdown("### 📊 Dati Macroeconomici")
     
-    pair = pair_data.get("pair", "")
-    curr_a = pair_data.get("currency_a", "")
-    curr_b = pair_data.get("currency_b", "")
-    
-    # Box bias
-    bias = pair_data.get("bias", "neutral")
-    diff = pair_data.get("differential", 0)
-    strength = pair_data.get("bias_strength", "neutral")
-    
-    if bias == "bullish":
-        st.success(f"### 🟢 {pair} - BIAS RIALZISTA ({strength.upper()})")
-    elif bias == "bearish":
-        st.error(f"### 🔴 {pair} - BIAS RIBASSISTA ({strength.upper()})")
-    else:
-        st.info(f"### ⚪ {pair} - NEUTRALE")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Differenziale", f"{diff:+d}")
-    with col2:
-        st.metric(f"Score {curr_a}", f"{pair_data.get('total_a', 0):+d}")
-    with col3:
-        st.metric(f"Score {curr_b}", f"{pair_data.get('total_b', 0):+d}")
-    
-    st.markdown(f"**Sintesi:** {pair_data.get('summary', 'N/A')}")
-    
-    # Dati macro delle due valute
-    st.markdown("#### 📈 Confronto Dati Macro e Punteggi")
-    
-    data_a = currencies_data.get(curr_a, {})
-    data_b = currencies_data.get(curr_b, {})
-    scores_a = pair_data.get("scores_a", {})
-    scores_b = pair_data.get("scores_b", {})
-    
-    def get_score_info(scores, key):
-        item = scores.get(key, {})
-        if isinstance(item, dict):
-            return item.get("score", 0), item.get("comment", "-")
-        return item if isinstance(item, int) else 0, "-"
-    
-    col1, col2 = st.columns(2)
-    
-    params = [
-        ("rates_now", "Tassi Attuali"),
-        ("rates_future", "Aspettative Tassi"),
-        ("inflation", "Inflazione"),
-        ("growth", "Crescita/PIL"),
-        ("risk_sentiment", "Risk Sentiment"),
-        ("balance_fiscal", "Bilancia/Fiscale"),
-    ]
-    
-    with col1:
-        st.markdown(f"### {curr_a}")
-        st.markdown(f"""
-**Dati Economici:**
-- 🏦 Tasso BC: **{data_a.get('interest_rate', 'N/A')}**
-- 📊 Inflazione: **{data_a.get('inflation_rate', data_a.get('inflation_cpi', 'N/A'))}**
-- 📈 PIL: **{data_a.get('gdp_growth', 'N/A')}**
-- 👥 Disoccupazione: **{data_a.get('unemployment', 'N/A')}**
-""")
-        
-        st.markdown(f"**Punteggi {curr_a} vs {curr_b}:**")
-        
-        scores_table_a = []
-        total_calc_a = 0
-        for key, label in params:
-            score, comment = get_score_info(scores_a, key)
-            total_calc_a += score
-            emoji = "🟢" if score > 0 else ("🔴" if score < 0 else "⚪")
-            scores_table_a.append({
-                "Parametro": label,
-                "Score": f"{emoji} {score:+d}",
-                "Motivazione": comment
-            })
-        
-        df_scores_a = pd.DataFrame(scores_table_a)
-        st.dataframe(df_scores_a, use_container_width=True, hide_index=True, height=250)
-        
-        total_a = pair_data.get("total_a", total_calc_a)
-        emoji_total = "🟢" if total_a > 0 else ("🔴" if total_a < 0 else "⚪")
-        st.markdown(f"### {emoji_total} TOTALE: **{total_a:+d}**")
-    
-    with col2:
-        st.markdown(f"### {curr_b}")
-        st.markdown(f"""
-**Dati Economici:**
-- 🏦 Tasso BC: **{data_b.get('interest_rate', 'N/A')}**
-- 📊 Inflazione: **{data_b.get('inflation_rate', data_b.get('inflation_cpi', 'N/A'))}**
-- 📈 PIL: **{data_b.get('gdp_growth', 'N/A')}**
-- 👥 Disoccupazione: **{data_b.get('unemployment', 'N/A')}**
-""")
-        
-        st.markdown(f"**Punteggi {curr_b} vs {curr_a}:**")
-        
-        scores_table_b = []
-        total_calc_b = 0
-        for key, label in params:
-            score, comment = get_score_info(scores_b, key)
-            total_calc_b += score
-            emoji = "🟢" if score > 0 else ("🔴" if score < 0 else "⚪")
-            scores_table_b.append({
-                "Parametro": label,
-                "Score": f"{emoji} {score:+d}",
-                "Motivazione": comment
-            })
-        
-        df_scores_b = pd.DataFrame(scores_table_b)
-        st.dataframe(df_scores_b, use_container_width=True, hide_index=True, height=250)
-        
-        total_b = pair_data.get("total_b", total_calc_b)
-        emoji_total = "🟢" if total_b > 0 else ("🔴" if total_b < 0 else "⚪")
-        st.markdown(f"### {emoji_total} TOTALE: **{total_b:+d}**")
-    
-    # Scenari
-    st.markdown("---")
-    st.markdown("#### 📊 Scenari di Prezzo")
-    
-    current_price = pair_data.get("current_price", 0)
-    scenarios = pair_data.get("scenarios", {})
-    
-    if current_price:
-        st.info(f"**Prezzo attuale:** ~{current_price:.4f}")
-    else:
-        st.info("Prezzo non disponibile")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        base = scenarios.get("base", {})
-        if base:
-            st.markdown(f"**🟡 Base**\n\n{base.get('low', 0):.4f} - {base.get('high', 0):.4f}")
-    with col2:
-        bull = scenarios.get("bullish", {})
-        if bull:
-            st.markdown(f"**🟢 {curr_a} Forte**\n\n{bull.get('low', 0):.4f} - {bull.get('high', 0):.4f}")
-    with col3:
-        bear = scenarios.get("bearish", {})
-        if bear:
-            st.markdown(f"**🔴 {curr_b} Forte**\n\n{bear.get('low', 0):.4f} - {bear.get('high', 0):.4f}")
-    
-    # Key drivers
-    st.markdown("#### 🔑 Driver Chiave")
-    for driver in pair_data.get("key_drivers", []):
-        st.markdown(f"• {driver}")
-
-
-# --- STILE CSS ---
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-    
-    /* Migliora visualizzazione tabella */
-    [data-testid="stDataFrame"] {
-        width: 100%;
-    }
-    
-    [data-testid="stDataFrame"] td {
-        white-space: pre-wrap !important;
-        word-wrap: break-word !important;
-    }
-    
-    /* Aumenta altezza righe */
-    [data-testid="stDataFrame"] [data-testid="StyledDataFrame"] {
-        font-size: 14px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- HEADER ---
-st.markdown('<p class="main-header">📊 Forex Macro Analyst</p>', unsafe_allow_html=True)
-st.markdown("**Powered by Claude AI** - Analisi macroeconomica globale di tutte le coppie forex")
-
-# --- SIDEBAR ---
-with st.sidebar:
-    st.header("⚙️ Configurazione")
-    
-    if API_KEY_LOADED:
-        st.success("✅ API Key configurata")
-    else:
-        st.error("❌ API Key mancante")
-    
-    if API_NINJAS_ENABLED:
-        st.success("📊 API Ninjas attiva")
-    else:
-        st.warning("📊 API Ninjas Key mancante")
-    
-    if SUPABASE_ENABLED:
-        st.success("☁️ Database cloud attivo")
-    else:
-        st.info("💾 Salvataggio locale")
-    
-    st.markdown("---")
-    
-    # Analisi disponibili
-    available_dates = get_available_dates()
-    
-    if available_dates:
-        st.markdown("### 📁 Analisi Salvate")
-        
-        # Selettore data/ora
-        date_options = [format_datetime_display(d) for d in available_dates]
-        selected_date_idx = st.selectbox(
-            "Seleziona analisi:",
-            range(len(date_options)),
-            format_func=lambda x: date_options[x],
-            key="date_selector"
-        )
-        
-        selected_date = available_dates[selected_date_idx]
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("📂 Carica", use_container_width=True):
-                loaded = load_analysis(selected_date)
-                if loaded:
-                    st.session_state['current_analysis'] = loaded
-                    st.session_state['analysis_source'] = 'loaded'
-                    st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Elimina", use_container_width=True, type="secondary"):
-                st.session_state['confirm_delete'] = selected_date
-        
-        # Conferma eliminazione
-        if 'confirm_delete' in st.session_state and st.session_state['confirm_delete'] == selected_date:
-            st.warning(f"⚠️ Eliminare l'analisi del {format_datetime_display(selected_date)}?")
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("✅ Sì", use_container_width=True):
-                    if delete_analysis(selected_date):
-                        st.success("Analisi eliminata!")
-                        # Se l'analisi corrente è quella eliminata, rimuovila
-                        if 'current_analysis' in st.session_state:
-                            current_dt = st.session_state['current_analysis'].get('analysis_datetime', '')
-                            if current_dt == selected_date:
-                                del st.session_state['current_analysis']
-                        del st.session_state['confirm_delete']
-                        st.rerun()
-            with col2:
-                if st.button("❌ No", use_container_width=True):
-                    del st.session_state['confirm_delete']
-                    st.rerun()
-    else:
-        st.info("Nessuna analisi salvata")
-    
-    st.markdown("---")
-    
-    st.markdown(f"**Coppie analizzate:** {len(FOREX_PAIRS)}")
-    st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
-    st.markdown(f"**Modello:** Claude Sonnet 4")
-    st.markdown(f"**Dati:** global-rates.com + API Ninjas")
-    
-    st.markdown("---")
-    
-    # Opzioni analisi
-    st.markdown("### ⚙️ Opzioni")
-    
-    enable_claude_analysis = st.checkbox(
-        "🧠 Analisi Claude (coppie forex)",
-        value=True,
-        help="Disabilita per testare solo il recupero dati dalle API"
-    )
-    
-    if not enable_claude_analysis:
-        st.info("💡 Solo recupero dati - nessun token Claude usato")
-    
-    st.markdown("---")
-    
-    # ====== NUOVA SEZIONE: RISORSE AGGIUNTIVE ======
-    st.markdown("### 📎 Risorse Aggiuntive")
-    st.caption("Inserisci link a fonti extra (comunicati stampa, news, report)")
-    
-    additional_urls = st.text_area(
-        "URL (uno per riga)",
-        height=120,
-        placeholder="https://federalreserve.gov/newsevents/...\nhttps://ecb.europa.eu/press/...\nhttps://reuters.com/markets/...",
-        help="Max 10 URL. Queste fonti verranno analizzate INSIEME ai dati standard, non li sostituiscono.",
-        key="additional_urls"
-    )
-    
-    # Conta URL validi
-    if additional_urls.strip():
-        url_list = [u.strip() for u in additional_urls.strip().split('\n') if u.strip().startswith(('http://', 'https://'))]
-        if url_list:
-            st.info(f"📌 {len(url_list)} URL verranno analizzati")
-            if len(url_list) > 10:
-                st.warning("⚠️ Max 10 URL - verranno usati solo i primi 10")
-    
-    st.markdown("---")
-    
-    # Pulsante nuova analisi
-    analyze_btn = st.button(
-        "🔄 Nuova Analisi" if enable_claude_analysis else "🔄 Test Recupero Dati",
-        disabled=not API_KEY_LOADED,
-        use_container_width=True,
-        type="primary"
-    )
-    
-    st.caption("📝 Ogni analisi viene salvata con data e ora")
-
-
-# --- MAIN ---
-
-# Carica automaticamente l'ultima analisi all'avvio
-if 'current_analysis' not in st.session_state:
-    latest = get_latest_analysis()
-    if latest:
-        st.session_state['current_analysis'] = latest
-        st.session_state['analysis_source'] = 'auto'
-
-# Nuova analisi
-if analyze_btn:
-    progress = st.progress(0, text="Inizializzazione...")
-    
-    progress.progress(5, text="📊 FASE 1: Scaricamento dati da global-rates.com + API Ninjas...")
-    te_data, search_text = search_all_currencies_data()
-    
-    # ====== FASE 1B: RISORSE AGGIUNTIVE (se presenti) ======
-    additional_content = ""
-    if additional_urls and additional_urls.strip():
-        url_list = [u.strip() for u in additional_urls.strip().split('\n') if u.strip().startswith(('http://', 'https://'))]
-        if url_list:
-            progress.progress(20, text=f"📎 FASE 1B: Recupero {len(url_list)} risorse aggiuntive...")
-            additional_content = fetch_additional_resources(url_list)
-            if additional_content:
-                st.info(f"✅ Recuperate {len(url_list)} risorse aggiuntive")
-    
-    # Mostra i dati recuperati
-    st.markdown("---")
-    st.markdown("### 📊 Dati Recuperati dalle API")
-    
-    # Tabella dati
-    if te_data:
+    if macro_data:
         table_rows = []
-        for curr, data in te_data.items():
+        for curr, data in macro_data.items():
             row = {"Valuta": curr}
-            for key, value in data.items():
-                row[key] = value
+            row["Tasso %"] = data.get('interest_rate', 'N/A')
+            row["Inflazione %"] = data.get('inflation_rate', 'N/A')
+            row["PIL %"] = data.get('gdp_growth', 'N/A')
+            row["Disoccup. %"] = data.get('unemployment', 'N/A')
             table_rows.append(row)
         
-        df_test = pd.DataFrame(table_rows)
-        st.dataframe(df_test, use_container_width=True, hide_index=True)
+        df = pd.DataFrame(table_rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
         
         # Verifica completezza
         missing = []
-        for curr, data in te_data.items():
+        for curr, data in macro_data.items():
             for key, value in data.items():
                 if value == 'N/A' or value is None:
                     missing.append(f"{curr}-{key}")
         
         if missing:
-            st.warning(f"⚠️ Dati mancanti: {', '.join(missing)}")
+            st.warning(f"⚠️ Dati mancanti: {', '.join(missing[:5])}...")
         else:
-            st.success("✅ Tutti i dati recuperati con successo!")
+            st.success("✅ Tutti i dati recuperati!")
+
+
+def display_analysis_matrix(analysis: dict):
+    """Mostra la matrice delle analisi forex"""
     
-    # Se analisi Claude abilitata, procedi
-    if enable_claude_analysis:
-        progress.progress(50, text="🧠 FASE 2: Claude sta analizzando le coppie forex...")
-        analysis = analyze_all_pairs(ANTHROPIC_API_KEY, te_data, search_text, additional_content)
+    if "error" in analysis:
+        st.error(f"Errore nell'analisi: {analysis['error']}")
+        return
+    
+    # Header
+    st.markdown(f"### 🤖 Analisi Claude AI")
+    
+    if "summary" in analysis:
+        st.info(f"📋 **Contesto:** {analysis['summary']}")
+    
+    if "risk_sentiment" in analysis:
+        sentiment = analysis["risk_sentiment"]
+        emoji = "🟢" if sentiment == "risk-on" else "🔴" if sentiment == "risk-off" else "🟡"
+        st.markdown(f"**Risk Sentiment:** {emoji} {sentiment.upper()}")
+    
+    # Analisi per coppia
+    pair_analysis = analysis.get("pair_analysis", {})
+    
+    if pair_analysis:
+        st.markdown("### 📈 Analisi per Coppia")
         
-        if "error" not in analysis:
-            analysis["model_used"] = "Claude Sonnet 4"
-            analysis["data_source"] = "API Ufficiali Banche Centrali"
-            # Salva info sulle risorse aggiuntive usate
-            if additional_content:
-                analysis["additional_resources_used"] = True
-            progress.progress(80, text="💾 Salvataggio analisi...")
-            if save_analysis(analysis):
-                st.session_state['current_analysis'] = analysis
+        # Crea dataframe
+        rows = []
+        for pair, data in pair_analysis.items():
+            bias = data.get("bias", "neutral")
+            strength = data.get("strength", 3)
+            summary = data.get("summary", "")
+            
+            bias_emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "🟡"
+            strength_bar = "●" * strength + "○" * (5 - strength)
+            
+            rows.append({
+                "Coppia": pair,
+                "Bias": f"{bias_emoji} {bias.upper()}",
+                "Forza": strength_bar,
+                "Analisi": summary[:200] + "..." if len(summary) > 200 else summary
+            })
+        
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Rate Outlook
+    rate_outlook = analysis.get("rate_outlook", {})
+    if rate_outlook:
+        st.markdown("### 🏦 Outlook Tassi")
+        
+        rate_rows = []
+        for curr, data in rate_outlook.items():
+            rate_rows.append({
+                "Valuta": curr,
+                "Tasso Attuale": data.get("current_rate", "N/A"),
+                "Prossimo Meeting": data.get("next_meeting", "N/A"),
+                "Aspettativa": data.get("expectation", "N/A"),
+                "Probabilità": data.get("probability", "N/A")
+            })
+        
+        df_rates = pd.DataFrame(rate_rows)
+        st.dataframe(df_rates, use_container_width=True, hide_index=True)
+
+
+def display_analysis_history(analyses: list, user_id: str):
+    """Mostra lo storico delle analisi"""
+    
+    st.markdown("### 📜 Storico Analisi")
+    
+    if not analyses:
+        st.info("Nessuna analisi salvata")
+        return
+    
+    for i, analysis_record in enumerate(analyses[:20]):  # Max 20
+        # Estrai informazioni
+        if SUPABASE_ENABLED:
+            datetime_str = analysis_record.get("analysis_datetime", "")
+            analysis_type = analysis_record.get("analysis_type", "custom")
+            options = json.loads(analysis_record.get("options_selected", "{}"))
+            data = analysis_record.get("data", {})
+        else:
+            datetime_str = analysis_record.get("data", {}).get("analysis_datetime", "")
+            analysis_type = analysis_record.get("analysis_type", "custom")
+            options = analysis_record.get("options_selected", {})
+            data = analysis_record.get("data", {})
+        
+        # Formato display
+        date_display = format_datetime_display(datetime_str)
+        type_label = get_analysis_type_label(analysis_type)
+        
+        # Badge opzioni
+        badges = []
+        if options.get("macro"): badges.append("📊")
+        if options.get("news"): badges.append("📰")
+        if options.get("links"): badges.append("📎")
+        if options.get("claude"): badges.append("🤖")
+        badges_str = " ".join(badges)
+        
+        col1, col2, col3 = st.columns([3, 1, 1])
+        
+        with col1:
+            st.markdown(f"**{date_display}** - {type_label} {badges_str}")
+        
+        with col2:
+            if st.button("📂", key=f"load_{i}", help="Carica"):
+                st.session_state['current_analysis'] = analysis_record
+                st.session_state['analysis_source'] = 'loaded'
+                st.rerun()
+        
+        with col3:
+            if st.button("🗑️", key=f"del_{i}", help="Elimina"):
+                if delete_analysis(datetime_str, user_id):
+                    st.success("Eliminata!")
+                    st.rerun()
+
+
+# ============================================================================
+# CSS STYLING
+# ============================================================================
+
+def apply_custom_css():
+    st.markdown("""
+    <style>
+        .main-header {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #1e3a5f;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stProgress > div > div > div > div {
+            background-color: #1e3a5f;
+        }
+        
+        div[data-testid="stExpander"] {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .analysis-options {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# MAIN APP
+# ============================================================================
+
+def main():
+    apply_custom_css()
+    
+    # ===== CHECK AUTENTICAZIONE =====
+    if 'authenticated' not in st.session_state or not st.session_state['authenticated']:
+        show_login_page()
+        return
+    
+    # ===== UTENTE AUTENTICATO =====
+    user = st.session_state.get('user', {})
+    user_id = st.session_state.get('user_id', 'local')
+    username = user.get('username', 'Utente')
+    
+    # --- HEADER ---
+    col_header1, col_header2 = st.columns([4, 1])
+    with col_header1:
+        st.markdown('<p class="main-header">📊 Forex Macro Analyst</p>', unsafe_allow_html=True)
+        st.markdown(f"**Powered by Claude AI** | 👤 {username}")
+    with col_header2:
+        if st.button("🚪 Logout", type="secondary"):
+            logout()
+    
+    # --- SIDEBAR ---
+    with st.sidebar:
+        st.header("⚙️ Configurazione")
+        
+        # Status
+        if API_KEY_LOADED:
+            st.success("✅ API Claude configurata")
+        else:
+            st.error("❌ API Key mancante")
+        
+        if SUPABASE_ENABLED:
+            st.success("☁️ Database Supabase attivo")
+        else:
+            st.warning("💾 Modalità locale")
+        
+        st.markdown("---")
+        
+        # ===== OPZIONI ANALISI =====
+        st.markdown("### 🎛️ Opzioni Analisi")
+        
+        st.caption("Seleziona cosa includere nell'analisi:")
+        
+        opt_macro = st.checkbox(
+            "📊 Aggiorna Dati Macro",
+            value=True,
+            help="Recupera tassi, inflazione, PIL, disoccupazione (GRATIS)"
+        )
+        
+        opt_news = st.checkbox(
+            "📰 Ricerca Notizie Web",
+            value=True,
+            help="Cerca su Forex Factory, outlook BC, geopolitica (GRATIS)"
+        )
+        
+        opt_links = st.checkbox(
+            "📎 Processa Link Aggiuntivi",
+            value=False,
+            help="Analizza gli URL inseriti sotto (GRATIS)"
+        )
+        
+        # Textarea per link (visibile solo se opzione attiva)
+        additional_urls = ""
+        if opt_links:
+            additional_urls = st.text_area(
+                "URL (uno per riga)",
+                height=100,
+                placeholder="https://federalreserve.gov/...\nhttps://reuters.com/...",
+                help="Max 10 URL",
+                key="additional_urls"
+            )
+            
+            if additional_urls.strip():
+                url_count = len([u for u in additional_urls.split('\n') if u.strip().startswith('http')])
+                st.info(f"📌 {url_count} URL da processare")
+        
+        st.markdown("---")
+        
+        opt_claude = st.checkbox(
+            "🤖 Analisi Claude AI",
+            value=True,
+            help="Genera analisi completa forex ($$$ - costa token)"
+        )
+        
+        if opt_claude:
+            st.warning("⚠️ L'analisi Claude consuma token API")
+        
+        # Validazione: almeno un'opzione dati se Claude attivo
+        if opt_claude and not (opt_macro or opt_news or opt_links):
+            st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
+        
+        st.markdown("---")
+        
+        # ===== BOTTONE ANALISI =====
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_news or opt_links)
+        
+        analyze_btn = st.button(
+            "🚀 AVVIA ANALISI",
+            disabled=not can_analyze,
+            use_container_width=True,
+            type="primary"
+        )
+        
+        # Calcola tipo analisi
+        analysis_type = "custom"
+        if opt_macro and opt_news and opt_claude and not opt_links:
+            analysis_type = "full"
+        elif opt_macro and not opt_news and not opt_links:
+            analysis_type = "macro_only"
+        elif opt_news and not opt_macro and not opt_links:
+            analysis_type = "news_only"
+        elif opt_links and not opt_macro and not opt_news:
+            analysis_type = "links_only"
+        
+        st.caption(f"📋 Tipo: {get_analysis_type_label(analysis_type)}")
+        
+        st.markdown("---")
+        st.markdown(f"**Coppie:** {len(FOREX_PAIRS)}")
+        st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
+    
+    # --- MAIN AREA ---
+    
+    # Layout a due colonne: Risultati | Storico
+    col_main, col_history = st.columns([3, 1])
+    
+    with col_main:
+        # ===== ESECUZIONE ANALISI =====
+        if analyze_btn:
+            progress = st.progress(0, text="Inizializzazione...")
+            
+            # Variabili per raccogliere i dati
+            macro_data = None
+            news_text = ""
+            news_structured = {}
+            additional_text = ""
+            links_structured = []
+            claude_analysis = None
+            
+            options_selected = {
+                "macro": opt_macro,
+                "news": opt_news,
+                "links": opt_links,
+                "claude": opt_claude
+            }
+            
+            step = 0
+            total_steps = sum([opt_macro, opt_news, opt_links, opt_claude])
+            
+            # FASE 1: Dati Macro
+            if opt_macro:
+                step += 1
+                progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
+                macro_data = fetch_macro_data()
+                st.session_state['last_macro_data'] = macro_data
+            
+            # FASE 2: Notizie Web
+            if opt_news:
+                step += 1
+                progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
+                news_text, news_structured = search_web_news()
+                st.session_state['last_news_text'] = news_text
+                st.session_state['last_news_structured'] = news_structured
+            
+            # FASE 3: Link Aggiuntivi
+            if opt_links and additional_urls.strip():
+                step += 1
+                progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
+                url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
+                additional_text, links_structured = fetch_additional_resources(url_list)
+                st.session_state['last_links_text'] = additional_text
+                st.session_state['last_links_structured'] = links_structured
+            
+            # FASE 4: Analisi Claude
+            if opt_claude:
+                step += 1
+                progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
+                
+                # Usa dati dalla sessione se non aggiornati ora
+                if not opt_macro and 'last_macro_data' in st.session_state:
+                    macro_data = st.session_state['last_macro_data']
+                if not opt_news and 'last_news_text' in st.session_state:
+                    news_text = st.session_state['last_news_text']
+                if not opt_links and 'last_links_text' in st.session_state:
+                    additional_text = st.session_state['last_links_text']
+                
+                claude_analysis = analyze_with_claude(
+                    ANTHROPIC_API_KEY,
+                    macro_data,
+                    news_text,
+                    additional_text
+                )
+            
+            # ===== SALVATAGGIO =====
+            progress.progress(90, text="💾 Salvataggio...")
+            
+            analysis_result = {
+                "macro_data": macro_data,
+                "news_structured": news_structured,
+                "links_structured": links_structured,
+                "claude_analysis": claude_analysis,
+                "options_selected": options_selected
+            }
+            
+            if save_analysis(analysis_result, user_id, analysis_type, options_selected):
+                st.session_state['current_analysis'] = analysis_result
                 st.session_state['analysis_source'] = 'new'
-                progress.progress(100, text="✅ Analisi completata!")
+                progress.progress(100, text="✅ Completato!")
                 st.rerun()
             else:
-                st.error("❌ Errore nel salvataggio dell'analisi")
+                st.error("❌ Errore nel salvataggio")
+        
+        # ===== VISUALIZZAZIONE RISULTATI =====
+        if 'current_analysis' in st.session_state:
+            analysis = st.session_state['current_analysis']
+            source = st.session_state.get('analysis_source', 'unknown')
+            
+            if source == 'new':
+                st.success("✅ Nuova analisi completata!")
+            elif source == 'loaded':
+                st.info("📂 Analisi caricata da archivio")
+            
+            # Estrai dati (gestisci sia formato nuovo che vecchio)
+            if 'data' in analysis:
+                # Formato Supabase
+                data = analysis.get('data', {})
+                macro_data = data.get('macro_data')
+                news_structured = data.get('news_structured', {})
+                links_structured = data.get('links_structured', [])
+                claude_analysis = data.get('claude_analysis')
+            else:
+                # Formato diretto
+                macro_data = analysis.get('macro_data')
+                news_structured = analysis.get('news_structured', {})
+                links_structured = analysis.get('links_structured', [])
+                claude_analysis = analysis.get('claude_analysis')
+            
+            # Mostra sezioni in base a cosa è disponibile
+            if macro_data:
+                display_macro_data(macro_data)
+                st.markdown("---")
+            
+            if news_structured or links_structured:
+                display_news_summary(news_structured, links_structured)
+                st.markdown("---")
+            
+            if claude_analysis:
+                display_analysis_matrix(claude_analysis)
+        
         else:
-            progress.progress(100, text="❌ Errore nell'analisi")
-            st.error(f"Errore: {analysis.get('error', 'Sconosciuto')}")
-    else:
-        # Solo test recupero dati
-        progress.progress(100, text="✅ Test recupero dati completato!")
-        st.success("✅ Test completato! I dati sopra sono stati recuperati dalle API delle banche centrali.")
-        st.info("💡 Abilita 'Analisi Claude' nella sidebar per generare l'analisi completa delle coppie forex.")
-
-# Mostra analisi corrente
-if 'current_analysis' in st.session_state:
-    source = st.session_state.get('analysis_source', 'unknown')
-    if source == 'auto':
-        st.info("📂 Caricata automaticamente l'ultima analisi salvata")
-    elif source == 'loaded':
-        st.info("📂 Analisi caricata da archivio")
-    elif source == 'new':
-        st.success("✅ Nuova analisi completata e salvata!")
+            # Stato iniziale
+            st.markdown("""
+            ### 👋 Benvenuto!
+            
+            Seleziona le opzioni nella sidebar e clicca **🚀 AVVIA ANALISI**.
+            
+            **Opzioni disponibili:**
+            - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
+            - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
+            - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
+            - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
+            
+            💡 **Suggerimento:** Puoi aggiornare solo le notizie senza richiamare Claude per risparmiare!
+            """)
     
-    display_matrix(st.session_state['current_analysis'])
-
-else:
-    # Stato iniziale senza analisi
-    if not API_KEY_LOADED:
-        st.error("""
-        ### ⚠️ File di configurazione mancante!
-        
-        Crea un file `config.py` nella stessa cartella con:
-        ```python
-        ANTHROPIC_API_KEY = "la-tua-api-key"
-        ```
-        """)
-    else:
-        st.markdown("""
-        ### 👋 Benvenuto!
-        
-        Nessuna analisi salvata trovata.
-        
-        **Come funziona:**
-        1. Clicca **"🔄 Nuova Analisi"** nella sidebar
-        2. I dati macro vengono scaricati da **global-rates.com + API Ninjas**
-        3. Claude analizza tutte le 19 coppie forex
-        4. L'analisi viene **salvata automaticamente** con la data odierna
-        
-        **Fonti Dati:**
-        - 🌐 global-rates.com (Tassi interesse + Inflazione)
-        - 🇦🇺 ABS - Australian Bureau of Statistics (Inflazione AUD)
-        - 📊 API Ninjas (PIL + Disoccupazione)
-        - 📰 DuckDuckGo Search (Notizie + Outlook)
-        
-        ---
-        
-        **Coppie analizzate:**
-        """)
-        
-        cols = st.columns(4)
-        for i, pair in enumerate(FOREX_PAIRS):
-            with cols[i % 4]:
-                st.markdown(f"• {pair}")
+    with col_history:
+        # ===== STORICO ANALISI =====
+        user_analyses = get_user_analyses(user_id, limit=20)
+        display_analysis_history(user_analyses, user_id)
+    
+    # --- FOOTER ---
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #6b7280; font-size: 0.8rem;">
+        📊 Forex Macro Analyst v3.0 | Powered by Claude AI<br>
+        ⚠️ Non costituisce consiglio di investimento
+    </div>
+    """, unsafe_allow_html=True)
 
 
-# --- FOOTER ---
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #6b7280; font-size: 0.8rem;">
-    📊 Forex Macro Analyst | Powered by Claude AI | Dati: global-rates.com + API Ninjas<br>
-    ⚠️ Analisi qualitativa - Non costituisce consiglio di investimento
-</div>
-""", unsafe_allow_html=True)
+# ============================================================================
+# RUN
+# ============================================================================
+
+if __name__ == "__main__":
+    main()
