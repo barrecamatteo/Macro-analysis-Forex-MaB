@@ -2,6 +2,7 @@ import streamlit as st
 import anthropic
 from duckduckgo_search import DDGS
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import pandas as pd
 import os
@@ -9,6 +10,9 @@ from pathlib import Path
 import requests
 import hashlib
 import re
+
+# Timezone Italia
+ITALY_TZ = ZoneInfo("Europe/Rome")
 
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
@@ -173,7 +177,7 @@ def create_user(username: str, password: str, email: str = None) -> bool:
         "password_hash": hash_password(password),
         "email": email,
         "is_active": True,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now(ITALY_TZ).isoformat()
     }
     
     result = supabase_request("POST", "users", data)
@@ -259,12 +263,18 @@ def save_analysis(analysis: dict, user_id: str, analysis_type: str, options_sele
         options_selected: Dict con le opzioni selezionate
     """
     try:
-        datetime_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        now = datetime.now(ITALY_TZ)
+        datetime_str = now.strftime("%Y-%m-%d_%H-%M-%S")
+        date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M")  # Solo ore e minuti
+        
         analysis["analysis_datetime"] = datetime_str
         
         if SUPABASE_ENABLED:
             data = {
                 "analysis_datetime": datetime_str,
+                "analysis_date": date_str,
+                "time": time_str,
                 "user_id": user_id,
                 "analysis_type": analysis_type,
                 "options_selected": options_selected,  # Supabase JSONB accetta dict direttamente
@@ -278,6 +288,8 @@ def save_analysis(analysis: dict, user_id: str, analysis_type: str, options_sele
             save_data = {
                 "user_id": user_id,
                 "analysis_type": analysis_type,
+                "analysis_date": date_str,
+                "time": time_str,
                 "options_selected": options_selected,
                 "data": analysis
             }
@@ -482,6 +494,21 @@ RANGE TOTALI POSSIBILI:
 - score_quote: da -7 a +7
 - differenziale: da -14 a +14
 
+## ⚠️ MOTIVAZIONI DETTAGLIATE (IMPORTANTE!)
+
+Le motivazioni per ogni punteggio devono essere ESPLICATIVE e COMPLETE:
+- Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %)
+- Citare le ASPETTATIVE delle banche centrali (tagli/rialzi previsti, date meeting)
+- Citare informazioni dalle NOTIZIE WEB se rilevanti
+- Citare informazioni dai LINK AGGIUNTIVI forniti dall'utente se presenti
+- Spiegare il RAGIONAMENTO dietro il punteggio
+
+ESEMPIO MOTIVAZIONE CORRETTA (dettagliata):
+"EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole. BCE ha tagliato a dicembre e mercati prezzano ulteriori 50bp di tagli nel 2025, mentre Fed mantiene stance hawkish con possibile hold prolungato"
+
+ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
+"EUR tassi inferiori a USD"
+
 ## FORMATO OUTPUT JSON:
 {
     "analysis_date": "YYYY-MM-DD",
@@ -503,33 +530,33 @@ RANGE TOTALI POSSIBILI:
             "scores": {
                 "tassi_attuali": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "EUR 2.15% inferiore a USD 3.75%",
-                    "motivation_quote": "USD 3.75% superiore a EUR 2.15%"
+                    "motivation_base": "EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole per EUR nel confronto diretto",
+                    "motivation_quote": "USD tasso Fed al 3.75% vs EUR BCE al 2.15% - spread di 160bp favorevole per USD, rendimenti più attraenti"
                 },
                 "aspettative_tassi": {
                     "base": -2, "quote": 2,
-                    "motivation_base": "BCE molto più dovish con tagli previsti",
-                    "motivation_quote": "Fed hawkish, mantiene tassi alti"
+                    "motivation_base": "BCE molto più dovish: ha tagliato a dicembre, mercati prezzano altri 50bp di tagli nel 2025. Lagarde conferma stance accomodante",
+                    "motivation_quote": "Fed hawkish: Powell segnala hold prolungato, inflazione USA sticky al 2.7% ritarda i tagli. Dot plot indica solo 2 tagli nel 2025"
                 },
                 "inflazione": {
                     "base": 1, "quote": -1,
-                    "motivation_base": "Inflazione EUR più vicina al target",
-                    "motivation_quote": "Inflazione USA più lontana dal target"
+                    "motivation_base": "Inflazione EUR al 2.14% vicina al target BCE del 2%, trend in discesa stabile",
+                    "motivation_quote": "Inflazione USA al 2.74% ancora sopra target Fed del 2%, core PCE persistente"
                 },
                 "crescita_pil": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "PIL EUR molto inferiore",
-                    "motivation_quote": "PIL USA molto superiore"
+                    "motivation_base": "PIL Eurozona debole allo 0.7%, Germania in stagnazione, rischi recessione",
+                    "motivation_quote": "PIL USA robusto al 2.1%, mercato lavoro resiliente, consumi solidi"
                 },
                 "risk_sentiment": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Neutro",
-                    "motivation_quote": "Neutro"
+                    "motivation_base": "Risk sentiment attuale neutro per EUR/USD, nessun flight-to-safety significativo",
+                    "motivation_quote": "Risk sentiment neutro, USD non beneficia di particolare avversione al rischio"
                 },
                 "bilancia_fiscale": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Comparabile",
-                    "motivation_quote": "Comparabile"
+                    "motivation_base": "Situazione fiscale Eurozona mista ma gestibile, spread BTP contenuti",
+                    "motivation_quote": "Deficit USA elevato ma sostenibile, nessun impatto immediato su USD"
                 }
             }
         },
@@ -620,7 +647,7 @@ def search_web_news() -> tuple[str, dict]:
         "geopolitics": []
     }
     
-    today = datetime.now()
+    today = datetime.now(ITALY_TZ)
     current_year = today.year
     next_year = current_year + 1
     
@@ -920,7 +947,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
-    today = datetime.now()
+    today = datetime.now(ITALY_TZ)
     
     user_prompt = f"""
 Analizza TUTTE queste coppie forex: {pairs_list}
@@ -1372,7 +1399,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_base.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:60] + "..." if len(motivation) > 60 else motivation
+                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
                         })
                 
                 if score_rows_base:
@@ -1416,7 +1443,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_quote.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:60] + "..." if len(motivation) > 60 else motivation
+                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
                         })
                 
                 if score_rows_quote:
@@ -1829,6 +1856,8 @@ def main():
         
         step = 0
         total_steps = sum([opt_macro, opt_news, opt_links, opt_claude])
+        if total_steps == 0:
+            total_steps = 1  # Evita divisione per zero
         
         # FASE 1: Dati Macro
         if opt_macro:
@@ -1836,6 +1865,21 @@ def main():
             progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
             macro_data = fetch_macro_data()
             st.session_state['last_macro_data'] = macro_data
+        else:
+            # Usa dati macro dalla sessione o dall'ultima analisi salvata
+            if 'last_macro_data' in st.session_state and st.session_state['last_macro_data']:
+                macro_data = st.session_state['last_macro_data']
+            else:
+                # Carica dall'ultima analisi salvata
+                recent = list_analyses(user_id, limit=1)
+                if recent:
+                    last_analysis = load_analysis(
+                        recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime"),
+                        user_id
+                    )
+                    if last_analysis and 'macro_data' in last_analysis:
+                        macro_data = last_analysis['macro_data']
+                        st.session_state['last_macro_data'] = macro_data
         
         # FASE 2: Notizie Web
         if opt_news:
@@ -1859,9 +1903,7 @@ def main():
             step += 1
             progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
             
-            # Usa dati dalla sessione se non aggiornati ora
-            if not opt_macro and 'last_macro_data' in st.session_state:
-                macro_data = st.session_state['last_macro_data']
+            # Usa dati dalla sessione se non aggiornati ora (macro_data già gestito sopra)
             if not opt_news and 'last_news_text' in st.session_state:
                 news_text = st.session_state['last_news_text']
             if not opt_links and 'last_links_text' in st.session_state:
