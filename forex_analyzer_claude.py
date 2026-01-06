@@ -267,7 +267,7 @@ def save_analysis(analysis: dict, user_id: str, analysis_type: str, options_sele
                 "analysis_datetime": datetime_str,
                 "user_id": user_id,
                 "analysis_type": analysis_type,
-                "options_selected": json.dumps(options_selected),
+                "options_selected": options_selected,  # Supabase JSONB accetta dict direttamente
                 "data": analysis
             }
             result = supabase_request("POST", "analyses", data)
@@ -1045,13 +1045,23 @@ def display_analysis_history(analyses: list, user_id: str):
         # Estrai informazioni
         if SUPABASE_ENABLED:
             datetime_str = analysis_record.get("analysis_datetime", "")
-            analysis_type = analysis_record.get("analysis_type", "custom")
-            options = json.loads(analysis_record.get("options_selected", "{}"))
+            analysis_type = analysis_record.get("analysis_type", "custom") or "custom"
+            # options_selected può essere già un dict (JSONB) o una stringa
+            options_raw = analysis_record.get("options_selected", {})
+            if isinstance(options_raw, str):
+                try:
+                    options = json.loads(options_raw)
+                except:
+                    options = {}
+            elif isinstance(options_raw, dict):
+                options = options_raw
+            else:
+                options = {}
             data = analysis_record.get("data", {})
         else:
             datetime_str = analysis_record.get("data", {}).get("analysis_datetime", "")
-            analysis_type = analysis_record.get("analysis_type", "custom")
-            options = analysis_record.get("options_selected", {})
+            analysis_type = analysis_record.get("analysis_type", "custom") or "custom"
+            options = analysis_record.get("options_selected", {}) or {}
             data = analysis_record.get("data", {})
         
         # Formato display
