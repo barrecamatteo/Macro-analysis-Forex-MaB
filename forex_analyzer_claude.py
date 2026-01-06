@@ -1455,22 +1455,53 @@ def main():
         elif source == 'loaded':
             st.info("📂 Analisi caricata da archivio")
         
-        # Estrai dati (gestisci sia formato nuovo che legacy)
-        data_container = analysis.get('data', analysis)  # Se non c'è 'data', usa analysis stesso
+        # DEBUG: mostra struttura (rimuovere dopo test)
+        # with st.expander("🔍 Debug struttura dati"):
+        #     st.json(analysis)
         
-        # Formato nuovo v3
-        macro_data = data_container.get('macro_data')
-        news_structured = data_container.get('news_structured', {})
-        links_structured = data_container.get('links_structured', [])
-        claude_analysis = data_container.get('claude_analysis')
+        # Estrai dati - gestisci multipli formati
+        # Formato Supabase: { "data": {...}, "analysis_datetime": "...", ... }
+        # Formato v3: data contiene { "macro_data": ..., "claude_analysis": ... }
+        # Formato legacy: data contiene direttamente { "pair_analysis": ..., "market_summary": ... }
         
-        # Formato legacy: se non c'è claude_analysis ma ci sono pair_analysis, è formato vecchio
-        if not claude_analysis and data_container.get('pair_analysis'):
-            # Questo è un'analisi legacy - il data_container È l'analisi Claude
+        data_container = analysis.get('data', analysis)
+        
+        # Se data_container è una stringa (JSON serializzato), deserializza
+        if isinstance(data_container, str):
+            try:
+                data_container = json.loads(data_container)
+            except:
+                data_container = {}
+        
+        # Inizializza variabili
+        macro_data = None
+        news_structured = {}
+        links_structured = []
+        claude_analysis = None
+        
+        # Rileva formato e estrai dati
+        if 'claude_analysis' in data_container:
+            # Formato v3 nuovo
+            macro_data = data_container.get('macro_data')
+            news_structured = data_container.get('news_structured', {})
+            links_structured = data_container.get('links_structured', [])
+            claude_analysis = data_container.get('claude_analysis')
+        elif 'pair_analysis' in data_container:
+            # Formato legacy - data_container È l'analisi Claude
             claude_analysis = data_container
-            macro_data = None  # Nel formato legacy non c'era separazione
-            news_structured = {}
-            links_structured = []
+        elif 'macro_data' in data_container:
+            # Formato v3 senza Claude
+            macro_data = data_container.get('macro_data')
+            news_structured = data_container.get('news_structured', {})
+            links_structured = data_container.get('links_structured', [])
+        
+        # Verifica se c'è qualcosa da mostrare
+        has_content = macro_data or news_structured or links_structured or claude_analysis
+        
+        if not has_content:
+            st.warning("⚠️ Questa analisi non contiene dati visualizzabili")
+            with st.expander("🔍 Dettagli struttura"):
+                st.json(analysis)
         
         # Mostra sezioni in base a cosa è disponibile
         if macro_data:
