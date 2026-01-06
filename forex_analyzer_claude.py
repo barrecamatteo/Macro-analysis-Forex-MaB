@@ -437,53 +437,63 @@ FOREX_PAIRS = [
 # SYSTEM PROMPT PER ANALISI GLOBALE
 # ============================================================================
 
-SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare TUTTE le coppie forex fornite.
+SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 19 coppie forex separatamente.
 
-## ⚠️ REGOLE CRITICHE:
+## ⚠️ REGOLA FONDAMENTALE: ANALISI COPPIA PER COPPIA
 
-### 1. LINGUA: TUTTO IN ITALIANO
-Ogni parola della tua risposta deve essere in italiano. Non usare mai termini inglesi se esiste un equivalente italiano.
+Devi fare **19 ANALISI INDIPENDENTI**, una per ogni coppia forex.
+Per ogni coppia (es: AUD/CAD) devi:
+1. Analizzare il confronto DIRETTO tra le due valute della coppia
+2. Assegnare punteggi SPECIFICI per quella coppia
+3. I punteggi sono RELATIVI al confronto, NON assoluti
 
-### 2. STRUTTURA JSON OBBLIGATORIA
+⚠️ LA STESSA VALUTA PUÒ AVERE PUNTEGGI DIVERSI IN COPPIE DIVERSE!
+Esempio:
+- In AUD/CAD → AUD potrebbe avere score +5 (AUD più forte di CAD)
+- In AUD/USD → AUD potrebbe avere score -3 (AUD più debole di USD)
+
+Questo perché ogni coppia è un confronto unico con dinamiche proprie.
+
+## LINGUA: TUTTO IN ITALIANO
+
+## STRUTTURA JSON OBBLIGATORIA
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
-### 3. ANALISI DEL BIAS
-Per ogni coppia forex (es: EUR/USD dove EUR=base, USD=quote):
-- **BULLISH** = la valuta BASE si rafforza (score_base > score_quote)
-- **BEARISH** = la valuta BASE si indebolisce (score_base < score_quote)
-- **NEUTRAL** = equilibrio (score_base ≈ score_quote)
+## ANALISI DEL BIAS
+Per ogni coppia forex (es: EUR/USD dove EUR=valuta base, USD=valuta quote):
+- **BULLISH** = la valuta BASE si rafforza rispetto alla QUOTE
+- **BEARISH** = la valuta BASE si indebolisce rispetto alla QUOTE
+- **NEUTRAL** = equilibrio tra le due valute
 
-### 4. SISTEMA DI SCORING (6 PARAMETRI)
-Per OGNI coppia devi assegnare punteggi da -2 a +2 per questi 6 parametri:
-1. **Tassi Attuali**: confronto tassi BC attuali
-2. **Aspettative Tassi**: outlook hawkish/dovish, probabilità tagli/rialzi
-3. **Inflazione**: confronto CPI/inflazione
-4. **Crescita/PIL**: confronto crescita economica
-5. **Risk Sentiment**: impatto risk-on/risk-off sulla coppia
-6. **Bilancia/Fiscale**: bilancia commerciale, situazione fiscale
+## SISTEMA DI SCORING (6 PARAMETRI PER OGNI COPPIA)
 
-SCALA PUNTEGGI:
-- +2 = molto favorevole per quella valuta
+Per OGNI coppia, analizza il confronto diretto e assegna punteggi da -2 a +2:
+
+1. **Tassi Attuali**: chi ha il vantaggio sui tassi BC nel confronto diretto?
+2. **Aspettative Tassi**: chi ha outlook migliore (hawkish vs dovish)?
+3. **Inflazione**: chi gestisce meglio l'inflazione nel confronto?
+4. **Crescita/PIL**: chi ha crescita economica migliore?
+5. **Risk Sentiment**: in base al sentiment attuale, chi è favorito nella coppia?
+6. **Bilancia/Fiscale**: chi ha situazione fiscale/commerciale migliore?
+
+SCALA PUNTEGGI (sempre relativi al confronto nella coppia):
+- +2 = nettamente favorevole per quella valuta nel confronto
 - +1 = leggermente favorevole
-- 0 = neutro
+- 0 = neutro/parità
 - -1 = leggermente sfavorevole
-- -2 = molto sfavorevole
+- -2 = nettamente sfavorevole
 
-### 5. FORMATO OUTPUT JSON:
+## FORMATO OUTPUT JSON:
 {
     "analysis_date": "YYYY-MM-DD",
     "summary": "Breve riassunto del contesto macro globale in italiano",
-    "currency_analysis": {
-        "EUR": {"outlook": "bullish/bearish/neutral", "key_factors": ["fattore1", "fattore2"]},
-        ...per ogni valuta
-    },
     "pair_analysis": {
         "EUR/USD": {
             "bias": "bullish/bearish/neutral",
             "strength": 1-5,
-            "summary": "Spiegazione sintetica del bias",
+            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO EUR vs USD",
             "key_drivers": ["driver1", "driver2"],
-            "score_base": 5,
+            "score_base": 3,
             "score_quote": -3,
             "current_price": "1.0850",
             "price_scenarios": {
@@ -493,38 +503,38 @@ SCALA PUNTEGGI:
             },
             "scores": {
                 "tassi_attuali": {
-                    "base": 1, "quote": -1,
-                    "motivation_base": "EUR 2.15% vs USD 3.75% - differenziale sfavorevole",
-                    "motivation_quote": "USD 3.75% vs EUR 2.15% - differenziale favorevole"
+                    "base": -1, "quote": 1,
+                    "motivation_base": "EUR 2.15% inferiore a USD 3.75% - svantaggio per EUR",
+                    "motivation_quote": "USD 3.75% superiore a EUR 2.15% - vantaggio per USD"
                 },
                 "aspettative_tassi": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "BCE dovish con tagli previsti",
-                    "motivation_quote": "Fed hawkish, hold prolungato"
+                    "motivation_base": "BCE più dovish con tagli previsti vs Fed",
+                    "motivation_quote": "Fed più hawkish, mantiene tassi alti vs BCE"
                 },
                 "inflazione": {
-                    "base": 1, "quote": 0,
-                    "motivation_base": "Inflazione EUR 2.14% vicina al target",
-                    "motivation_quote": "Inflazione USA 2.74% sopra target"
+                    "base": 1, "quote": -1,
+                    "motivation_base": "Inflazione EUR 2.14% più vicina al target vs USA",
+                    "motivation_quote": "Inflazione USA 2.74% più lontana dal target vs EUR"
                 },
                 "crescita_pil": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "PIL EUR debole 0.7%",
-                    "motivation_quote": "PIL USA robusto 2.1%"
+                    "motivation_base": "PIL EUR 0.7% molto inferiore a USA",
+                    "motivation_quote": "PIL USA 2.1% molto superiore a EUR"
                 },
                 "risk_sentiment": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Neutro per EUR",
-                    "motivation_quote": "Neutro per USD"
+                    "motivation_base": "Risk sentiment neutro per questa coppia",
+                    "motivation_quote": "Risk sentiment neutro per questa coppia"
                 },
                 "bilancia_fiscale": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Situazione fiscale stabile",
-                    "motivation_quote": "Deficit elevato ma gestibile"
+                    "motivation_base": "Situazioni fiscali comparabili",
+                    "motivation_quote": "Situazioni fiscali comparabili"
                 }
             }
         },
-        ...per ogni coppia
+        ... RIPETI PER TUTTE LE 19 COPPIE CON ANALISI INDIPENDENTI
     },
     "rate_outlook": {
         "USD": {"current_rate": "X.XX%", "next_meeting": "data", "expectation": "hold/cut/hike", "probability": "XX%"},
@@ -534,14 +544,13 @@ SCALA PUNTEGGI:
     "events_calendar": []
 }
 
-### 6. REGOLE SPECIALI:
-- JPY/CHF: safe-haven, si rafforzano in risk-off
-- AUD/CAD: valute commodity, sensibili a Cina e materie prime
-- Il DIFFERENZIALE = score_base - score_quote (positivo = bullish, negativo = bearish)
-- Usa SEMPRE dati recenti dalle notizie, non solo i numeri
-- Assicurati che score_base = somma dei punteggi "base" dei 6 parametri
-- Assicurati che score_quote = somma dei punteggi "quote" dei 6 parametri
-- Per price_scenarios: stima range realistici basati sul prezzo attuale e sul bias
+## REGOLE SPECIALI:
+- JPY/CHF: safe-haven, considera l'impatto del risk sentiment sulla coppia specifica
+- AUD/CAD: valute commodity, analizza l'impatto su ogni coppia dove appaiono
+- Il DIFFERENZIALE = score_base - score_quote
+- score_base = SOMMA dei 6 punteggi "base" (da -12 a +12)
+- score_quote = SOMMA dei 6 punteggi "quote" (da -12 a +12)
+- OGNI COPPIA È UN'ANALISI A SÉ: non copiare punteggi da altre coppie!
 """
 
 
@@ -1487,29 +1496,6 @@ def display_analysis_matrix(analysis: dict):
             st.caption(f"Filtra per impatto 2-3 stelle e per le valute: {base_curr}, {quote_curr}")
         
         st.markdown("---")
-    
-    # ===== ANALISI PER VALUTA =====
-    currency_analysis = analysis.get("currency_analysis", {})
-    if currency_analysis:
-        st.markdown("### 💱 Outlook per Valuta")
-        
-        curr_rows = []
-        for curr, data in currency_analysis.items():
-            outlook = data.get("outlook", "neutral")
-            key_factors = data.get("key_factors", [])
-            
-            outlook_emoji = "🟢" if outlook == "bullish" else "🔴" if outlook == "bearish" else "🟡"
-            factors_str = " | ".join(key_factors[:3]) if key_factors else "N/A"
-            
-            curr_rows.append({
-                "Valuta": curr,
-                "Outlook": f"{outlook_emoji} {outlook.upper()}",
-                "Fattori Chiave": factors_str
-            })
-        
-        if curr_rows:
-            df_curr = pd.DataFrame(curr_rows)
-            st.dataframe(df_curr, use_container_width=True, hide_index=True)
 
 
 def display_analysis_history(analyses: list, user_id: str):
