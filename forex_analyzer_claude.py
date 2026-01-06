@@ -1,8 +1,7 @@
 import streamlit as st
 import anthropic
 from duckduckgo_search import DDGS
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 import json
 import pandas as pd
 import os
@@ -11,8 +10,21 @@ import requests
 import hashlib
 import re
 
-# Timezone Italia
-ITALY_TZ = ZoneInfo("Europe/Rome")
+# Timezone Italia (con fallback)
+try:
+    from zoneinfo import ZoneInfo
+    ITALY_TZ = ZoneInfo("Europe/Rome")
+except ImportError:
+    # Fallback per Python < 3.9
+    ITALY_TZ = None
+
+def get_italy_now():
+    """Restituisce datetime italiano"""
+    if ITALY_TZ:
+        return get_italy_now()
+    else:
+        # Fallback: UTC + 1 ora (o +2 in estate, ma approssimativo)
+        return datetime.utcnow() + timedelta(hours=1)
 
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
@@ -120,10 +132,12 @@ def supabase_request(method: str, endpoint: str, data: dict = None) -> dict | li
                 return response.json()
             return {}
         else:
+            # Log dettagliato dell'errore
+            st.error(f"Supabase errore {response.status_code}: {response.text[:200] if response.text else 'Nessun dettaglio'}")
             return None
             
     except Exception as e:
-        st.error(f"Errore Supabase: {e}")
+        st.error(f"Errore connessione Supabase: {e}")
         return None
 
 
@@ -177,7 +191,7 @@ def create_user(username: str, password: str, email: str = None) -> bool:
         "password_hash": hash_password(password),
         "email": email,
         "is_active": True,
-        "created_at": datetime.now(ITALY_TZ).isoformat()
+        "created_at": get_italy_now().isoformat()
     }
     
     result = supabase_request("POST", "users", data)
@@ -263,33 +277,30 @@ def save_analysis(analysis: dict, user_id: str, analysis_type: str, options_sele
         options_selected: Dict con le opzioni selezionate
     """
     try:
-        now = datetime.now(ITALY_TZ)
+        now = get_italy_now()
         datetime_str = now.strftime("%Y-%m-%d_%H-%M-%S")
-        date_str = now.strftime("%Y-%m-%d")
-        time_str = now.strftime("%H:%M")  # Solo ore e minuti
         
         analysis["analysis_datetime"] = datetime_str
         
         if SUPABASE_ENABLED:
             data = {
                 "analysis_datetime": datetime_str,
-                "analysis_date": date_str,
-                "time": time_str,
                 "user_id": user_id,
                 "analysis_type": analysis_type,
-                "options_selected": options_selected,  # Supabase JSONB accetta dict direttamente
+                "options_selected": options_selected,
                 "data": analysis
             }
             result = supabase_request("POST", "analyses", data)
-            return result is not None
+            if result is None:
+                st.error("Errore Supabase: impossibile salvare l'analisi")
+                return False
+            return True
         else:
             # Fallback locale
             filename = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
             save_data = {
                 "user_id": user_id,
                 "analysis_type": analysis_type,
-                "analysis_date": date_str,
-                "time": time_str,
                 "options_selected": options_selected,
                 "data": analysis
             }
@@ -647,7 +658,7 @@ def search_web_news() -> tuple[str, dict]:
         "geopolitics": []
     }
     
-    today = datetime.now(ITALY_TZ)
+    today = get_italy_now()
     current_year = today.year
     next_year = current_year + 1
     
@@ -947,7 +958,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
-    today = datetime.now(ITALY_TZ)
+    today = get_italy_now()
     
     user_prompt = f"""
 Analizza TUTTE queste coppie forex: {pairs_list}
@@ -1870,16 +1881,22 @@ def main():
             if 'last_macro_data' in st.session_state and st.session_state['last_macro_data']:
                 macro_data = st.session_state['last_macro_data']
             else:
-                # Carica dall'ultima analisi salvata
-                recent = list_analyses(user_id, limit=1)
-                if recent:
-                    last_analysis = load_analysis(
-                        recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime"),
-                        user_id
-                    )
-                    if last_analysis and 'macro_data' in last_analysis:
-                        macro_data = last_analysis['macro_data']
-                        st.session_state['last_macro_data'] = macro_data
+                # Prova a caricare dall'ultima analisi salvata
+                try:
+                    recent = list_analyses(user_id, limit=1)
+                    if recent and len(recent) > 0:
+                        datetime_key = recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime")
+                        if datetime_key:
+                            last_analysis = load_analysis(datetime_key, user_id)
+                            if last_analysis:
+                                # I dati sono dentro 'data' per Supabase
+                                data_container = last_analysis.get('data', last_analysis)
+                                if data_container and 'macro_data' in data_container:
+                                    macro_data = data_container['macro_data']
+                                    st.session_state['last_macro_data'] = macro_data
+                except Exception as e:
+                    # Se fallisce il caricamento, continua senza dati macro
+                    pass
         
         # FASE 2: Notizie Web
         if opt_news:
@@ -1933,7 +1950,8 @@ def main():
             progress.progress(100, text="✅ Completato!")
             st.rerun()
         else:
-            st.error("❌ Errore nel salvataggio")
+            progress.progress(100, text="❌ Errore")
+            # L'errore dettagliato è già mostrato da save_analysis
     
     # ===== VISUALIZZAZIONE RISULTATI =====
     if 'current_analysis' in st.session_state:
