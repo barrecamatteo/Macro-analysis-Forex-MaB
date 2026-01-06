@@ -21,7 +21,7 @@ except ImportError:
 def get_italy_now():
     """Restituisce datetime italiano"""
     if ITALY_TZ:
-        return get_italy_now()
+        return datetime.now(ITALY_TZ)
     else:
         # Fallback: UTC + 1 ora (o +2 in estate, ma approssimativo)
         return datetime.utcnow() + timedelta(hours=1)
