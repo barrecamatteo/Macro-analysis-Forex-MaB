@@ -1,307 +1,192 @@
-# 📊 Forex Macro Analyst - Claude AI
+# 📊 Forex Macro Analyst v3.0
 
-[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=Streamlit&logoColor=white)](https://streamlit.io/)
-[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
-[![Anthropic](https://img.shields.io/badge/Claude_AI-Sonnet_4-orange?style=for-the-badge)](https://anthropic.com/)
+Analizzatore forex macroeconomico powered by **Claude AI** con sistema di autenticazione e analisi modulare.
 
-**Analizzatore Forex Macroeconomico con IA** - Genera analisi fondamentali complete su 19 coppie forex usando Claude AI, dati macroeconomici in tempo reale e ricerche web automatiche.
+## ✨ Novità v3.0
 
-![Demo](https://img.shields.io/badge/Status-Production_Ready-green?style=flat-square)
+### 🔐 Sistema di Autenticazione
+- Login con username/password
+- Multi-utente con Supabase
+- Ogni utente vede solo le proprie analisi
+- Gestione utenti con script utility
 
----
+### 🎛️ Analisi Modulare
+Risparmia sui costi scegliendo cosa analizzare:
 
-## 🎯 Cosa Fa
+| Opzione | Descrizione | Costo |
+|---------|-------------|-------|
+| 📊 Dati Macro | Tassi, inflazione, PIL, disoccupazione | **GRATIS** |
+| 📰 Notizie Web | Forex Factory, outlook BC, geopolitica | **GRATIS** |
+| 📎 Link Aggiuntivi | Analizza URL personalizzati | **GRATIS** |
+| 🤖 Claude AI | Analisi completa forex | **$$$** |
 
-1. **Raccoglie dati macro** (tassi, inflazione, PIL, disoccupazione) da fonti ufficiali
-2. **Cerca notizie e outlook** con ricerche web automatiche (DuckDuckGo)
-3. **Analizza 19 coppie forex** usando Claude AI (claude-sonnet-4-20250514)
-4. **Genera punteggi e bias** per ogni coppia con spiegazioni dettagliate
-5. **Proiezioni tassi BC** - Date meeting, probabilità mercato, outlook 12 mesi
+### 📰 Riepilogo Notizie
+Visualizza cosa ha trovato la ricerca web PRIMA di chiamare Claude!
 
----
-
-## ⭐ Features Principali
-
-### 📈 Dati Macroeconomici (100% Gratuiti)
-| Indicatore | Fonte | Copertura |
-|------------|-------|-----------|
-| Tassi di interesse | global-rates.com | 7 valute |
-| Inflazione CPI | global-rates.com + ABS | 7 valute |
-| PIL (GDP Growth) | API Ninjas | 7 valute |
-| Disoccupazione | API Ninjas | 7 valute |
-
-### 🏦 Proiezioni Tassi Banche Centrali (NUOVO!)
-Per ogni BC (Fed, ECB, BoE, BoJ, SNB, RBA, BoC):
-- **Prossimo Meeting**: Data esatta
-- **Probabilità Mercato**: % hold/cut/hike (CME FedWatch, ASX, etc.)
-- **Storico Recente**: N tagli/rialzi negli ultimi 12 mesi
-- **Outlook 12M**: Previsioni analisti
-- **Stance**: Hawkish/Neutrale/Dovish
-
-### 🔍 Ricerche Web Automatiche
-- Query dinamiche per ogni banca centrale
-- Aggiornate automaticamente con anno corrente
-- Fonti: Reuters, Bloomberg, CME, ASX, ING, Goldman Sachs, etc.
-- **Forex Factory Breaking News** (NUOVO!) - News market-moving automatiche
-
-### 📎 Risorse Aggiuntive
-Inserisci manualmente link a fonti extra che Claude analizzerà:
-- **Comunicati stampa BC** (Fed statements, ECB press releases)
-- **Breaking news** su Reuters, Bloomberg
-- **Report analisti** (Goldman Sachs, JPMorgan, etc.)
-- **Dati economici** appena rilasciati (NFP, CPI)
-
-> ⚠️ Le risorse aggiuntive **integrano** l'analisi, non la sostituiscono!
-
-### 📊 Analisi per Coppia
-Per ognuna delle 19 coppie:
-- Punteggi su 6 parametri (-2 a +2)
-- Bias finale (bullish/bearish/neutral)
-- Sintesi in italiano
-- Scenari prezzo (base/bullish/bearish)
-- Key drivers
+### 📜 Storico Completo
+Ogni analisi viene salvata con:
+- Timestamp
+- Tipo di analisi
+- Opzioni selezionate
+- Tutti i dati raccolti
 
 ---
 
-## 🛠️ Installazione
+## 🚀 Installazione
 
-### Prerequisiti
-- Python 3.9+
-- API Key Anthropic ([console.anthropic.com](https://console.anthropic.com/))
-- API Key API Ninjas (opzionale, gratuita: [api-ninjas.com](https://api-ninjas.com/))
-
-### Setup Locale
-
+### 1. Requisiti
 ```bash
-# 1. Clona il repository
-git clone https://github.com/tuousername/forex-macro-analyst.git
-cd forex-macro-analyst
+pip install streamlit anthropic duckduckgo-search pandas requests
+```
 
-# 2. Installa dipendenze
-pip install -r requirements.txt
+### 2. Configurazione API Keys
+Crea `config.py`:
+```python
+ANTHROPIC_API_KEY = "sk-ant-..."
+SUPABASE_URL = "https://xxx.supabase.co"
+SUPABASE_KEY = "eyJ..."
+API_NINJAS_KEY = "xxx"  # Opzionale
+```
 
-# 3. Configura API Keys
-# Crea file config.py:
-echo 'ANTHROPIC_API_KEY = "sk-ant-..."' > config.py
-echo 'API_NINJAS_KEY = "tua_api_key"' >> config.py
+Oppure usa `st.secrets` su Streamlit Cloud.
 
-# 4. Avvia
+### 3. Setup Database Supabase
+
+1. Vai su [Supabase](https://supabase.com) e crea un progetto
+2. Vai su **SQL Editor**
+3. Esegui lo script `supabase_setup_v3.sql`
+4. Copia URL e anon key nelle impostazioni
+
+### 4. Crea Utente Admin
+L'utente viene creato automaticamente dallo script SQL:
+- **Username:** MBARRECA
+- **Password:** mbarreca
+
+### 5. Avvia
+```bash
 streamlit run forex_analyzer_claude.py
 ```
 
-### Setup Streamlit Cloud
+---
 
-1. Fork questo repository
-2. Vai su [share.streamlit.io](https://share.streamlit.io/)
-3. Connetti il tuo repo GitHub
-4. Aggiungi i secrets in Settings > Secrets:
+## 👥 Gestione Utenti
 
-```toml
-ANTHROPIC_API_KEY = "sk-ant-..."
-API_NINJAS_KEY = "tua_api_key"
+Usa lo script `user_manager.py`:
+
+```bash
+# Lista utenti
+python user_manager.py list
+
+# Aggiungi utente
+python user_manager.py add mario password123 mario@email.com
+
+# Cambia password
+python user_manager.py password mario nuova_password
+
+# Elimina utente
+python user_manager.py delete mario
+
+# Genera hash password
+python user_manager.py hash mia_password
 ```
+
+---
+
+## 💡 Scenari d'Uso
+
+### Scenario 1: Analisi Completa
+Seleziona tutte le opzioni → Costa token Claude ma hai tutto
+
+### Scenario 2: Solo Aggiornamento Dati
+- ✅ Dati Macro
+- ✅ Notizie Web
+- ❌ Claude
+
+→ **GRATIS!** Vedi i dati aggiornati senza spendere
+
+### Scenario 3: Breaking News
+- ❌ Dati Macro (già aggiornati prima)
+- ❌ Notizie Web
+- ✅ Link Aggiuntivi (inserisci URL news)
+- ✅ Claude
+
+→ Analisi veloce su notizie specifiche
+
+### Scenario 4: Riepilogo Notizie
+- ❌ Dati Macro
+- ✅ Notizie Web
+- ❌ Claude
+
+→ **GRATIS!** Vedi cosa dice il mercato senza analisi
 
 ---
 
 ## 📁 Struttura File
 
 ```
-forex-macro-analyst/
-├── forex_analyzer_claude.py   # App principale Streamlit
-├── macro_data_fetcher.py      # Fetcher dati macro (v7)
-├── config.py                  # API Keys (non committare!)
-├── requirements.txt           # Dipendenze Python
-├── README.md                  # Questo file
-├── .gitignore                 # Esclude config.py
-└── data/                      # Cache analisi (auto-generata)
+forex_analyzer_claude.py   # App principale
+macro_data_fetcher.py      # Modulo dati macro
+user_manager.py            # Utility gestione utenti
+config.py                  # Configurazione (non committare!)
+supabase_setup_v3.sql      # Script setup database
+requirements.txt           # Dipendenze Python
 ```
 
 ---
 
-## 📋 Requirements
+## 🗄️ Struttura Database
 
-```txt
-streamlit>=1.28.0
-anthropic>=0.49.0
-duckduckgo-search>=4.0.0
-pandas>=2.0.0
-requests>=2.31.0
-```
+### Tabella `users`
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| id | UUID | Chiave primaria |
+| username | VARCHAR | Unico |
+| password_hash | VARCHAR | SHA-256 |
+| email | VARCHAR | Opzionale |
+| is_active | BOOLEAN | Se può accedere |
+| created_at | TIMESTAMP | Data creazione |
 
----
-
-## 🎮 Utilizzo
-
-### 1. Avvia l'app
-```bash
-streamlit run forex_analyzer_claude.py
-```
-
-### 2. Seleziona le coppie
-- Default: tutte le 19 coppie
-- Puoi deselezionare quelle non interessanti
-
-### 3. Genera analisi
-- Click su "🚀 Genera Analisi Completa"
-- Attendi ~2-3 minuti (raccolta dati + analisi AI)
-
-### 4. Esplora i risultati
-- **Top Bullish/Bearish**: Le migliori opportunità
-- **Tabella Proiezioni Tassi**: Outlook per ogni BC
-- **Dettaglio Coppia**: Click su una riga per i dettagli
-
-### 5. Esporta
-- JSON completo con tutti i dati
-- Salvataggio automatico in `data/`
-
----
-
-## 📎 Come Usare le Risorse Aggiuntive
-
-Nella sidebar trovi una sezione "Risorse Aggiuntive" dove puoi incollare URL:
-
-```
-https://federalreserve.gov/newsevents/pressreleases/monetary20251210a.htm
-https://ecb.europa.eu/press/pr/date/2025/html/ecb.mp251218.en.html
-https://reuters.com/markets/rates-bonds/...
-```
-
-**Quando usarle:**
-| Scenario | Esempio URL |
-|----------|-------------|
-| Post-FOMC | Link al comunicato stampa Fed |
-| Post-ECB | Link alla conferenza stampa Lagarde |
-| Breaking News | Articolo Reuters/Bloomberg su evento importante |
-| Report Analisti | Research note da banca d'investimento |
-| Dati Economici | Link a release NFP/CPI su BLS/Eurostat |
-
-**Note importanti:**
-- Max **10 URL** per analisi
-- Max **4000 caratteri** estratti per URL
-- Siti con **paywall** (WSJ, FT) potrebbero non funzionare
-- Le risorse **integrano** i dati standard, non li sostituiscono
-
----
-
-## 🔄 Frequenza Aggiornamento Consigliata
-
-| Evento | Quando aggiornare |
-|--------|-------------------|
-| **Routine** | Domenica sera (prima settimana trading) |
-| **Post-NFP** | Venerdì dopo Non-Farm Payrolls |
-| **Post-CPI** | Dopo rilascio inflazione USA/EU |
-| **Post-FOMC** | Dopo meeting Fed |
-| **Post-ECB/BoE** | Dopo decisioni tassi |
-
----
-
-## 📊 Coppie Forex Analizzate
-
-### JPY Crosses
-USD/JPY, GBP/JPY, AUD/JPY, EUR/JPY, CAD/JPY
-
-### AUD Crosses
-AUD/USD, AUD/CAD, GBP/AUD, EUR/AUD
-
-### CAD Crosses
-EUR/CAD, GBP/CAD
-
-### CHF Crosses
-USD/CHF, EUR/CHF, GBP/CHF, CAD/CHF, AUD/CHF
-
-### Majors
-EUR/USD, EUR/GBP, GBP/USD
-
----
-
-## ⚙️ Configurazione Avanzata
-
-### Variabili d'ambiente supportate
-
-```bash
-# Obbligatoria
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Opzionali
-API_NINJAS_KEY=...        # Per PIL e disoccupazione
-SUPABASE_URL=...          # Per storage cloud
-SUPABASE_KEY=...          # Per storage cloud
-```
-
-### Personalizzare le ricerche
-
-Le query di ricerca sono in `search_qualitative_data()` nel file `forex_analyzer_claude.py`. Puoi aggiungere query personalizzate per fonti specifiche.
-
----
-
-## 🤝 Contributing
-
-1. Fork il repository
-2. Crea un branch (`git checkout -b feature/nuova-feature`)
-3. Commit le modifiche (`git commit -am 'Aggiunta nuova feature'`)
-4. Push al branch (`git push origin feature/nuova-feature`)
-5. Apri una Pull Request
-
----
-
-## ⚠️ Disclaimer
-
-**Questo tool è solo per scopi educativi e informativi.**
-
-- Non costituisce consulenza finanziaria
-- Le analisi sono generate da IA e possono contenere errori
-- Fai sempre le tue ricerche prima di tradare
-- Il trading forex comporta rischi significativi
+### Tabella `analyses`
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| id | UUID | Chiave primaria |
+| analysis_datetime | VARCHAR | Timestamp analisi |
+| user_id | UUID | Foreign key → users |
+| analysis_type | VARCHAR | full/macro_only/news_only/etc |
+| options_selected | JSONB | Opzioni selezionate |
+| data | JSONB | Tutti i dati dell'analisi |
 
 ---
 
 ## 📝 Changelog
 
+### v3.0.0 (Gennaio 2026)
+- 🔐 **Sistema Autenticazione**: Login multi-utente con Supabase
+- 🎛️ **Analisi Modulare**: Scegli cosa includere nell'analisi
+- 📰 **Riepilogo Notizie**: Visualizza risultati ricerca web
+- 📜 **Storico Completo**: Ogni tipo di analisi viene salvata
+- 💾 **Database Multi-utente**: Ogni utente ha le sue analisi
+- 🛠️ **User Manager**: Script utility per gestione utenti
+
 ### v2.3.0 (Dicembre 2025)
-- 📰 **Forex Factory News**: Ricerca automatica breaking news da forexfactory.com
-- 🔍 **Query site-specific**: 4 query dedicate per news market-moving
-- 🎯 **Filtro smart**: Solo news rilevanti (USD, EUR, Fed, ECB, tariff, etc.)
+- 📰 **Forex Factory News**: Ricerca automatica breaking news
 
 ### v2.2.0 (Dicembre 2025)
-- ✨ **Risorse Aggiuntive**: Inserisci URL custom (comunicati BC, news, report)
-- 📎 **Fetch intelligente**: Estrae testo da pagine web automaticamente
-- 🔗 **Max 10 URL**: Con troncamento a 4000 char per URL
-- ⚡ **Integrazione smart**: Le fonti custom si AGGIUNGONO ai dati standard
+- 📎 **Risorse Aggiuntive**: URL custom per Claude
 
 ### v2.1.0 (Dicembre 2025)
-- ✨ **Nuova sezione rate_outlook**: Proiezioni tassi per ogni BC
 - 🔍 **Query dinamiche**: Ricerche aggiornate automaticamente
 - 📊 **Tabella Meeting BC**: Date, probabilità, outlook
-- 🏦 **7 Banche Centrali**: Fed, ECB, BoE, BoJ, SNB, RBA, BoC
-
-### v2.0.0 (Dicembre 2025)
-- 🚀 **MacroDataFetcher v7**: 100% gratuito
-- 📈 **API Ninjas**: PIL e disoccupazione
-- 🌐 **Scraping migliorato**: global-rates.com + ABS
-
-### v1.0.0 (Novembre 2025)
-- 🎉 Release iniziale
-- 🤖 Integrazione Claude AI
-- 📊 19 coppie forex
 
 ---
 
-## 📄 License
+## ⚠️ Disclaimer
 
-MIT License - Vedi [LICENSE](LICENSE) per dettagli.
-
----
-
-## 🙏 Credits
-
-- **Claude AI** by [Anthropic](https://anthropic.com/)
-- **Streamlit** - Framework UI
-- **DuckDuckGo Search** - Ricerche web
-- **API Ninjas** - Dati economici
-- **global-rates.com** - Tassi e inflazione
+Questo strumento è solo per scopi informativi e educativi. 
+**Non costituisce consiglio di investimento.**
 
 ---
 
-<p align="center">
-  Made with ❤️ for Forex Traders
-</p>
+## 📄 Licenza
+
+MIT License - Vedi LICENSE per dettagli.
