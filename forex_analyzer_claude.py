@@ -583,15 +583,17 @@ def search_web_news() -> tuple[str, dict]:
     
     for query in forex_factory_queries:
         try:
-            results = DDGS().text(query, max_results=5)
+            results = DDGS().text(query, max_results=8)
             for r in results:
                 title = r.get('title', '')
                 body = r.get('body', '')
+                href = r.get('href', '')
                 if any(kw in body.lower() for kw in ['dollar', 'euro', 'yen', 'pound', 'fed', 'ecb', 'boe', 'boj', 'rate', 'inflation', 'gdp', 'employment', 'tariff', 'trade']):
-                    all_results.append(f"[FF-NEWS] {title}: {body[:500]}")
+                    all_results.append(f"[FF-NEWS] {title}: {body[:500]} | URL: {href}")
                     structured_results["forex_factory"].append({
                         "title": title,
-                        "body": body[:300]
+                        "body": body[:300],
+                        "url": href
                     })
         except:
             pass
@@ -616,15 +618,17 @@ def search_web_news() -> tuple[str, dict]:
     for currency, queries in rate_queries.items():
         for query in queries:
             try:
-                results = DDGS().text(query, max_results=3)
+                results = DDGS().text(query, max_results=5)
                 for r in results:
                     title = r.get('title', '')
                     body = r.get('body', '')
-                    all_results.append(f"[{currency}-RATE] {title}: {body[:400]}")
+                    href = r.get('href', '')
+                    all_results.append(f"[{currency}-RATE] {title}: {body[:400]} | URL: {href}")
                     structured_results["rate_expectations"].append({
                         "currency": currency,
                         "title": title,
-                        "body": body[:250]
+                        "body": body[:250],
+                        "url": href
                     })
             except:
                 pass
@@ -641,18 +645,22 @@ def search_web_news() -> tuple[str, dict]:
         f"ECB governing council meeting dates {current_year}",
         f"Bank of England MPC meeting dates {current_year}",
         f"central banks meeting calendar {current_year}",
+        f"BOJ Bank of Japan meeting dates {current_year}",
+        f"RBA meeting dates {current_year}",
     ]
     
     for query in calendar_queries:
         try:
-            results = DDGS().text(query, max_results=2)
+            results = DDGS().text(query, max_results=4)
             for r in results:
                 title = r.get('title', '')
                 body = r.get('body', '')
-                all_results.append(f"[CALENDAR] {title}: {body[:400]}")
+                href = r.get('href', '')
+                all_results.append(f"[CALENDAR] {title}: {body[:400]} | URL: {href}")
                 structured_results["meeting_calendar"].append({
                     "title": title,
-                    "body": body[:250]
+                    "body": body[:250],
+                    "url": href
                 })
         except:
             pass
@@ -668,18 +676,21 @@ def search_web_news() -> tuple[str, dict]:
         f"central banks rate cuts {current_year} comparison Fed ECB BoE",
         f"hawkish dovish central banks {current_year} ranking",
         f"monetary policy divergence {current_year} forex",
+        f"Fed vs ECB interest rate outlook {current_year}",
     ]
     
     for query in comparison_queries:
         try:
-            results = DDGS().text(query, max_results=3)
+            results = DDGS().text(query, max_results=5)
             for r in results:
                 title = r.get('title', '')
                 body = r.get('body', '')
-                all_results.append(f"[COMPARE] {title}: {body[:450]}")
+                href = r.get('href', '')
+                all_results.append(f"[COMPARE] {title}: {body[:450]} | URL: {href}")
                 structured_results["policy_comparison"].append({
                     "title": title,
-                    "body": body[:250]
+                    "body": body[:250],
+                    "url": href
                 })
         except:
             pass
@@ -695,18 +706,22 @@ def search_web_news() -> tuple[str, dict]:
         "forex market risk sentiment today",
         "US China trade war tariffs impact forex",
         "geopolitical risk currency markets",
+        f"stock market risk sentiment {current_year}",
+        "safe haven currencies demand",
     ]
     
     for query in geopolitics_queries:
         try:
-            results = DDGS().text(query, max_results=3)
+            results = DDGS().text(query, max_results=5)
             for r in results:
                 title = r.get('title', '')
                 body = r.get('body', '')
-                all_results.append(f"[GEOPOLITICS] {title}: {body[:400]}")
+                href = r.get('href', '')
+                all_results.append(f"[GEOPOLITICS] {title}: {body[:400]} | URL: {href}")
                 structured_results["geopolitics"].append({
                     "title": title,
-                    "body": body[:250]
+                    "body": body[:250],
+                    "url": href
                 })
         except:
             pass
@@ -915,16 +930,20 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
 # ============================================================================
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
-    """Mostra il riepilogo delle notizie trovate"""
+    """Mostra il riepilogo delle notizie trovate con link"""
     
-    st.markdown("### 📰 Riepilogo Notizie Trovate")
+    st.markdown("### 📰 Notizie e Calendario Economico")
     
     # Forex Factory
     if news_structured.get("forex_factory"):
         with st.expander(f"🔴 FOREX FACTORY ({len(news_structured['forex_factory'])} news)", expanded=True):
-            for item in news_structured["forex_factory"][:5]:
-                st.markdown(f"• **{item['title'][:80]}...**")
-                st.caption(item['body'][:150] + "...")
+            for item in news_structured["forex_factory"][:8]:
+                url = item.get('url', '')
+                if url:
+                    st.markdown(f"• **[{item['title'][:70]}...]({url})**")
+                else:
+                    st.markdown(f"• **{item['title'][:70]}...**")
+                st.caption(item['body'][:200] + "...")
     
     # Rate Expectations
     if news_structured.get("rate_expectations"):
@@ -938,28 +957,49 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
             
             for curr, items in by_currency.items():
                 st.markdown(f"**{curr}:**")
-                for item in items[:2]:
-                    st.caption(f"• {item['title'][:60]}...")
+                for item in items[:3]:
+                    url = item.get('url', '')
+                    if url:
+                        st.markdown(f"• [{item['title'][:55]}...]({url})")
+                    else:
+                        st.caption(f"• {item['title'][:55]}...")
     
     # Meeting Calendar
     if news_structured.get("meeting_calendar"):
         with st.expander(f"📅 CALENDARIO MEETING ({len(news_structured['meeting_calendar'])} risultati)"):
-            for item in news_structured["meeting_calendar"][:3]:
-                st.markdown(f"• {item['title'][:80]}")
+            for item in news_structured["meeting_calendar"][:6]:
+                url = item.get('url', '')
+                if url:
+                    st.markdown(f"• [{item['title'][:70]}]({url})")
+                else:
+                    st.markdown(f"• {item['title'][:70]}")
+    
+    # Policy Comparison
+    if news_structured.get("policy_comparison"):
+        with st.expander(f"⚖️ CONFRONTO POLITICHE ({len(news_structured['policy_comparison'])} risultati)"):
+            for item in news_structured["policy_comparison"][:5]:
+                url = item.get('url', '')
+                if url:
+                    st.markdown(f"• [{item['title'][:70]}]({url})")
+                else:
+                    st.markdown(f"• {item['title'][:70]}")
     
     # Geopolitics
     if news_structured.get("geopolitics"):
         with st.expander(f"🌍 GEOPOLITICA ({len(news_structured['geopolitics'])} risultati)"):
-            for item in news_structured["geopolitics"][:3]:
-                st.markdown(f"• {item['title'][:80]}")
+            for item in news_structured["geopolitics"][:5]:
+                url = item.get('url', '')
+                if url:
+                    st.markdown(f"• [{item['title'][:70]}]({url})")
+                else:
+                    st.markdown(f"• {item['title'][:70]}")
     
     # Link aggiuntivi processati
     if links_structured:
         with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=True):
             for item in links_structured:
                 status_icon = "✅" if item['status'] == 'success' else "❌"
-                st.markdown(f"{status_icon} **{item['title'][:60]}**")
-                st.caption(f"URL: {item['url'][:50]}...")
+                st.markdown(f"{status_icon} **[{item['title'][:50]}]({item['url']})**")
                 if item['status'] == 'success':
                     st.caption(item['content_preview'][:200] + "...")
 
@@ -995,66 +1035,159 @@ def display_macro_data(macro_data: dict):
 
 
 def display_analysis_matrix(analysis: dict):
-    """Mostra la matrice delle analisi forex"""
+    """Mostra la matrice delle analisi forex - LAYOUT OTTIMIZZATO"""
     
     if "error" in analysis:
         st.error(f"Errore nell'analisi: {analysis['error']}")
         return
     
-    # Header
-    st.markdown(f"### 🤖 Analisi Claude AI")
+    # ===== HEADER E SUMMARY =====
+    st.markdown("### 🤖 Analisi Claude AI")
     
+    # Data analisi e Risk Sentiment nella stessa riga
+    col_date, col_sentiment = st.columns([2, 2])
+    
+    with col_date:
+        if "analysis_date" in analysis:
+            st.caption(f"📅 Data analisi: {analysis['analysis_date']}")
+    
+    with col_sentiment:
+        if "risk_sentiment" in analysis:
+            sentiment = analysis["risk_sentiment"]
+            emoji = "🟢" if sentiment == "risk-on" else "🔴" if sentiment == "risk-off" else "🟡"
+            st.markdown(f"**Risk Sentiment:** {emoji} {sentiment.upper()}")
+    
+    # Summary
     if "summary" in analysis:
         st.info(f"📋 **Contesto:** {analysis['summary']}")
     
-    if "risk_sentiment" in analysis:
-        sentiment = analysis["risk_sentiment"]
-        emoji = "🟢" if sentiment == "risk-on" else "🔴" if sentiment == "risk-off" else "🟡"
-        st.markdown(f"**Risk Sentiment:** {emoji} {sentiment.upper()}")
+    st.markdown("---")
     
-    # Analisi per coppia
+    # ===== OUTLOOK TASSI (subito dopo summary) =====
+    rate_outlook = analysis.get("rate_outlook", {})
+    if rate_outlook:
+        st.markdown("### 🏦 Outlook Tassi di Interesse")
+        
+        rate_rows = []
+        for curr, data in rate_outlook.items():
+            expectation = data.get("expectation", "hold")
+            exp_emoji = "📈" if expectation == "hike" else "📉" if expectation == "cut" else "➡️"
+            
+            rate_rows.append({
+                "Valuta": curr,
+                "Tasso Attuale": data.get("current_rate", "N/A"),
+                "Prossimo Meeting": data.get("next_meeting", "N/A"),
+                "Aspettativa": f"{exp_emoji} {expectation.upper()}",
+                "Probabilità": data.get("probability", "N/A")
+            })
+        
+        df_rates = pd.DataFrame(rate_rows)
+        st.dataframe(df_rates, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+    
+    # ===== TOP BULLISH / TOP BEARISH =====
     pair_analysis = analysis.get("pair_analysis", {})
     
     if pair_analysis:
-        st.markdown("### 📈 Analisi per Coppia")
+        # Ordina per bias e strength
+        bullish_pairs = [(p, d) for p, d in pair_analysis.items() if d.get("bias") == "bullish"]
+        bearish_pairs = [(p, d) for p, d in pair_analysis.items() if d.get("bias") == "bearish"]
         
-        # Crea dataframe
+        # Ordina per strength decrescente
+        bullish_pairs.sort(key=lambda x: x[1].get("strength", 0), reverse=True)
+        bearish_pairs.sort(key=lambda x: x[1].get("strength", 0), reverse=True)
+        
+        st.markdown("### 🎯 Top Opportunità")
+        
+        col_bull, col_bear = st.columns(2)
+        
+        with col_bull:
+            st.markdown("#### 🟢 TOP BULLISH")
+            for pair, data in bullish_pairs[:5]:
+                strength = data.get("strength", 3)
+                dots = "●●" if strength >= 4 else "●"
+                st.markdown(f"**{pair}** {dots}")
+                st.caption(data.get("summary", "")[:80] + "...")
+        
+        with col_bear:
+            st.markdown("#### 🔴 TOP BEARISH")
+            for pair, data in bearish_pairs[:5]:
+                strength = data.get("strength", 3)
+                dots = "●●" if strength >= 4 else "●"
+                st.markdown(f"**{pair}** {dots}")
+                st.caption(data.get("summary", "")[:80] + "...")
+        
+        st.markdown("---")
+        
+        # ===== ANALISI COMPLETA PER COPPIA =====
+        st.markdown("### 📈 Analisi Completa per Coppia")
+        
+        # Crea dataframe con bias+forza combinati
         rows = []
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
             strength = data.get("strength", 3)
             summary = data.get("summary", "")
             
+            # Emoji + bias + forza combinati
             bias_emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "🟡"
-            strength_bar = "●" * strength + "○" * (5 - strength)
+            strength_indicator = "●●" if strength >= 4 else "●" if strength >= 2 else "○"
+            bias_combined = f"{bias_emoji} {bias.upper()} {strength_indicator}"
             
             rows.append({
                 "Coppia": pair,
-                "Bias": f"{bias_emoji} {bias.upper()}",
-                "Forza": strength_bar,
-                "Analisi": summary[:200] + "..." if len(summary) > 200 else summary
+                "Bias": bias_combined,
+                "Analisi": summary[:120] + "..." if len(summary) > 120 else summary
             })
         
         df = pd.DataFrame(rows)
         st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    # Rate Outlook
-    rate_outlook = analysis.get("rate_outlook", {})
-    if rate_outlook:
-        st.markdown("### 🏦 Outlook Tassi")
         
-        rate_rows = []
-        for curr, data in rate_outlook.items():
-            rate_rows.append({
+        # Legenda
+        st.caption("Legenda forza: ●● = forte (4-5) | ● = moderato (2-3) | ○ = debole (1)")
+        
+        # Dettagli in expander
+        with st.expander("📊 Dettagli completi per coppia"):
+            for pair, data in pair_analysis.items():
+                bias = data.get("bias", "neutral")
+                strength = data.get("strength", 3)
+                summary = data.get("summary", "")
+                key_drivers = data.get("key_drivers", [])
+                
+                bias_emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "🟡"
+                strength_bar = "●" * strength + "○" * (5 - strength)
+                
+                st.markdown(f"**{pair}** - {bias_emoji} {bias.upper()} | Forza: {strength_bar}")
+                st.markdown(f"*{summary}*")
+                if key_drivers:
+                    st.caption(f"Driver: {', '.join(key_drivers)}")
+                st.markdown("")
+        
+        st.markdown("---")
+    
+    # ===== ANALISI PER VALUTA =====
+    currency_analysis = analysis.get("currency_analysis", {})
+    if currency_analysis:
+        st.markdown("### 💱 Outlook per Valuta")
+        
+        curr_rows = []
+        for curr, data in currency_analysis.items():
+            outlook = data.get("outlook", "neutral")
+            key_factors = data.get("key_factors", [])
+            
+            outlook_emoji = "🟢" if outlook == "bullish" else "🔴" if outlook == "bearish" else "🟡"
+            factors_str = " | ".join(key_factors[:3]) if key_factors else "N/A"
+            
+            curr_rows.append({
                 "Valuta": curr,
-                "Tasso Attuale": data.get("current_rate", "N/A"),
-                "Prossimo Meeting": data.get("next_meeting", "N/A"),
-                "Aspettativa": data.get("expectation", "N/A"),
-                "Probabilità": data.get("probability", "N/A")
+                "Outlook": f"{outlook_emoji} {outlook.upper()}",
+                "Fattori Chiave": factors_str
             })
         
-        df_rates = pd.DataFrame(rate_rows)
-        st.dataframe(df_rates, use_container_width=True, hide_index=True)
+        if curr_rows:
+            df_curr = pd.DataFrame(curr_rows)
+            st.dataframe(df_curr, use_container_width=True, hide_index=True)
 
 
 def display_analysis_history(analyses: list, user_id: str):
@@ -1503,17 +1636,22 @@ def main():
             with st.expander("🔍 Dettagli struttura"):
                 st.json(analysis)
         
-        # Mostra sezioni in base a cosa è disponibile
+        # === ORDINE VISUALIZZAZIONE ===
+        # 1. Dati Macro
+        # 2. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
+        # 3. Notizie e Calendario (alla fine)
+        
         if macro_data:
             display_macro_data(macro_data)
             st.markdown("---")
         
-        if news_structured or links_structured:
-            display_news_summary(news_structured, links_structured)
-            st.markdown("---")
-        
         if claude_analysis:
             display_analysis_matrix(claude_analysis)
+            st.markdown("---")
+        
+        # Notizie alla fine
+        if news_structured or links_structured:
+            display_news_summary(news_structured, links_structured)
     
     else:
         # Stato iniziale
