@@ -1029,7 +1029,7 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
 def display_news_summary(news_structured: dict, links_structured: list = None):
     """Mostra il riepilogo delle notizie trovate con link"""
     
-    st.markdown("### 📰 Notizie e Calendario Economico")
+    st.markdown("### 📰 Notizie Web")
     
     # Forex Factory
     if news_structured.get("forex_factory"):
@@ -1529,27 +1529,27 @@ def display_analysis_matrix(analysis: dict):
                 for driver in key_drivers:
                     st.markdown(f"• {driver}")
                 st.markdown("")
-            
-            st.markdown("---")
-            
-            # === CALENDARIO ECONOMICO ===
-            st.markdown("### 📅 Calendario Economico")
-            
-            st.info("📊 Consulta i calendari economici per gli eventi della settimana")
-            
-            col_te, col_ff = st.columns(2)
-            
-            with col_te:
-                st.markdown("🔗 [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
-            
-            with col_ff:
-                st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
-            
-            st.caption(f"Filtra per impatto 2-3 stelle e per le valute: {base_curr}, {quote_curr}")
         else:
             # Nessuna coppia selezionata
             st.markdown("### 🔍 Dettaglio Coppia Selezionata")
-            st.info("👆 Seleziona una coppia dalla tabella sopra (colonna 📌) per vedere l'analisi dettagliata")
+            st.info("👆 Seleziona una coppia dalla tabella sopra per vedere l'analisi dettagliata")
+        
+        st.markdown("---")
+        
+        # === CALENDARIO ECONOMICO (sempre visibile) ===
+        st.markdown("### 📅 Calendario Economico")
+        
+        st.info("📊 Consulta i calendari economici per gli eventi della settimana")
+        
+        col_te, col_ff = st.columns(2)
+        
+        with col_te:
+            st.markdown("🔗 [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
+        
+        with col_ff:
+            st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
+        
+        st.caption("💡 Filtra per impatto 2-3 stelle e per le valute che ti interessano")
         
         st.markdown("---")
 
@@ -2025,7 +2025,7 @@ def main():
         # === ORDINE VISUALIZZAZIONE ===
         # 1. Dati Macro
         # 2. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
-        # 3. Notizie e Calendario (alla fine)
+        # 3. Notizie Web (alla fine)
         
         if macro_data:
             display_macro_data(macro_data)
