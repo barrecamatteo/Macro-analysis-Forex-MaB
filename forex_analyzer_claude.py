@@ -1185,11 +1185,11 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
         
-        # ===== TABELLA TUTTE LE COPPIE CON CHECKBOX =====
+        # ===== TABELLA TUTTE LE COPPIE CON SELEZIONE SINGOLA =====
         st.markdown("### 📋 Tutte le Coppie")
         st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
         
-        # Crea dataframe con checkbox
+        # Crea dataframe 
         rows = []
         pair_list = list(pair_analysis.keys())
         
@@ -1210,7 +1210,6 @@ def display_analysis_matrix(analysis: dict):
                 bias_combined = "🟡 NEUTRAL"
             
             rows.append({
-                "Seleziona": False,
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
@@ -1219,38 +1218,24 @@ def display_analysis_matrix(analysis: dict):
         
         df = pd.DataFrame(rows)
         
-        # Usa data_editor per avere checkbox interattive
-        edited_df = st.data_editor(
+        # Usa dataframe con selezione singola riga
+        selection = st.dataframe(
             df,
             use_container_width=True,
             hide_index=True,
-            column_config={
-                "Seleziona": st.column_config.CheckboxColumn(
-                    "📌",
-                    help="Seleziona per vedere il dettaglio",
-                    default=False,
-                    width="small"
-                ),
-                "Coppia": st.column_config.TextColumn("Coppia", width="small"),
-                "Bias": st.column_config.TextColumn("Bias", width="medium"),
-                "Diff": st.column_config.NumberColumn("Diff", width="small"),
-                "Sintesi": st.column_config.TextColumn("Sintesi", width="large"),
-            },
-            disabled=["Coppia", "Bias", "Diff", "Sintesi"],
-            key="pair_table_editor"
+            on_select="rerun",
+            selection_mode="single-row",
+            key="pair_table_selection"
         )
         
         # Legenda
         st.caption("Legenda: 🟢🟢/🔴🔴 = bias forte (4-5) | 🟢/🔴 = bias moderato (1-3) | 🟡 = neutrale")
         
-        # Trova la coppia selezionata (l'ultima checkbox attivata)
-        selected_rows = edited_df[edited_df["Seleziona"] == True]
-        
-        if not selected_rows.empty:
-            # Prendi l'ultima coppia selezionata
-            selected_pair = selected_rows.iloc[-1]["Coppia"]
-        else:
-            selected_pair = None
+        # Trova la coppia selezionata
+        selected_pair = None
+        if selection and selection.selection and selection.selection.rows:
+            selected_row_idx = selection.selection.rows[0]
+            selected_pair = pair_list[selected_row_idx]
         
         st.markdown("---")
         
