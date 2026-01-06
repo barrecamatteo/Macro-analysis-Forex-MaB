@@ -448,17 +448,26 @@ Ogni parola della tua risposta deve essere in italiano. Non usare mai termini in
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ### 3. ANALISI DEL BIAS
-Per ogni coppia forex:
-- **BULLISH** = la valuta BASE si rafforza (es: EUR/USD bullish = EUR forte)
-- **BEARISH** = la valuta BASE si indebolisce (es: EUR/USD bearish = EUR debole)
-- **NEUTRAL** = equilibrio o incertezza
+Per ogni coppia forex (es: EUR/USD dove EUR=base, USD=quote):
+- **BULLISH** = la valuta BASE si rafforza (score_base > score_quote)
+- **BEARISH** = la valuta BASE si indebolisce (score_base < score_quote)
+- **NEUTRAL** = equilibrio (score_base ≈ score_quote)
 
-### 4. FATTORI DA CONSIDERARE (in ordine di importanza):
-1. **ASPETTATIVE sui tassi** (+ importante dei tassi attuali!)
-2. **Comunicazioni delle banche centrali** (hawkish/dovish)
-3. **Dati macro attuali** (inflazione, PIL, disoccupazione)
-4. **Risk sentiment globale** (risk-on/risk-off)
-5. **Fattori geopolitici**
+### 4. SISTEMA DI SCORING (6 PARAMETRI)
+Per OGNI coppia devi assegnare punteggi da -2 a +2 per questi 6 parametri:
+1. **Tassi Attuali**: confronto tassi BC attuali
+2. **Aspettative Tassi**: outlook hawkish/dovish, probabilità tagli/rialzi
+3. **Inflazione**: confronto CPI/inflazione
+4. **Crescita/PIL**: confronto crescita economica
+5. **Risk Sentiment**: impatto risk-on/risk-off sulla coppia
+6. **Bilancia/Fiscale**: bilancia commerciale, situazione fiscale
+
+SCALA PUNTEGGI:
+- +2 = molto favorevole per quella valuta
+- +1 = leggermente favorevole
+- 0 = neutro
+- -1 = leggermente sfavorevole
+- -2 = molto sfavorevole
 
 ### 5. FORMATO OUTPUT JSON:
 {
@@ -472,8 +481,48 @@ Per ogni coppia forex:
         "EUR/USD": {
             "bias": "bullish/bearish/neutral",
             "strength": 1-5,
-            "summary": "Spiegazione in italiano del perché questo bias",
-            "key_drivers": ["driver1", "driver2"]
+            "summary": "Spiegazione sintetica del bias",
+            "key_drivers": ["driver1", "driver2"],
+            "score_base": 5,
+            "score_quote": -3,
+            "current_price": "1.0850",
+            "price_scenarios": {
+                "base_range": "1.0750 - 1.0950",
+                "base_strong": "1.0950 - 1.1100",
+                "quote_strong": "1.0600 - 1.0750"
+            },
+            "scores": {
+                "tassi_attuali": {
+                    "base": 1, "quote": -1,
+                    "motivation_base": "EUR 2.15% vs USD 3.75% - differenziale sfavorevole",
+                    "motivation_quote": "USD 3.75% vs EUR 2.15% - differenziale favorevole"
+                },
+                "aspettative_tassi": {
+                    "base": -1, "quote": 1,
+                    "motivation_base": "BCE dovish con tagli previsti",
+                    "motivation_quote": "Fed hawkish, hold prolungato"
+                },
+                "inflazione": {
+                    "base": 1, "quote": 0,
+                    "motivation_base": "Inflazione EUR 2.14% vicina al target",
+                    "motivation_quote": "Inflazione USA 2.74% sopra target"
+                },
+                "crescita_pil": {
+                    "base": -1, "quote": 1,
+                    "motivation_base": "PIL EUR debole 0.7%",
+                    "motivation_quote": "PIL USA robusto 2.1%"
+                },
+                "risk_sentiment": {
+                    "base": 0, "quote": 0,
+                    "motivation_base": "Neutro per EUR",
+                    "motivation_quote": "Neutro per USD"
+                },
+                "bilancia_fiscale": {
+                    "base": 0, "quote": 0,
+                    "motivation_base": "Situazione fiscale stabile",
+                    "motivation_quote": "Deficit elevato ma gestibile"
+                }
+            }
         },
         ...per ogni coppia
     },
@@ -486,10 +535,13 @@ Per ogni coppia forex:
 }
 
 ### 6. REGOLE SPECIALI:
-- JPY: ricorda che è safe-haven, si rafforza in risk-off
-- CHF: idem, safe-haven
+- JPY/CHF: safe-haven, si rafforzano in risk-off
 - AUD/CAD: valute commodity, sensibili a Cina e materie prime
+- Il DIFFERENZIALE = score_base - score_quote (positivo = bullish, negativo = bearish)
 - Usa SEMPRE dati recenti dalle notizie, non solo i numeri
+- Assicurati che score_base = somma dei punteggi "base" dei 6 parametri
+- Assicurati che score_quote = somma dei punteggi "quote" dei 6 parametri
+- Per price_scenarios: stima range realistici basati sul prezzo attuale e sul bias
 """
 
 
@@ -1090,79 +1142,349 @@ def display_analysis_matrix(analysis: dict):
     pair_analysis = analysis.get("pair_analysis", {})
     
     if pair_analysis:
-        # Ordina per bias e strength
-        bullish_pairs = [(p, d) for p, d in pair_analysis.items() if d.get("bias") == "bullish"]
-        bearish_pairs = [(p, d) for p, d in pair_analysis.items() if d.get("bias") == "bearish"]
+        # Calcola differenziale per ogni coppia e ordina
+        pairs_with_diff = []
+        for p, d in pair_analysis.items():
+            score_base = d.get("score_base", 0)
+            score_quote = d.get("score_quote", 0)
+            diff = score_base - score_quote
+            pairs_with_diff.append((p, d, diff))
         
-        # Ordina per strength decrescente
-        bullish_pairs.sort(key=lambda x: x[1].get("strength", 0), reverse=True)
-        bearish_pairs.sort(key=lambda x: x[1].get("strength", 0), reverse=True)
+        # Ordina per differenziale
+        bullish_pairs = [(p, d, diff) for p, d, diff in pairs_with_diff if diff > 0]
+        bearish_pairs = [(p, d, diff) for p, d, diff in pairs_with_diff if diff < 0]
+        neutral_pairs = [(p, d, diff) for p, d, diff in pairs_with_diff if diff == 0]
+        
+        bullish_pairs.sort(key=lambda x: x[2], reverse=True)
+        bearish_pairs.sort(key=lambda x: x[2])  # più negativo prima
         
         st.markdown("### 🎯 Top Opportunità")
         
         col_bull, col_bear = st.columns(2)
         
         with col_bull:
-            st.markdown("#### 🟢 TOP BULLISH")
-            for pair, data in bullish_pairs[:5]:
+            st.markdown("#### 🏆 TOP BULLISH (Long)")
+            for pair, data, diff in bullish_pairs[:5]:
                 strength = data.get("strength", 3)
-                dots = "●●" if strength >= 4 else "●"
-                st.markdown(f"**{pair}** {dots}")
-                st.caption(data.get("summary", "")[:80] + "...")
+                dots = "🟢🟢" if strength >= 4 else "🟢"
+                st.markdown(f"**{pair}** {dots} → Diff: **+{diff}**")
         
         with col_bear:
-            st.markdown("#### 🔴 TOP BEARISH")
-            for pair, data in bearish_pairs[:5]:
+            st.markdown("#### 📉 TOP BEARISH (Short)")
+            for pair, data, diff in bearish_pairs[:5]:
                 strength = data.get("strength", 3)
-                dots = "●●" if strength >= 4 else "●"
-                st.markdown(f"**{pair}** {dots}")
-                st.caption(data.get("summary", "")[:80] + "...")
+                dots = "🔴🔴" if strength >= 4 else "🔴"
+                st.markdown(f"**{pair}** {dots} → Diff: **{diff}**")
         
         st.markdown("---")
         
-        # ===== ANALISI COMPLETA PER COPPIA =====
-        st.markdown("### 📈 Analisi Completa per Coppia")
+        # ===== TABELLA TUTTE LE COPPIE =====
+        st.markdown("### 📋 Tutte le Coppie")
+        st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
         
-        # Crea dataframe con bias+forza combinati
+        # Crea dataframe con struttura completa
         rows = []
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
             strength = data.get("strength", 3)
             summary = data.get("summary", "")
+            score_base = data.get("score_base", 0)
+            score_quote = data.get("score_quote", 0)
+            differential = score_base - score_quote
             
-            # Emoji + bias + forza combinati
-            bias_emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "🟡"
-            strength_indicator = "●●" if strength >= 4 else "●" if strength >= 2 else "○"
-            bias_combined = f"{bias_emoji} {bias.upper()} {strength_indicator}"
+            # Pallini colorati per bias + forza
+            if bias == "bullish":
+                bias_combined = "🟢🟢 BULLISH" if strength >= 4 else "🟢 BULLISH"
+            elif bias == "bearish":
+                bias_combined = "🔴🔴 BEARISH" if strength >= 4 else "🔴 BEARISH"
+            else:
+                bias_combined = "🟡 NEUTRAL"
+            
+            # Estrai valute dalla coppia
+            base_curr, quote_curr = pair.split("/")
             
             rows.append({
                 "Coppia": pair,
                 "Bias": bias_combined,
-                "Analisi": summary[:120] + "..." if len(summary) > 120 else summary
+                "Diff": differential,
+                base_curr: score_base,
+                quote_curr: score_quote,
+                "Sintesi": summary[:100] + "..." if len(summary) > 100 else summary
             })
         
         df = pd.DataFrame(rows)
         st.dataframe(df, use_container_width=True, hide_index=True)
         
         # Legenda
-        st.caption("Legenda forza: ●● = forte (4-5) | ● = moderato (2-3) | ○ = debole (1)")
+        st.caption("Legenda: 🟢🟢/🔴🔴 = bias forte (4-5) | 🟢/🔴 = bias moderato (1-3) | 🟡 = neutrale")
         
-        # Dettagli in expander
-        with st.expander("📊 Dettagli completi per coppia"):
-            for pair, data in pair_analysis.items():
-                bias = data.get("bias", "neutral")
-                strength = data.get("strength", 3)
-                summary = data.get("summary", "")
-                key_drivers = data.get("key_drivers", [])
+        st.markdown("---")
+        
+        # ===== DETTAGLIO SINGOLA COPPIA (SELEZIONABILE) =====
+        st.markdown("### 🔍 Dettaglio Coppia Selezionata")
+        
+        # Lista coppie per selectbox
+        pair_list = list(pair_analysis.keys())
+        
+        # Selectbox per selezionare la coppia
+        selected_pair = st.selectbox(
+            "Seleziona una coppia per vedere l'analisi dettagliata:",
+            pair_list,
+            key="selected_pair_detail"
+        )
+        
+        if selected_pair and selected_pair in pair_analysis:
+            pair_data = pair_analysis[selected_pair]
+            
+            bias = pair_data.get("bias", "neutral")
+            strength = pair_data.get("strength", 3)
+            summary = pair_data.get("summary", "")
+            score_base = pair_data.get("score_base", 0)
+            score_quote = pair_data.get("score_quote", 0)
+            differential = score_base - score_quote
+            scores = pair_data.get("scores", {})
+            
+            # Estrai valute dalla coppia
+            base_curr, quote_curr = selected_pair.split("/")
+            
+            # Determina tipo bias
+            if bias == "bullish":
+                bias_type = "RIALZISTA" 
+                bias_strength = "(STRONG)" if strength >= 4 else "(MODERATE)"
+                header_color = "#d4edda"
+                header_border = "#28a745"
+                header_emoji = "🟢"
+            elif bias == "bearish":
+                bias_type = "RIBASSISTA"
+                bias_strength = "(STRONG)" if strength >= 4 else "(MODERATE)"
+                header_color = "#f8d7da"
+                header_border = "#dc3545"
+                header_emoji = "🔴"
+            else:
+                bias_type = "NEUTRALE"
+                bias_strength = ""
+                header_color = "#fff3cd"
+                header_border = "#ffc107"
+                header_emoji = "🟡"
+            
+            # === HEADER BOX ===
+            st.markdown(f"""
+            <div style="background-color: {header_color}; border-left: 5px solid {header_border}; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin: 0; color: #333;">{header_emoji} {selected_pair} - BIAS {bias_type} {bias_strength}</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # === BOX PUNTEGGI ===
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                diff_color = "#28a745" if differential > 0 else "#dc3545" if differential < 0 else "#6c757d"
+                st.markdown(f"""
+                <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <p style="margin: 0; color: #666; font-size: 0.9em;">Differenziale</p>
+                    <p style="margin: 5px 0 0 0; font-size: 2em; font-weight: bold; color: {diff_color};">{'+' if differential > 0 else ''}{differential}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col2:
+                base_color = "#28a745" if score_base > 0 else "#dc3545" if score_base < 0 else "#6c757d"
+                st.markdown(f"""
+                <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <p style="margin: 0; color: #666; font-size: 0.9em;">Score {base_curr}</p>
+                    <p style="margin: 5px 0 0 0; font-size: 2em; font-weight: bold; color: {base_color};">{'+' if score_base > 0 else ''}{score_base}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col3:
+                quote_color = "#28a745" if score_quote > 0 else "#dc3545" if score_quote < 0 else "#6c757d"
+                st.markdown(f"""
+                <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                    <p style="margin: 0; color: #666; font-size: 0.9em;">Score {quote_curr}</p>
+                    <p style="margin: 5px 0 0 0; font-size: 2em; font-weight: bold; color: {quote_color};">{'+' if score_quote > 0 else ''}{score_quote}</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # === SINTESI ===
+            st.markdown("")
+            st.markdown(f"**Sintesi:** {summary}")
+            
+            st.markdown("---")
+            
+            # === CONFRONTO DATI MACRO E PUNTEGGI ===
+            st.markdown("### 📊 Confronto Dati Macro e Punteggi")
+            
+            # Recupera dati macro se disponibili
+            macro_data = st.session_state.get('last_macro_data', {})
+            
+            col_base, col_quote = st.columns(2)
+            
+            # Mappa nomi parametri
+            param_names = {
+                "tassi_attuali": "Tassi Attuali",
+                "aspettative_tassi": "Aspettative Tassi",
+                "inflazione": "Inflazione",
+                "crescita_pil": "Crescita/PIL",
+                "risk_sentiment": "Risk Sentiment",
+                "bilancia_fiscale": "Bilancia/Fiscale"
+            }
+            
+            with col_base:
+                st.markdown(f"### {base_curr}")
                 
-                bias_emoji = "🟢" if bias == "bullish" else "🔴" if bias == "bearish" else "🟡"
-                strength_bar = "●" * strength + "○" * (5 - strength)
+                # Dati economici
+                if base_curr in macro_data:
+                    st.markdown("**Dati Economici:**")
+                    base_macro = macro_data[base_curr]
+                    st.markdown(f"- 🏦 Tasso BC: **{base_macro.get('interest_rate', 'N/A')}%**")
+                    st.markdown(f"- 📈 Inflazione: **{base_macro.get('inflation_rate', 'N/A')}%**")
+                    st.markdown(f"- 📊 PIL: **{base_macro.get('gdp_growth', 'N/A')}%**")
+                    st.markdown(f"- 👥 Disoccupazione: **{base_macro.get('unemployment', 'N/A')}%**")
                 
-                st.markdown(f"**{pair}** - {bias_emoji} {bias.upper()} | Forza: {strength_bar}")
-                st.markdown(f"*{summary}*")
-                if key_drivers:
-                    st.caption(f"Driver: {', '.join(key_drivers)}")
+                # Tabella punteggi BASE
+                st.markdown(f"**Punteggi {base_curr} vs {quote_curr}:**")
+                
+                score_rows_base = []
+                for param_key, param_label in param_names.items():
+                    if param_key in scores:
+                        score_val = scores[param_key].get("base", 0)
+                        motivation = scores[param_key].get("motivation_base", "")
+                        
+                        # Emoji per punteggio
+                        if score_val > 0:
+                            score_display = f"🟢 +{score_val}"
+                        elif score_val < 0:
+                            score_display = f"🔴 {score_val}"
+                        else:
+                            score_display = f"⚪ 0"
+                        
+                        score_rows_base.append({
+                            "Parametro": param_label,
+                            "Score": score_display,
+                            "Motivazione": motivation[:60] + "..." if len(motivation) > 60 else motivation
+                        })
+                
+                if score_rows_base:
+                    df_base = pd.DataFrame(score_rows_base)
+                    st.dataframe(df_base, use_container_width=True, hide_index=True)
+                
+                # Totale
+                total_color = "#28a745" if score_base > 0 else "#dc3545" if score_base < 0 else "#6c757d"
+                total_emoji = "🟢" if score_base > 0 else "🔴" if score_base < 0 else "⚪"
+                st.markdown(f"### {total_emoji} TOTALE: {'+' if score_base > 0 else ''}{score_base}")
+            
+            with col_quote:
+                st.markdown(f"### {quote_curr}")
+                
+                # Dati economici
+                if quote_curr in macro_data:
+                    st.markdown("**Dati Economici:**")
+                    quote_macro = macro_data[quote_curr]
+                    st.markdown(f"- 🏦 Tasso BC: **{quote_macro.get('interest_rate', 'N/A')}%**")
+                    st.markdown(f"- 📈 Inflazione: **{quote_macro.get('inflation_rate', 'N/A')}%**")
+                    st.markdown(f"- 📊 PIL: **{quote_macro.get('gdp_growth', 'N/A')}%**")
+                    st.markdown(f"- 👥 Disoccupazione: **{quote_macro.get('unemployment', 'N/A')}%**")
+                
+                # Tabella punteggi QUOTE
+                st.markdown(f"**Punteggi {quote_curr} vs {base_curr}:**")
+                
+                score_rows_quote = []
+                for param_key, param_label in param_names.items():
+                    if param_key in scores:
+                        score_val = scores[param_key].get("quote", 0)
+                        motivation = scores[param_key].get("motivation_quote", "")
+                        
+                        # Emoji per punteggio
+                        if score_val > 0:
+                            score_display = f"🟢 +{score_val}"
+                        elif score_val < 0:
+                            score_display = f"🔴 {score_val}"
+                        else:
+                            score_display = f"⚪ 0"
+                        
+                        score_rows_quote.append({
+                            "Parametro": param_label,
+                            "Score": score_display,
+                            "Motivazione": motivation[:60] + "..." if len(motivation) > 60 else motivation
+                        })
+                
+                if score_rows_quote:
+                    df_quote = pd.DataFrame(score_rows_quote)
+                    st.dataframe(df_quote, use_container_width=True, hide_index=True)
+                
+                # Totale
+                total_color = "#28a745" if score_quote > 0 else "#dc3545" if score_quote < 0 else "#6c757d"
+                total_emoji = "🟢" if score_quote > 0 else "🔴" if score_quote < 0 else "⚪"
+                st.markdown(f"### {total_emoji} TOTALE: {'+' if score_quote > 0 else ''}{score_quote}")
+            
+            st.markdown("---")
+            
+            # === SCENARI DI PREZZO ===
+            price_scenarios = pair_data.get("price_scenarios", {})
+            current_price = pair_data.get("current_price", "N/A")
+            key_drivers = pair_data.get("key_drivers", [])
+            
+            if price_scenarios or current_price != "N/A":
+                st.markdown("### 📊 Scenari di Prezzo")
+                
+                # Box prezzo attuale
+                st.markdown(f"""
+                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                if price_scenarios:
+                    col_base_range, col_base_strong, col_quote_strong = st.columns(3)
+                    
+                    with col_base_range:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                            <p style="margin: 0;">🟡 <strong>Base</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_range', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_base_strong:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px;">
+                            <p style="margin: 0;">🟢 <strong>{base_curr} Forte</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_strong', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_quote_strong:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px;">
+                            <p style="margin: 0;">🔴 <strong>{quote_curr} Forte</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('quote_strong', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                
                 st.markdown("")
+            
+            # === DRIVER CHIAVE ===
+            if key_drivers:
+                st.markdown("### 🔑 Driver Chiave")
+                for driver in key_drivers:
+                    st.markdown(f"• {driver}")
+                st.markdown("")
+            
+            st.markdown("---")
+            
+            # === CALENDARIO ECONOMICO ===
+            st.markdown("### 📅 Calendario Economico")
+            
+            st.info("📊 Consulta i calendari economici per gli eventi della settimana")
+            
+            col_te, col_ff = st.columns(2)
+            
+            with col_te:
+                st.markdown("🔗 [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
+            
+            with col_ff:
+                st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
+            
+            st.caption(f"Filtra per impatto 2-3 stelle e per le valute: {base_curr}, {quote_curr}")
         
         st.markdown("---")
     
