@@ -381,12 +381,14 @@ def get_user_analyses(user_id: str, limit: int = 50) -> list:
 
 
 def format_datetime_display(datetime_str: str) -> str:
-    """Formatta datetime per visualizzazione: 28/12/2025 14:30"""
+    """Formatta datetime per visualizzazione: 28/12/2025 14:30 (senza secondi)"""
     try:
         if "_" in datetime_str:
             date_part, time_part = datetime_str.split("_")
             date_obj = datetime.strptime(date_part, "%Y-%m-%d")
-            time_formatted = time_part.replace("-", ":")
+            # Prendi solo ore e minuti (rimuovi i secondi)
+            time_parts = time_part.split("-")
+            time_formatted = f"{time_parts[0]}:{time_parts[1]}"  # Solo HH:MM
             return f"{date_obj.strftime('%d/%m/%Y')} {time_formatted}"
         else:
             date_obj = datetime.strptime(datetime_str, "%Y-%m-%d")
@@ -449,39 +451,36 @@ Per ogni coppia (es: AUD/CAD) devi:
 
 ⚠️ LA STESSA VALUTA PUÒ AVERE PUNTEGGI DIVERSI IN COPPIE DIVERSE!
 Esempio:
-- In AUD/CAD → AUD potrebbe avere score +5 (AUD più forte di CAD)
-- In AUD/USD → AUD potrebbe avere score -3 (AUD più debole di USD)
-
-Questo perché ogni coppia è un confronto unico con dinamiche proprie.
+- In AUD/CAD → AUD potrebbe avere score +3 (AUD più forte di CAD)
+- In AUD/USD → AUD potrebbe avere score -2 (AUD più debole di USD)
 
 ## LINGUA: TUTTO IN ITALIANO
 
 ## STRUTTURA JSON OBBLIGATORIA
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
-## ANALISI DEL BIAS
-Per ogni coppia forex (es: EUR/USD dove EUR=valuta base, USD=valuta quote):
-- **BULLISH** = la valuta BASE si rafforza rispetto alla QUOTE
-- **BEARISH** = la valuta BASE si indebolisce rispetto alla QUOTE
-- **NEUTRAL** = equilibrio tra le due valute
-
 ## SISTEMA DI SCORING (6 PARAMETRI PER OGNI COPPIA)
 
-Per OGNI coppia, analizza il confronto diretto e assegna punteggi da -2 a +2:
+⚠️ RANGE PUNTEGGI SPECIFICI:
+- **Aspettative Tassi**: da -2 a +2 (parametro più importante!)
+- **Tutti gli altri parametri**: da -1 a +1
 
-1. **Tassi Attuali**: chi ha il vantaggio sui tassi BC nel confronto diretto?
-2. **Aspettative Tassi**: chi ha outlook migliore (hawkish vs dovish)?
-3. **Inflazione**: chi gestisce meglio l'inflazione nel confronto?
-4. **Crescita/PIL**: chi ha crescita economica migliore?
-5. **Risk Sentiment**: in base al sentiment attuale, chi è favorito nella coppia?
-6. **Bilancia/Fiscale**: chi ha situazione fiscale/commerciale migliore?
+I 6 PARAMETRI:
+1. **Tassi Attuali** [-1 a +1]: chi ha il vantaggio sui tassi BC nel confronto?
+2. **Aspettative Tassi** [-2 a +2]: chi ha outlook migliore (hawkish vs dovish)? PESO DOPPIO!
+3. **Inflazione** [-1 a +1]: chi gestisce meglio l'inflazione?
+4. **Crescita/PIL** [-1 a +1]: chi ha crescita economica migliore?
+5. **Risk Sentiment** [-1 a +1]: chi è favorito dal sentiment attuale?
+6. **Bilancia/Fiscale** [-1 a +1]: chi ha situazione fiscale migliore?
 
-SCALA PUNTEGGI (sempre relativi al confronto nella coppia):
-- +2 = nettamente favorevole per quella valuta nel confronto
-- +1 = leggermente favorevole
-- 0 = neutro/parità
-- -1 = leggermente sfavorevole
-- -2 = nettamente sfavorevole
+SCALA:
+- Per Aspettative Tassi: +2/-2 = netto vantaggio/svantaggio, +1/-1 = leggero, 0 = neutro
+- Per altri parametri: +1/-1 = vantaggio/svantaggio, 0 = neutro
+
+RANGE TOTALI POSSIBILI:
+- score_base: da -7 a +7
+- score_quote: da -7 a +7
+- differenziale: da -14 a +14
 
 ## FORMATO OUTPUT JSON:
 {
@@ -491,7 +490,7 @@ SCALA PUNTEGGI (sempre relativi al confronto nella coppia):
         "EUR/USD": {
             "bias": "bullish/bearish/neutral",
             "strength": 1-5,
-            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO EUR vs USD",
+            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO",
             "key_drivers": ["driver1", "driver2"],
             "score_base": 3,
             "score_quote": -3,
@@ -504,37 +503,37 @@ SCALA PUNTEGGI (sempre relativi al confronto nella coppia):
             "scores": {
                 "tassi_attuali": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "EUR 2.15% inferiore a USD 3.75% - svantaggio per EUR",
-                    "motivation_quote": "USD 3.75% superiore a EUR 2.15% - vantaggio per USD"
+                    "motivation_base": "EUR 2.15% inferiore a USD 3.75%",
+                    "motivation_quote": "USD 3.75% superiore a EUR 2.15%"
                 },
                 "aspettative_tassi": {
-                    "base": -1, "quote": 1,
-                    "motivation_base": "BCE più dovish con tagli previsti vs Fed",
-                    "motivation_quote": "Fed più hawkish, mantiene tassi alti vs BCE"
+                    "base": -2, "quote": 2,
+                    "motivation_base": "BCE molto più dovish con tagli previsti",
+                    "motivation_quote": "Fed hawkish, mantiene tassi alti"
                 },
                 "inflazione": {
                     "base": 1, "quote": -1,
-                    "motivation_base": "Inflazione EUR 2.14% più vicina al target vs USA",
-                    "motivation_quote": "Inflazione USA 2.74% più lontana dal target vs EUR"
+                    "motivation_base": "Inflazione EUR più vicina al target",
+                    "motivation_quote": "Inflazione USA più lontana dal target"
                 },
                 "crescita_pil": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "PIL EUR 0.7% molto inferiore a USA",
-                    "motivation_quote": "PIL USA 2.1% molto superiore a EUR"
+                    "motivation_base": "PIL EUR molto inferiore",
+                    "motivation_quote": "PIL USA molto superiore"
                 },
                 "risk_sentiment": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Risk sentiment neutro per questa coppia",
-                    "motivation_quote": "Risk sentiment neutro per questa coppia"
+                    "motivation_base": "Neutro",
+                    "motivation_quote": "Neutro"
                 },
                 "bilancia_fiscale": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Situazioni fiscali comparabili",
-                    "motivation_quote": "Situazioni fiscali comparabili"
+                    "motivation_base": "Comparabile",
+                    "motivation_quote": "Comparabile"
                 }
             }
         },
-        ... RIPETI PER TUTTE LE 19 COPPIE CON ANALISI INDIPENDENTI
+        ... RIPETI PER TUTTE LE 19 COPPIE
     },
     "rate_outlook": {
         "USD": {"current_rate": "X.XX%", "next_meeting": "data", "expectation": "hold/cut/hike", "probability": "XX%"},
@@ -544,13 +543,12 @@ SCALA PUNTEGGI (sempre relativi al confronto nella coppia):
     "events_calendar": []
 }
 
-## REGOLE SPECIALI:
-- JPY/CHF: safe-haven, considera l'impatto del risk sentiment sulla coppia specifica
-- AUD/CAD: valute commodity, analizza l'impatto su ogni coppia dove appaiono
-- Il DIFFERENZIALE = score_base - score_quote
-- score_base = SOMMA dei 6 punteggi "base" (da -12 a +12)
-- score_quote = SOMMA dei 6 punteggi "quote" (da -12 a +12)
-- OGNI COPPIA È UN'ANALISI A SÉ: non copiare punteggi da altre coppie!
+## REGOLE:
+- OGNI COPPIA È UN'ANALISI INDIPENDENTE
+- Aspettative Tassi ha peso doppio (-2 a +2), gli altri -1 a +1
+- score_base = SOMMA dei 6 punteggi "base"
+- score_quote = SOMMA dei 6 punteggi "quote"
+- differenziale = score_base - score_quote
 """
 
 
@@ -1187,12 +1185,14 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
         
-        # ===== TABELLA TUTTE LE COPPIE =====
+        # ===== TABELLA TUTTE LE COPPIE CON CHECKBOX =====
         st.markdown("### 📋 Tutte le Coppie")
         st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
         
-        # Crea dataframe con struttura completa
+        # Crea dataframe con checkbox
         rows = []
+        pair_list = list(pair_analysis.keys())
+        
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
             strength = data.get("strength", 3)
@@ -1209,40 +1209,55 @@ def display_analysis_matrix(analysis: dict):
             else:
                 bias_combined = "🟡 NEUTRAL"
             
-            # Estrai valute dalla coppia
-            base_curr, quote_curr = pair.split("/")
-            
             rows.append({
+                "Seleziona": False,
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                base_curr: score_base,
-                quote_curr: score_quote,
                 "Sintesi": summary[:100] + "..." if len(summary) > 100 else summary
             })
         
         df = pd.DataFrame(rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Usa data_editor per avere checkbox interattive
+        edited_df = st.data_editor(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Seleziona": st.column_config.CheckboxColumn(
+                    "📌",
+                    help="Seleziona per vedere il dettaglio",
+                    default=False,
+                    width="small"
+                ),
+                "Coppia": st.column_config.TextColumn("Coppia", width="small"),
+                "Bias": st.column_config.TextColumn("Bias", width="medium"),
+                "Diff": st.column_config.NumberColumn("Diff", width="small"),
+                "Sintesi": st.column_config.TextColumn("Sintesi", width="large"),
+            },
+            disabled=["Coppia", "Bias", "Diff", "Sintesi"],
+            key="pair_table_editor"
+        )
         
         # Legenda
         st.caption("Legenda: 🟢🟢/🔴🔴 = bias forte (4-5) | 🟢/🔴 = bias moderato (1-3) | 🟡 = neutrale")
         
+        # Trova la coppia selezionata (l'ultima checkbox attivata)
+        selected_rows = edited_df[edited_df["Seleziona"] == True]
+        
+        if not selected_rows.empty:
+            # Prendi l'ultima coppia selezionata
+            selected_pair = selected_rows.iloc[-1]["Coppia"]
+        else:
+            selected_pair = None
+        
         st.markdown("---")
         
-        # ===== DETTAGLIO SINGOLA COPPIA (SELEZIONABILE) =====
-        st.markdown("### 🔍 Dettaglio Coppia Selezionata")
-        
-        # Lista coppie per selectbox
-        pair_list = list(pair_analysis.keys())
-        
-        # Selectbox per selezionare la coppia
-        selected_pair = st.selectbox(
-            "Seleziona una coppia per vedere l'analisi dettagliata:",
-            pair_list,
-            key="selected_pair_detail"
-        )
-        
+        # ===== DETTAGLIO COPPIA SELEZIONATA =====
         if selected_pair and selected_pair in pair_analysis:
+            st.markdown("### 🔍 Dettaglio Coppia Selezionata")
+            
             pair_data = pair_analysis[selected_pair]
             
             bias = pair_data.get("bias", "neutral")
@@ -1322,19 +1337,22 @@ def display_analysis_matrix(analysis: dict):
             # === CONFRONTO DATI MACRO E PUNTEGGI ===
             st.markdown("### 📊 Confronto Dati Macro e Punteggi")
             
+            # Legenda punteggi
+            st.caption("📌 Range punteggi: **Aspettative Tassi** [-2 a +2] | **Altri parametri** [-1 a +1]")
+            
             # Recupera dati macro se disponibili
             macro_data = st.session_state.get('last_macro_data', {})
             
             col_base, col_quote = st.columns(2)
             
-            # Mappa nomi parametri
+            # Mappa nomi parametri con range
             param_names = {
-                "tassi_attuali": "Tassi Attuali",
-                "aspettative_tassi": "Aspettative Tassi",
-                "inflazione": "Inflazione",
-                "crescita_pil": "Crescita/PIL",
-                "risk_sentiment": "Risk Sentiment",
-                "bilancia_fiscale": "Bilancia/Fiscale"
+                "tassi_attuali": "Tassi Attuali [-1/+1]",
+                "aspettative_tassi": "Aspettative Tassi [-2/+2]",
+                "inflazione": "Inflazione [-1/+1]",
+                "crescita_pil": "Crescita/PIL [-1/+1]",
+                "risk_sentiment": "Risk Sentiment [-1/+1]",
+                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]"
             }
             
             with col_base:
@@ -1494,6 +1512,10 @@ def display_analysis_matrix(analysis: dict):
                 st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
             
             st.caption(f"Filtra per impatto 2-3 stelle e per le valute: {base_curr}, {quote_curr}")
+        else:
+            # Nessuna coppia selezionata
+            st.markdown("### 🔍 Dettaglio Coppia Selezionata")
+            st.info("👆 Seleziona una coppia dalla tabella sopra (colonna 📌) per vedere l'analisi dettagliata")
         
         st.markdown("---")
 
