@@ -1227,10 +1227,8 @@ def display_analysis_matrix(analysis: dict):
         st.markdown("### 📋 Tutte le Coppie")
         st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
         
-        # Crea dataframe 
-        rows = []
-        pair_list = list(pair_analysis.keys())
-        
+        # Crea lista con dati e ordina per differenziale (dal più bullish al più bearish)
+        rows_data = []
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
             strength = data.get("strength", 3)
@@ -1247,14 +1245,26 @@ def display_analysis_matrix(analysis: dict):
             else:
                 bias_combined = "🟡 NEUTRAL"
             
-            rows.append({
+            rows_data.append({
+                "pair": pair,
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
                 "Sintesi": summary[:100] + "..." if len(summary) > 100 else summary
             })
         
+        # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
+        rows_data.sort(key=lambda x: x["Diff"], reverse=True)
+        
+        # Estrai pair_list ordinato e righe per dataframe
+        pair_list = [r["pair"] for r in rows_data]
+        rows = [{k: v for k, v in r.items() if k != "pair"} for r in rows_data]
+        
         df = pd.DataFrame(rows)
+        
+        # Calcola altezza per mostrare tutte le righe senza scroll
+        # Circa 35px per riga + 40px header
+        table_height = len(rows) * 35 + 40
         
         # Usa dataframe con selezione singola riga
         selection = st.dataframe(
@@ -1263,6 +1273,7 @@ def display_analysis_matrix(analysis: dict):
             hide_index=True,
             on_select="rerun",
             selection_mode="single-row",
+            height=table_height,
             key="pair_table_selection"
         )
         
