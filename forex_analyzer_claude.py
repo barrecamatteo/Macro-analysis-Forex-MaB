@@ -310,18 +310,33 @@ def load_analysis(datetime_str: str, user_id: str) -> dict | None:
 
 
 def delete_analysis(datetime_str: str, user_id: str) -> bool:
-    """Cancella un'analisi da Supabase per un utente specifico"""
+    """Cancella un'analisi da Supabase. Gestisce sia analisi con user_id che legacy."""
     try:
         if SUPABASE_ENABLED:
+            # Prima prova a cancellare con user_id
             result = supabase_request(
                 "DELETE", 
                 f"analyses?analysis_datetime=eq.{datetime_str}&user_id=eq.{user_id}"
             )
+            if result is not None:
+                return True
+            
+            # Se non trovata, prova a cancellare analisi legacy (user_id NULL)
+            result = supabase_request(
+                "DELETE", 
+                f"analyses?analysis_datetime=eq.{datetime_str}&user_id=is.null"
+            )
             return result is not None
         else:
-            filename = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
-            if filename.exists():
-                filename.unlink()
+            # Locale: prova entrambi i formati di filename
+            filename_new = DATA_FOLDER / f"analysis_{user_id}_{datetime_str}.json"
+            filename_legacy = DATA_FOLDER / f"analysis_{datetime_str}.json"
+            
+            if filename_new.exists():
+                filename_new.unlink()
+                return True
+            elif filename_legacy.exists():
+                filename_legacy.unlink()
                 return True
     except Exception as e:
         st.error(f"Errore cancellazione: {e}")
@@ -331,18 +346,20 @@ def delete_analysis(datetime_str: str, user_id: str) -> bool:
 def get_user_analyses(user_id: str, limit: int = 50) -> list:
     """
     Restituisce tutte le analisi di un utente (più recente prima).
-    Include metadati come tipo e opzioni selezionate.
+    Include anche analisi legacy senza user_id per retrocompatibilità.
     """
     analyses = []
     
     if SUPABASE_ENABLED:
+        # Query che recupera sia analisi dell'utente che quelle senza user_id (legacy)
         result = supabase_request(
             "GET", 
-            f"analyses?user_id=eq.{user_id}&order=analysis_datetime.desc&limit={limit}"
+            f"analyses?or=(user_id.eq.{user_id},user_id.is.null)&order=analysis_datetime.desc&limit={limit}"
         )
         if result:
             analyses = result
     else:
+        # Locale: cerca sia file con user_id che senza
         for file in DATA_FOLDER.glob(f"analysis_{user_id}_*.json"):
             try:
                 with open(file, "r", encoding="utf-8") as f:
@@ -350,7 +367,15 @@ def get_user_analyses(user_id: str, limit: int = 50) -> list:
                     analyses.append(data)
             except:
                 pass
-        analyses = sorted(analyses, key=lambda x: x.get("data", {}).get("analysis_datetime", ""), reverse=True)
+        # Cerca anche file vecchio formato (senza user_id nel nome)
+        for file in DATA_FOLDER.glob("analysis_2*.json"):
+            try:
+                with open(file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    analyses.append(data)
+            except:
+                pass
+        analyses = sorted(analyses, key=lambda x: x.get("data", {}).get("analysis_datetime", "") or x.get("analysis_datetime", ""), reverse=True)
     
     return analyses[:limit]
 
@@ -1042,12 +1067,21 @@ def display_analysis_history(analyses: list, user_id: str):
         return
     
     for i, analysis_record in enumerate(analyses[:20]):  # Max 20
-        # Estrai informazioni
-        if SUPABASE_ENABLED:
-            datetime_str = analysis_record.get("analysis_datetime", "")
-            analysis_type = analysis_record.get("analysis_type", "custom") or "custom"
-            # options_selected può essere già un dict (JSONB) o una stringa
-            options_raw = analysis_record.get("options_selected", {})
+        # Estrai informazioni - gestisci sia formato nuovo che legacy
+        datetime_str = analysis_record.get("analysis_datetime", "")
+        
+        # Se non c'è analysis_datetime al primo livello, cerca in data (formato legacy)
+        if not datetime_str:
+            data_obj = analysis_record.get("data", {})
+            if isinstance(data_obj, dict):
+                datetime_str = data_obj.get("analysis_datetime", "")
+        
+        analysis_type = analysis_record.get("analysis_type") or "full"  # Legacy = full
+        
+        # options_selected può essere dict, string, o None
+        options_raw = analysis_record.get("options_selected")
+        options = {}
+        if options_raw:
             if isinstance(options_raw, str):
                 try:
                     options = json.loads(options_raw)
@@ -1055,31 +1089,32 @@ def display_analysis_history(analyses: list, user_id: str):
                     options = {}
             elif isinstance(options_raw, dict):
                 options = options_raw
-            else:
-                options = {}
-            data = analysis_record.get("data", {})
-        else:
-            datetime_str = analysis_record.get("data", {}).get("analysis_datetime", "")
-            analysis_type = analysis_record.get("analysis_type", "custom") or "custom"
-            options = analysis_record.get("options_selected", {}) or {}
-            data = analysis_record.get("data", {})
+        
+        # Per analisi legacy senza options, mostra come "completa"
+        is_legacy = not options_raw
         
         # Formato display
-        date_display = format_datetime_display(datetime_str)
+        date_display = format_datetime_display(datetime_str) if datetime_str else "Data sconosciuta"
         type_label = get_analysis_type_label(analysis_type)
         
         # Badge opzioni
         badges = []
-        if options.get("macro"): badges.append("📊")
-        if options.get("news"): badges.append("📰")
-        if options.get("links"): badges.append("📎")
-        if options.get("claude"): badges.append("🤖")
-        badges_str = " ".join(badges)
+        if is_legacy:
+            badges = ["🔄"]  # Legacy = analisi completa vecchio formato
+        else:
+            if options.get("macro"): badges.append("📊")
+            if options.get("news"): badges.append("📰")
+            if options.get("links"): badges.append("📎")
+            if options.get("claude"): badges.append("🤖")
+        badges_str = " ".join(badges) if badges else ""
         
         col1, col2, col3 = st.columns([3, 1, 1])
         
         with col1:
-            st.markdown(f"**{date_display}** - {type_label} {badges_str}")
+            label = f"**{date_display}** - {type_label} {badges_str}"
+            if is_legacy:
+                label += " *(legacy)*"
+            st.markdown(label)
         
         with col2:
             if st.button("📂", key=f"load_{i}", help="Carica"):
@@ -1088,10 +1123,13 @@ def display_analysis_history(analyses: list, user_id: str):
                 st.rerun()
         
         with col3:
-            if st.button("🗑️", key=f"del_{i}", help="Elimina"):
-                if delete_analysis(datetime_str, user_id):
-                    st.success("Eliminata!")
-                    st.rerun()
+            if datetime_str:
+                if st.button("🗑️", key=f"del_{i}", help="Elimina"):
+                    # Per analisi legacy senza user_id, usa None
+                    del_user_id = analysis_record.get("user_id") or user_id
+                    if delete_analysis(datetime_str, del_user_id):
+                        st.success("Eliminata!")
+                        st.rerun()
 
 
 # ============================================================================
@@ -1252,155 +1290,215 @@ def main():
         st.markdown("---")
         st.markdown(f"**Coppie:** {len(FOREX_PAIRS)}")
         st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
+        
+        st.markdown("---")
+        
+        # ===== STORICO ANALISI (menu a tendina) =====
+        user_analyses = get_user_analyses(user_id, limit=30)
+        
+        if user_analyses:
+            st.markdown("### 📁 Analisi Salvate")
+            
+            # Crea lista opzioni per selectbox
+            analysis_options = []
+            for analysis_record in user_analyses:
+                datetime_str = analysis_record.get("analysis_datetime", "")
+                if not datetime_str:
+                    data_obj = analysis_record.get("data", {})
+                    if isinstance(data_obj, dict):
+                        datetime_str = data_obj.get("analysis_datetime", "")
+                
+                analysis_type = analysis_record.get("analysis_type") or "full"
+                date_display = format_datetime_display(datetime_str) if datetime_str else "Data sconosciuta"
+                type_label = get_analysis_type_label(analysis_type)
+                
+                analysis_options.append({
+                    "label": f"{date_display} - {type_label}",
+                    "datetime": datetime_str,
+                    "record": analysis_record
+                })
+            
+            # Selectbox
+            selected_idx = st.selectbox(
+                "Seleziona analisi:",
+                range(len(analysis_options)),
+                format_func=lambda x: analysis_options[x]["label"],
+                key="analysis_selector"
+            )
+            
+            selected_analysis = analysis_options[selected_idx]
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📂 Carica", use_container_width=True):
+                    st.session_state['current_analysis'] = selected_analysis["record"]
+                    st.session_state['analysis_source'] = 'loaded'
+                    st.rerun()
+            
+            with col2:
+                if st.button("🗑️ Elimina", use_container_width=True, type="secondary"):
+                    st.session_state['confirm_delete'] = selected_analysis["datetime"]
+            
+            # Conferma eliminazione
+            if 'confirm_delete' in st.session_state and st.session_state['confirm_delete'] == selected_analysis["datetime"]:
+                st.warning(f"⚠️ Eliminare questa analisi?")
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button("✅ Sì", use_container_width=True):
+                        del_user_id = selected_analysis["record"].get("user_id") or user_id
+                        if delete_analysis(selected_analysis["datetime"], del_user_id):
+                            st.success("Eliminata!")
+                            del st.session_state['confirm_delete']
+                            st.rerun()
+                with col_no:
+                    if st.button("❌ No", use_container_width=True):
+                        del st.session_state['confirm_delete']
+                        st.rerun()
+        else:
+            st.info("📁 Nessuna analisi salvata")
     
     # --- MAIN AREA ---
     
-    # Layout a due colonne: Risultati | Storico
-    col_main, col_history = st.columns([3, 1])
-    
-    with col_main:
-        # ===== ESECUZIONE ANALISI =====
-        if analyze_btn:
-            progress = st.progress(0, text="Inizializzazione...")
-            
-            # Variabili per raccogliere i dati
-            macro_data = None
-            news_text = ""
-            news_structured = {}
-            additional_text = ""
-            links_structured = []
-            claude_analysis = None
-            
-            options_selected = {
-                "macro": opt_macro,
-                "news": opt_news,
-                "links": opt_links,
-                "claude": opt_claude
-            }
-            
-            step = 0
-            total_steps = sum([opt_macro, opt_news, opt_links, opt_claude])
-            
-            # FASE 1: Dati Macro
-            if opt_macro:
-                step += 1
-                progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
-                macro_data = fetch_macro_data()
-                st.session_state['last_macro_data'] = macro_data
-            
-            # FASE 2: Notizie Web
-            if opt_news:
-                step += 1
-                progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
-                news_text, news_structured = search_web_news()
-                st.session_state['last_news_text'] = news_text
-                st.session_state['last_news_structured'] = news_structured
-            
-            # FASE 3: Link Aggiuntivi
-            if opt_links and additional_urls.strip():
-                step += 1
-                progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
-                url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
-                additional_text, links_structured = fetch_additional_resources(url_list)
-                st.session_state['last_links_text'] = additional_text
-                st.session_state['last_links_structured'] = links_structured
-            
-            # FASE 4: Analisi Claude
-            if opt_claude:
-                step += 1
-                progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
-                
-                # Usa dati dalla sessione se non aggiornati ora
-                if not opt_macro and 'last_macro_data' in st.session_state:
-                    macro_data = st.session_state['last_macro_data']
-                if not opt_news and 'last_news_text' in st.session_state:
-                    news_text = st.session_state['last_news_text']
-                if not opt_links and 'last_links_text' in st.session_state:
-                    additional_text = st.session_state['last_links_text']
-                
-                claude_analysis = analyze_with_claude(
-                    ANTHROPIC_API_KEY,
-                    macro_data,
-                    news_text,
-                    additional_text
-                )
-            
-            # ===== SALVATAGGIO =====
-            progress.progress(90, text="💾 Salvataggio...")
-            
-            analysis_result = {
-                "macro_data": macro_data,
-                "news_structured": news_structured,
-                "links_structured": links_structured,
-                "claude_analysis": claude_analysis,
-                "options_selected": options_selected
-            }
-            
-            if save_analysis(analysis_result, user_id, analysis_type, options_selected):
-                st.session_state['current_analysis'] = analysis_result
-                st.session_state['analysis_source'] = 'new'
-                progress.progress(100, text="✅ Completato!")
-                st.rerun()
-            else:
-                st.error("❌ Errore nel salvataggio")
+    # ===== ESECUZIONE ANALISI =====
+    if analyze_btn:
+        progress = st.progress(0, text="Inizializzazione...")
         
-        # ===== VISUALIZZAZIONE RISULTATI =====
-        if 'current_analysis' in st.session_state:
-            analysis = st.session_state['current_analysis']
-            source = st.session_state.get('analysis_source', 'unknown')
-            
-            if source == 'new':
-                st.success("✅ Nuova analisi completata!")
-            elif source == 'loaded':
-                st.info("📂 Analisi caricata da archivio")
-            
-            # Estrai dati (gestisci sia formato nuovo che vecchio)
-            if 'data' in analysis:
-                # Formato Supabase
-                data = analysis.get('data', {})
-                macro_data = data.get('macro_data')
-                news_structured = data.get('news_structured', {})
-                links_structured = data.get('links_structured', [])
-                claude_analysis = data.get('claude_analysis')
-            else:
-                # Formato diretto
-                macro_data = analysis.get('macro_data')
-                news_structured = analysis.get('news_structured', {})
-                links_structured = analysis.get('links_structured', [])
-                claude_analysis = analysis.get('claude_analysis')
-            
-            # Mostra sezioni in base a cosa è disponibile
-            if macro_data:
-                display_macro_data(macro_data)
-                st.markdown("---")
-            
-            if news_structured or links_structured:
-                display_news_summary(news_structured, links_structured)
-                st.markdown("---")
-            
-            if claude_analysis:
-                display_analysis_matrix(claude_analysis)
+        # Variabili per raccogliere i dati
+        macro_data = None
+        news_text = ""
+        news_structured = {}
+        additional_text = ""
+        links_structured = []
+        claude_analysis = None
         
+        options_selected = {
+            "macro": opt_macro,
+            "news": opt_news,
+            "links": opt_links,
+            "claude": opt_claude
+        }
+        
+        step = 0
+        total_steps = sum([opt_macro, opt_news, opt_links, opt_claude])
+        
+        # FASE 1: Dati Macro
+        if opt_macro:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
+            macro_data = fetch_macro_data()
+            st.session_state['last_macro_data'] = macro_data
+        
+        # FASE 2: Notizie Web
+        if opt_news:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
+            news_text, news_structured = search_web_news()
+            st.session_state['last_news_text'] = news_text
+            st.session_state['last_news_structured'] = news_structured
+        
+        # FASE 3: Link Aggiuntivi
+        if opt_links and additional_urls.strip():
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
+            url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
+            additional_text, links_structured = fetch_additional_resources(url_list)
+            st.session_state['last_links_text'] = additional_text
+            st.session_state['last_links_structured'] = links_structured
+        
+        # FASE 4: Analisi Claude
+        if opt_claude:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
+            
+            # Usa dati dalla sessione se non aggiornati ora
+            if not opt_macro and 'last_macro_data' in st.session_state:
+                macro_data = st.session_state['last_macro_data']
+            if not opt_news and 'last_news_text' in st.session_state:
+                news_text = st.session_state['last_news_text']
+            if not opt_links and 'last_links_text' in st.session_state:
+                additional_text = st.session_state['last_links_text']
+            
+            claude_analysis = analyze_with_claude(
+                ANTHROPIC_API_KEY,
+                macro_data,
+                news_text,
+                additional_text
+            )
+        
+        # ===== SALVATAGGIO =====
+        progress.progress(90, text="💾 Salvataggio...")
+        
+        analysis_result = {
+            "macro_data": macro_data,
+            "news_structured": news_structured,
+            "links_structured": links_structured,
+            "claude_analysis": claude_analysis,
+            "options_selected": options_selected
+        }
+        
+        if save_analysis(analysis_result, user_id, analysis_type, options_selected):
+            st.session_state['current_analysis'] = analysis_result
+            st.session_state['analysis_source'] = 'new'
+            progress.progress(100, text="✅ Completato!")
+            st.rerun()
         else:
-            # Stato iniziale
-            st.markdown("""
-            ### 👋 Benvenuto!
-            
-            Seleziona le opzioni nella sidebar e clicca **🚀 AVVIA ANALISI**.
-            
-            **Opzioni disponibili:**
-            - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
-            - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
-            - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
-            - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
-            
-            💡 **Suggerimento:** Puoi aggiornare solo le notizie senza richiamare Claude per risparmiare!
-            """)
+            st.error("❌ Errore nel salvataggio")
     
-    with col_history:
-        # ===== STORICO ANALISI =====
-        user_analyses = get_user_analyses(user_id, limit=20)
-        display_analysis_history(user_analyses, user_id)
+    # ===== VISUALIZZAZIONE RISULTATI =====
+    if 'current_analysis' in st.session_state:
+        analysis = st.session_state['current_analysis']
+        source = st.session_state.get('analysis_source', 'unknown')
+        
+        if source == 'new':
+            st.success("✅ Nuova analisi completata!")
+        elif source == 'loaded':
+            st.info("📂 Analisi caricata da archivio")
+        
+        # Estrai dati (gestisci sia formato nuovo che legacy)
+        data_container = analysis.get('data', analysis)  # Se non c'è 'data', usa analysis stesso
+        
+        # Formato nuovo v3
+        macro_data = data_container.get('macro_data')
+        news_structured = data_container.get('news_structured', {})
+        links_structured = data_container.get('links_structured', [])
+        claude_analysis = data_container.get('claude_analysis')
+        
+        # Formato legacy: se non c'è claude_analysis ma ci sono pair_analysis, è formato vecchio
+        if not claude_analysis and data_container.get('pair_analysis'):
+            # Questo è un'analisi legacy - il data_container È l'analisi Claude
+            claude_analysis = data_container
+            macro_data = None  # Nel formato legacy non c'era separazione
+            news_structured = {}
+            links_structured = []
+        
+        # Mostra sezioni in base a cosa è disponibile
+        if macro_data:
+            display_macro_data(macro_data)
+            st.markdown("---")
+        
+        if news_structured or links_structured:
+            display_news_summary(news_structured, links_structured)
+            st.markdown("---")
+        
+        if claude_analysis:
+            display_analysis_matrix(claude_analysis)
+    
+    else:
+        # Stato iniziale
+        st.markdown("""
+        ### 👋 Benvenuto!
+        
+        Seleziona le opzioni nella sidebar e clicca **🚀 AVVIA ANALISI**.
+        
+        **Opzioni disponibili:**
+        - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
+        - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
+        - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
+        - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
+        
+        💡 **Suggerimento:** Puoi aggiornare solo le notizie senza richiamare Claude per risparmiare!
+        """)
     
     # --- FOOTER ---
     st.markdown("---")
