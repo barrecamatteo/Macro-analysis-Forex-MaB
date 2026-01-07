@@ -793,37 +793,29 @@ def search_web_news() -> tuple[str, dict]:
     all_results.append(f"[CENTRAL BANK MEETING CALENDAR]")
     all_results.append(f"{'='*60}")
     
-    # Query più specifiche con siti affidabili
+    # Query più specifiche
     calendar_queries = [
-        f"site:federalreserve.gov FOMC meeting schedule {current_year}",
-        f"site:ecb.europa.eu governing council meeting dates {current_year}",
-        f"site:bankofengland.co.uk MPC meeting dates {current_year}",
-        f"site:boj.or.jp monetary policy meeting schedule {current_year}",
-        f"FOMC meeting dates January February March {current_year}",
-        f"ECB interest rate decision dates {current_year}",
-        f"central bank meeting calendar {current_year} Fed ECB BoE BoJ",
+        f"FOMC meeting schedule {current_year}",
+        f"ECB governing council meeting dates {current_year}",
+        f"Bank of England MPC meeting dates {current_year}",
+        f"Bank of Japan BOJ monetary policy meeting {current_year}",
+        f"central bank meeting calendar {current_year}",
+        f"Fed ECB BoE interest rate decision dates {current_year}",
     ]
-    
-    # Keywords per filtrare risultati rilevanti
-    calendar_keywords = ['fomc', 'ecb', 'boe', 'boj', 'snb', 'rba', 'boc', 'meeting', 'schedule', 
-                         'calendar', 'rate decision', 'monetary policy', 'interest rate', 'central bank']
     
     for query in calendar_queries:
         try:
-            results = DDGS().text(query, max_results=4)
+            results = DDGS().text(query, max_results=3)
             for r in results:
-                title = r.get('title', '').lower()
-                body = r.get('body', '').lower()
+                title = r.get('title', '')
+                body = r.get('body', '')
                 href = r.get('href', '')
-                
-                # Filtra solo risultati pertinenti
-                if any(kw in title or kw in body for kw in calendar_keywords):
-                    all_results.append(f"[CALENDAR] {r.get('title', '')}: {r.get('body', '')[:400]} | URL: {href}")
-                    structured_results["meeting_calendar"].append({
-                        "title": r.get('title', ''),
-                        "body": r.get('body', '')[:250],
-                        "url": href
-                    })
+                all_results.append(f"[CALENDAR] {title}: {body[:400]} | URL: {href}")
+                structured_results["meeting_calendar"].append({
+                    "title": title,
+                    "body": body[:250],
+                    "url": href
+                })
         except:
             pass
     
@@ -834,38 +826,29 @@ def search_web_news() -> tuple[str, dict]:
     all_results.append(f"[MONETARY POLICY COMPARISON]")
     all_results.append(f"{'='*60}")
     
-    # Query più specifiche con siti finanziari affidabili
+    # Query più specifiche
     comparison_queries = [
-        f"site:reuters.com central bank interest rates {current_year}",
-        f"site:bloomberg.com Fed ECB rate outlook {current_year}",
-        f"site:ft.com monetary policy divergence {current_year}",
-        f"Fed vs ECB vs BoE interest rate comparison {current_year}",
-        f"central bank policy divergence forex impact {current_year}",
-        f"hawkish dovish central banks Fed ECB BoJ {current_year}",
-        f"interest rate differential EUR USD GBP {current_year}",
-        f"monetary policy outlook major central banks {current_year}",
+        f"Fed ECB interest rate comparison {current_year}",
+        f"central bank monetary policy outlook {current_year}",
+        f"hawkish dovish Fed ECB BoE BoJ {current_year}",
+        f"interest rate divergence forex {current_year}",
+        f"Fed vs ECB vs Bank of England rate policy {current_year}",
+        f"central banks rate cuts hikes forecast {current_year}",
     ]
-    
-    # Keywords per filtrare risultati rilevanti
-    policy_keywords = ['fed', 'ecb', 'boe', 'boj', 'rate', 'monetary', 'policy', 'hawkish', 
-                       'dovish', 'central bank', 'interest', 'inflation', 'hike', 'cut', 'forex']
     
     for query in comparison_queries:
         try:
-            results = DDGS().text(query, max_results=5)
+            results = DDGS().text(query, max_results=4)
             for r in results:
-                title = r.get('title', '').lower()
-                body = r.get('body', '').lower()
+                title = r.get('title', '')
+                body = r.get('body', '')
                 href = r.get('href', '')
-                
-                # Filtra solo risultati pertinenti
-                if any(kw in title or kw in body for kw in policy_keywords):
-                    all_results.append(f"[COMPARE] {r.get('title', '')}: {r.get('body', '')[:450]} | URL: {href}")
-                    structured_results["policy_comparison"].append({
-                        "title": r.get('title', ''),
-                        "body": r.get('body', '')[:250],
-                        "url": href
-                    })
+                all_results.append(f"[COMPARE] {title}: {body[:450]} | URL: {href}")
+                structured_results["policy_comparison"].append({
+                    "title": title,
+                    "body": body[:250],
+                    "url": href
+                })
         except:
             pass
     
