@@ -464,7 +464,19 @@ FOREX_PAIRS = [
 
 SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 19 coppie forex separatamente.
 
-## ⚠️ REGOLA FONDAMENTALE: ANALISI COPPIA PER COPPIA
+## ⚠️ REGOLA CRITICA: USA LE NOTIZIE WEB, NON CONOSCENZE OBSOLETE!
+
+Le tue conoscenze potrebbero essere OBSOLETE. Per le ASPETTATIVE SUI TASSI devi:
+1. **LEGGERE ATTENTAMENTE** tutte le notizie web fornite (sezione [RATE EXPECTATIONS])
+2. **BASARTI SOLO** sulle informazioni trovate nelle notizie
+3. **NON ASSUMERE** che le banche centrali mantengano politiche passate
+
+⚠️ ESEMPIO ERRORE DA EVITARE:
+- NON dire "BoJ ultra-dovish" se le notizie mostrano che ha alzato i tassi!
+- NON dire "Fed hawkish" se le notizie mostrano tagli imminenti!
+- VERIFICA SEMPRE nelle notizie web prima di scrivere!
+
+## REGOLA FONDAMENTALE: ANALISI COPPIA PER COPPIA
 
 Devi fare **19 ANALISI INDIPENDENTI**, una per ogni coppia forex.
 Per ogni coppia (es: AUD/CAD) devi:
@@ -490,7 +502,7 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 I 6 PARAMETRI:
 1. **Tassi Attuali** [-1 a +1]: chi ha il vantaggio sui tassi BC nel confronto?
-2. **Aspettative Tassi** [-2 a +2]: chi ha outlook migliore (hawkish vs dovish)? PESO DOPPIO!
+2. **Aspettative Tassi** [-2 a +2]: chi ha outlook migliore (hawkish vs dovish)? PESO DOPPIO! ⚠️ USA LE NOTIZIE WEB!
 3. **Inflazione** [-1 a +1]: chi gestisce meglio l'inflazione?
 4. **Crescita/PIL** [-1 a +1]: chi ha crescita economica migliore?
 5. **Risk Sentiment** [-1 a +1]: chi è favorito dal sentiment attuale?
@@ -509,13 +521,12 @@ RANGE TOTALI POSSIBILI:
 
 Le motivazioni per ogni punteggio devono essere ESPLICATIVE e COMPLETE:
 - Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %)
-- Citare le ASPETTATIVE delle banche centrali (tagli/rialzi previsti, date meeting)
-- Citare informazioni dalle NOTIZIE WEB se rilevanti
-- Citare informazioni dai LINK AGGIUNTIVI forniti dall'utente se presenti
+- Citare le ASPETTATIVE delle banche centrali DALLE NOTIZIE WEB (tagli/rialzi previsti, date meeting)
+- Citare SPECIFICAMENTE le fonti dalle notizie web (es: "secondo Reuters...", "come riportato da Bloomberg...")
 - Spiegare il RAGIONAMENTO dietro il punteggio
 
 ESEMPIO MOTIVAZIONE CORRETTA (dettagliata):
-"EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole. BCE ha tagliato a dicembre e mercati prezzano ulteriori 50bp di tagli nel 2025, mentre Fed mantiene stance hawkish con possibile hold prolungato"
+"EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole. Secondo le notizie, BCE ha tagliato a dicembre e mercati prezzano ulteriori 50bp di tagli nel 2025, mentre Fed mantiene stance hawkish con possibile hold prolungato"
 
 ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
 "EUR tassi inferiori a USD"
@@ -574,14 +585,24 @@ ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
         ... RIPETI PER TUTTE LE 19 COPPIE
     },
     "rate_outlook": {
-        "USD": {"current_rate": "X.XX%", "next_meeting": "data", "expectation": "hold/cut/hike", "probability": "XX%"},
-        ...per ogni valuta
+        "USD": {
+            "current_rate": "X.XX%",
+            "next_meeting": "data (es: 2026-01-29)",
+            "expectation": "hold/cut/hike",
+            "probability": "XX%",
+            "stance": "hawkish/dovish/neutral",
+            "notes": "Breve spiegazione basata sulle notizie web (es: Fed segnala pausa, mercati prezzano 2 tagli nel 2025)"
+        },
+        ... PER OGNI VALUTA (USD, EUR, GBP, JPY, CHF, AUD, CAD)
     },
     "risk_sentiment": "risk-on/risk-off/neutral",
     "events_calendar": []
 }
 
-## REGOLE:
+## REGOLE CRITICHE:
+- ⚠️ PER RATE_OUTLOOK: BASA LE INFORMAZIONI SULLE NOTIZIE WEB, NON SU CONOSCENZE OBSOLETE!
+- La BoJ potrebbe aver alzato i tassi di recente - VERIFICA nelle notizie!
+- La Fed potrebbe aver cambiato stance - VERIFICA nelle notizie!
 - OGNI COPPIA È UN'ANALISI INDIPENDENTE
 - Aspettative Tassi ha peso doppio (-2 a +2), gli altri -1 a +1
 - score_base = SOMMA dei 6 punteggi "base"
@@ -703,13 +724,48 @@ def search_web_news() -> tuple[str, dict]:
     all_results.append(f"{'='*60}")
     
     rate_queries = {
-        "USD": [f"Fed FOMC next meeting {current_year} rate decision probability", f"CME FedWatch tool Fed rate expectations {current_year}"],
-        "EUR": [f"ECB next meeting {current_year} rate decision probability", f"ECB rate forecast {current_year} {next_year}"],
-        "GBP": [f"Bank of England MPC next meeting {current_year} rate decision", f"BoE rate forecast {current_year}"],
-        "JPY": [f"Bank of Japan BOJ meeting {current_year} rate hike probability", f"BOJ policy outlook {current_year}"],
-        "CHF": [f"SNB Swiss National Bank meeting {current_year} rate decision"],
-        "AUD": [f"RBA Reserve Bank Australia meeting {current_year} rate decision", f"RBA rate forecast {current_year}"],
-        "CAD": [f"Bank of Canada BoC meeting {current_year} rate decision", f"BoC rate forecast {current_year}"],
+        "USD": [
+            f"Federal Reserve FOMC rate decision January February {current_year}",
+            f"Fed funds rate forecast {current_year} CME FedWatch",
+            f"Fed Powell hawkish dovish {current_year}",
+            f"Fed rate cut hike probability {current_year}"
+        ],
+        "EUR": [
+            f"ECB European Central Bank rate decision {current_year}",
+            f"ECB Lagarde hawkish dovish {current_year}",
+            f"ECB rate cut forecast {current_year}",
+            f"eurozone interest rate outlook {current_year}"
+        ],
+        "GBP": [
+            f"Bank of England BoE rate decision {current_year}",
+            f"BoE MPC hawkish dovish {current_year}",
+            f"UK interest rate forecast {current_year}",
+            f"Bank of England rate cut hike {current_year}"
+        ],
+        "JPY": [
+            f"Bank of Japan BOJ rate hike {current_year}",
+            f"BOJ Ueda interest rate policy {current_year}",
+            f"Japan interest rate forecast {current_year}",
+            f"BOJ end negative rates policy normalization",
+            f"Bank of Japan hawkish shift {current_year}"
+        ],
+        "CHF": [
+            f"SNB Swiss National Bank rate decision {current_year}",
+            f"SNB interest rate forecast {current_year}",
+            f"Switzerland negative rates policy {current_year}"
+        ],
+        "AUD": [
+            f"RBA Reserve Bank Australia rate decision {current_year}",
+            f"RBA Bullock hawkish dovish {current_year}",
+            f"Australia interest rate forecast {current_year}",
+            f"RBA rate cut hike {current_year}"
+        ],
+        "CAD": [
+            f"Bank of Canada BoC rate decision {current_year}",
+            f"BoC Macklem hawkish dovish {current_year}",
+            f"Canada interest rate forecast {current_year}",
+            f"BoC rate cut hike {current_year}"
+        ],
     }
     
     for currency, queries in rate_queries.items():
@@ -1170,16 +1226,27 @@ def display_analysis_matrix(analysis: dict):
             expectation = data.get("expectation", "hold")
             exp_emoji = "📈" if expectation == "hike" else "📉" if expectation == "cut" else "➡️"
             
+            stance = data.get("stance", "neutral")
+            stance_emoji = "🦅" if stance == "hawkish" else "🕊️" if stance == "dovish" else "➖"
+            
             rate_rows.append({
                 "Valuta": curr,
                 "Tasso Attuale": data.get("current_rate", "N/A"),
                 "Prossimo Meeting": data.get("next_meeting", "N/A"),
                 "Aspettativa": f"{exp_emoji} {expectation.upper()}",
+                "Stance": f"{stance_emoji} {stance.capitalize()}",
                 "Probabilità": data.get("probability", "N/A")
             })
         
         df_rates = pd.DataFrame(rate_rows)
         st.dataframe(df_rates, use_container_width=True, hide_index=True)
+        
+        # Mostra note dettagliate in expander
+        with st.expander("📝 Note dettagliate sulle aspettative tassi"):
+            for curr, data in rate_outlook.items():
+                notes = data.get("notes", "")
+                if notes:
+                    st.markdown(f"**{curr}:** {notes}")
         
         st.markdown("---")
     
