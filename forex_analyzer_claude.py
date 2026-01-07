@@ -1277,15 +1277,15 @@ def display_analysis_matrix(analysis: dict):
         with col_bull:
             st.markdown("#### 🏆 TOP BULLISH (Long)")
             for pair, data, diff in bullish_pairs[:5]:
-                strength = data.get("strength", 3)
-                dots = "🟢🟢" if strength >= 4 else "🟢"
+                # Pallini basati sul differenziale (>=7 = forte)
+                dots = "🟢🟢" if diff >= 7 else "🟢"
                 st.markdown(f"**{pair}** {dots} → Diff: **+{diff}**")
         
         with col_bear:
             st.markdown("#### 📉 TOP BEARISH (Short)")
             for pair, data, diff in bearish_pairs[:5]:
-                strength = data.get("strength", 3)
-                dots = "🔴🔴" if strength >= 4 else "🔴"
+                # Pallini basati sul differenziale (<=-7 = forte)
+                dots = "🔴🔴" if diff <= -7 else "🔴"
                 st.markdown(f"**{pair}** {dots} → Diff: **{diff}**")
         
         st.markdown("---")
@@ -1298,17 +1298,16 @@ def display_analysis_matrix(analysis: dict):
         rows_data = []
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
-            strength = data.get("strength", 3)
             summary = data.get("summary", "")
             score_base = data.get("score_base", 0)
             score_quote = data.get("score_quote", 0)
             differential = score_base - score_quote
             
-            # Pallini colorati per bias + forza
-            if bias == "bullish":
-                bias_combined = "🟢🟢 BULLISH" if strength >= 4 else "🟢 BULLISH"
-            elif bias == "bearish":
-                bias_combined = "🔴🔴 BEARISH" if strength >= 4 else "🔴 BEARISH"
+            # Pallini colorati basati sul DIFFERENZIALE (>=7 o <=-7 = forte)
+            if bias == "bullish" or differential > 0:
+                bias_combined = "🟢🟢 BULLISH" if differential >= 7 else "🟢 BULLISH"
+            elif bias == "bearish" or differential < 0:
+                bias_combined = "🔴🔴 BEARISH" if differential <= -7 else "🔴 BEARISH"
             else:
                 bias_combined = "🟡 NEUTRAL"
             
@@ -1353,7 +1352,7 @@ def display_analysis_matrix(analysis: dict):
         )
         
         # Legenda
-        st.caption("Legenda: 🟢🟢/🔴🔴 = bias forte (4-5) | 🟢/🔴 = bias moderato (1-3) | 🟡 = neutrale")
+        st.caption("Legenda: 🟢🟢/🔴🔴 = bias forte (diff ≥7 o ≤-7) | 🟢/🔴 = bias moderato | 🟡 = neutrale")
         
         # Trova la coppia selezionata
         selected_pair = None
@@ -1370,7 +1369,6 @@ def display_analysis_matrix(analysis: dict):
             pair_data = pair_analysis[selected_pair]
             
             bias = pair_data.get("bias", "neutral")
-            strength = pair_data.get("strength", 3)
             summary = pair_data.get("summary", "")
             score_base = pair_data.get("score_base", 0)
             score_quote = pair_data.get("score_quote", 0)
@@ -1380,19 +1378,19 @@ def display_analysis_matrix(analysis: dict):
             # Estrai valute dalla coppia
             base_curr, quote_curr = selected_pair.split("/")
             
-            # Determina tipo bias
-            if bias == "bullish":
+            # Determina tipo bias basato su DIFFERENZIALE
+            if bias == "bullish" or differential > 0:
                 bias_type = "RIALZISTA" 
-                bias_strength = "(STRONG)" if strength >= 4 else "(MODERATE)"
+                bias_strength = "(STRONG)" if differential >= 7 else "(MODERATE)"
                 header_color = "#d4edda"
                 header_border = "#28a745"
-                header_emoji = "🟢"
-            elif bias == "bearish":
+                header_emoji = "🟢🟢" if differential >= 7 else "🟢"
+            elif bias == "bearish" or differential < 0:
                 bias_type = "RIBASSISTA"
-                bias_strength = "(STRONG)" if strength >= 4 else "(MODERATE)"
+                bias_strength = "(STRONG)" if differential <= -7 else "(MODERATE)"
                 header_color = "#f8d7da"
                 header_border = "#dc3545"
-                header_emoji = "🔴"
+                header_emoji = "🔴🔴" if differential <= -7 else "🔴"
             else:
                 bias_type = "NEUTRALE"
                 bias_strength = ""
