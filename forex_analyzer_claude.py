@@ -494,7 +494,7 @@ PMI_CONFIG = {
 }
 
 
-def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 3) -> dict:
+def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5) -> dict:
     """
     Scarica i dati PMI da Investing.com per una valuta e tipo specifico.
     
@@ -664,7 +664,7 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
     
     url = "https://tradingeconomics.com/switzerland/services-pmi"
     
-    for attempt in range(3):  # Max 3 tentativi
+    for attempt in range(5):  # Max 5 tentativi
         try:
             headers = {
                 'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100, 120)}.0.0.0 Safari/537.36',
@@ -685,7 +685,7 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
                 response = requests.get(url, headers=headers, timeout=25)
             
             if response.status_code != 200:
-                if attempt < 2:
+                if attempt < 4:
                     time.sleep(2 + attempt * 2)
                     continue
                 return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
@@ -779,7 +779,7 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
                 }
             
             # Retry
-            if attempt < 2:
+            if attempt < 4:
                 time.sleep(2 + attempt * 2)
                 continue
             
@@ -793,7 +793,7 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
             }
             
         except Exception as e:
-            if attempt < 2:
+            if attempt < 4:
                 time.sleep(2 + attempt * 2)
                 continue
             return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
