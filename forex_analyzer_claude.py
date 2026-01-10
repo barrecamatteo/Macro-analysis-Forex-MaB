@@ -516,55 +516,130 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        # Prova con cloudscraper se disponibile (bypassa Cloudflare/protezioni)
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(url, timeout=20)
+        except ImportError:
+            # Fallback a requests normale
+            response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code != 200:
             return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
         
         html = response.text
         
-        # Pattern per estrarre i valori dalla tabella storica
-        # Cerca nella tabella dei dati storici: Release Date, Actual, Forecast, Previous
-        
-        # Pattern per trovare l'ultima riga della tabella con i dati
-        # La struttura tipica è: <td>data</td><td>actual</td><td>forecast</td><td>previous</td>
-        
         current_value = None
         previous_value = None
         release_date = None
         
-        # Metodo 1: Cerca nel summary box (più affidabile)
-        # Pattern: id="releaseInfo" contiene i valori recenti
-        actual_match = re.search(r'Actual[:\s]*</span>\s*<span[^>]*>([0-9.]+)', html, re.IGNORECASE)
-        if actual_match:
-            try:
-                current_value = float(actual_match.group(1))
-            except:
-                pass
+        # ===== METODO 1: Pattern per "Latest Release" block =====
+        # Cerca: Actual\n48.2 (con possibili spazi/newline)
+        actual_patterns = [
+            r'Actual\s*\n\s*([0-9]+\.?[0-9]*)',  # Actual seguito da newline e numero
+            r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
+            r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
+            r'Actual</th>\s*</tr>\s*<tr[^>]*>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',  # Table header
+            r'>\s*Actual\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
+        ]
         
-        previous_match = re.search(r'Previous[:\s]*</span>\s*<span[^>]*>([0-9.]+)', html, re.IGNORECASE)
-        if previous_match:
-            try:
-                previous_value = float(previous_match.group(1))
-            except:
-                pass
+        for pattern in actual_patterns:
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 30 <= val <= 70:  # Range tipico PMI
+                        current_value = val
+                        break
+                except:
+                    pass
         
-        # Metodo 2: Cerca nella tabella storica se metodo 1 fallisce
+        # Cerca Previous
+        previous_patterns = [
+            r'Previous\s*\n\s*([0-9]+\.?[0-9]*)',  # Previous seguito da newline e numero
+            r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
+            r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
+            r'>\s*Previous\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
+        ]
+        
+        for pattern in previous_patterns:
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 30 <= val <= 70:  # Range tipico PMI
+                        previous_value = val
+                        break
+                except:
+                    pass
+        
+        # ===== METODO 2: Cerca nella tabella storica (formato markdown-like) =====
         if current_value is None or previous_value is None:
-            # Pattern per righe tabella: cerca valori numerici tra 30 e 70 (range tipico PMI)
-            table_pattern = r'<td[^>]*>(\d{1,2}[./]\d{1,2}[./]\d{2,4})</td>\s*<td[^>]*>([0-9.]+)</td>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9.]+)</td>'
+            # Pattern: | Dec 01, 2025 (Nov) | 10:00 | 48.2 | 49.0 | 48.7 |
+            table_pattern = r'\|\s*([A-Za-z]{3}\s+\d{1,2},\s*\d{4})[^|]*\|\s*\d{1,2}:\d{2}\s*\|\s*([0-9]+\.?[0-9]*)\s*\|\s*[0-9.]*\s*\|\s*([0-9]+\.?[0-9]*)\s*\|'
             matches = re.findall(table_pattern, html)
             
             if matches and len(matches) >= 1:
-                # Prima riga = dato più recente
                 try:
                     release_date = matches[0][0]
-                    current_value = float(matches[0][1])
-                    previous_value = float(matches[0][2])
+                    val_actual = float(matches[0][1])
+                    val_previous = float(matches[0][2])
+                    if 30 <= val_actual <= 70:
+                        current_value = val_actual
+                    if 30 <= val_previous <= 70:
+                        previous_value = val_previous
+                except:
+                    pass
+        
+        # ===== METODO 3: Pattern HTML tabella classica =====
+        if current_value is None or previous_value is None:
+            # Cerca righe tabella HTML
+            table_html_pattern = r'<td[^>]*>([A-Za-z]{3}\s+\d{1,2},\s*\d{4})[^<]*</td>\s*<td[^>]*>\d{1,2}:\d{2}</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)</td>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)</td>'
+            matches = re.findall(table_html_pattern, html, re.DOTALL)
+            
+            if matches and len(matches) >= 1:
+                try:
+                    release_date = matches[0][0]
+                    val_actual = float(matches[0][1])
+                    val_previous = float(matches[0][2])
+                    if 30 <= val_actual <= 70:
+                        current_value = val_actual
+                    if 30 <= val_previous <= 70:
+                        previous_value = val_previous
+                except:
+                    pass
+        
+        # ===== METODO 4: Fallback - cerca tutti i numeri PMI-like vicino a "Actual/Previous" =====
+        if current_value is None:
+            # Cerca blocco con Actual e numeri vicini
+            block_match = re.search(r'Actual.{0,50}?([0-9]{2}\.[0-9])', html, re.IGNORECASE | re.DOTALL)
+            if block_match:
+                try:
+                    val = float(block_match.group(1))
+                    if 30 <= val <= 70:
+                        current_value = val
+                except:
+                    pass
+        
+        if previous_value is None:
+            block_match = re.search(r'Previous.{0,50}?([0-9]{2}\.[0-9])', html, re.IGNORECASE | re.DOTALL)
+            if block_match:
+                try:
+                    val = float(block_match.group(1))
+                    if 30 <= val <= 70:
+                        previous_value = val
                 except:
                     pass
         
@@ -598,10 +673,21 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        # Prova con cloudscraper se disponibile (bypassa Cloudflare)
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper()
+            response = scraper.get(url, timeout=20)
+        except ImportError:
+            # Fallback a requests normale
+            response = requests.get(url, headers=headers, timeout=20)
         
         if response.status_code != 200:
             return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
@@ -611,32 +697,54 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
         current_value = None
         previous_value = None
         
-        # TradingEconomics mostra il valore attuale in un elemento prominente
-        # Pattern: cerca valori numerici tipici PMI (40-60 range)
+        # ===== Pattern multipli per TradingEconomics =====
         
-        # Cerca il valore principale (current)
-        current_match = re.search(r'id="p"[^>]*>([0-9.]+)<', html)
-        if current_match:
-            try:
-                current_value = float(current_match.group(1))
-            except:
-                pass
+        # Pattern 1: id="p" (valore principale)
+        current_patterns = [
+            r'id="p"[^>]*>([0-9]+\.?[0-9]*)<',
+            r'"Last"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
+            r'>\s*([0-9]{2}\.[0-9])\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>Switzerland',
+            r'Switzerland Services PMI[^0-9]*([0-9]{2}\.[0-9])',
+        ]
         
-        # Cerca previous
-        previous_match = re.search(r'Previous[:\s]*</td>\s*<td[^>]*>([0-9.]+)', html, re.IGNORECASE)
-        if previous_match:
-            try:
-                previous_value = float(previous_match.group(1))
-            except:
-                pass
+        for pattern in current_patterns:
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 30 <= val <= 70:  # Range tipico PMI
+                        current_value = val
+                        break
+                except:
+                    pass
         
-        # Fallback: cerca nella tabella
-        if current_value is None:
+        # Pattern Previous
+        previous_patterns = [
+            r'Previous[:\s]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',
+            r'"Previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
+            r'Previous\s*\n\s*([0-9]+\.?[0-9]*)',
+        ]
+        
+        for pattern in previous_patterns:
+            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+            if match:
+                try:
+                    val = float(match.group(1))
+                    if 30 <= val <= 70:
+                        previous_value = val
+                        break
+                except:
+                    pass
+        
+        # Fallback: cerca tutti i numeri PMI-like
+        if current_value is None or previous_value is None:
             values = re.findall(r'>(\d{2}\.\d)<', html)
             pmi_values = [float(v) for v in values if 35 <= float(v) <= 65]
             if len(pmi_values) >= 2:
-                current_value = pmi_values[0]
-                previous_value = pmi_values[1]
+                if current_value is None:
+                    current_value = pmi_values[0]
+                if previous_value is None:
+                    previous_value = pmi_values[1]
         
         delta = None
         if current_value is not None and previous_value is not None:
@@ -1605,6 +1713,158 @@ def display_macro_data(macro_data: dict):
             st.warning(f"⚠️ Dati mancanti: {', '.join(missing[:5])}...")
         else:
             st.success("✅ Tutti i dati recuperati!")
+
+
+def display_pmi_table(pmi_data: dict):
+    """
+    Mostra i dati PMI in formato tabella con colorazione automatica.
+    
+    Design:
+    | Valuta | 🏭 Manuf. | Prev | Δ | 🏢 Services | Prev | Δ | Analisi |
+    |--------|----------|------|---|-------------|------|---|---------|
+    | USD    | 47.9     | 48.2 |-0.3| 54.4       | 52.6 |+1.8| 🏭↓ 🏢↑ |
+    """
+    st.markdown("### 📈 Dati PMI (Manufacturing & Services)")
+    
+    if not pmi_data:
+        st.warning("⚠️ Nessun dato PMI disponibile")
+        return
+    
+    # Costruisci le righe della tabella
+    table_rows = []
+    missing_data = []
+    
+    # Ordine valute
+    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+    
+    for curr in currency_order:
+        if curr not in pmi_data:
+            continue
+            
+        data = pmi_data[curr]
+        manuf = data.get("manufacturing", {})
+        services = data.get("services", {})
+        
+        # Estrai valori Manufacturing
+        manuf_current = manuf.get("current")
+        manuf_previous = manuf.get("previous")
+        manuf_delta = manuf.get("delta")
+        manuf_label = manuf.get("label", "Manufacturing")
+        
+        # Estrai valori Services
+        services_current = services.get("current")
+        services_previous = services.get("previous")
+        services_delta = services.get("delta")
+        services_label = services.get("label", "Services")
+        
+        # Formatta valori con label per USD (ISM)
+        if curr == "USD":
+            manuf_display = f"{manuf_current} (ISM)" if manuf_current else "N/A"
+            services_display = f"{services_current} (ISM)" if services_current else "N/A"
+        else:
+            manuf_display = str(manuf_current) if manuf_current else "N/A"
+            services_display = str(services_current) if services_current else "N/A"
+        
+        # Formatta delta con segno
+        def format_delta(delta):
+            if delta is None:
+                return "N/A"
+            elif delta > 0:
+                return f"+{delta}"
+            else:
+                return str(delta)
+        
+        # Calcola interpretazione
+        trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
+        
+        # Traccia dati mancanti
+        if manuf_current is None:
+            missing_data.append(f"{curr}-Manufacturing")
+        if services_current is None:
+            missing_data.append(f"{curr}-Services")
+        
+        row = {
+            "Valuta": curr,
+            "🏭 Manuf.": manuf_display,
+            "Prev": str(manuf_previous) if manuf_previous else "N/A",
+            "Δ Manuf": format_delta(manuf_delta),
+            "🏢 Services": services_display,
+            "Prev ": str(services_previous) if services_previous else "N/A",  # Spazio per evitare duplicato colonna
+            "Δ Serv": format_delta(services_delta),
+            "Analisi": trend_text
+        }
+        table_rows.append(row)
+    
+    if table_rows:
+        df = pd.DataFrame(table_rows)
+        
+        # Funzione per colorare le celle
+        def style_pmi_table(df):
+            styles = pd.DataFrame('', index=df.index, columns=df.columns)
+            
+            for idx, row in df.iterrows():
+                # Colora Manufacturing current
+                try:
+                    manuf_val = float(str(row["🏭 Manuf."]).replace(" (ISM)", "").replace("N/A", "0"))
+                    if manuf_val >= 50:
+                        styles.loc[idx, "🏭 Manuf."] = 'background-color: #d4edda; color: #155724'  # Verde
+                    elif manuf_val > 0:
+                        styles.loc[idx, "🏭 Manuf."] = 'background-color: #f8d7da; color: #721c24'  # Rosso
+                except:
+                    pass
+                
+                # Colora Services current
+                try:
+                    serv_val = float(str(row["🏢 Services"]).replace(" (ISM)", "").replace("N/A", "0"))
+                    if serv_val >= 50:
+                        styles.loc[idx, "🏢 Services"] = 'background-color: #d4edda; color: #155724'  # Verde
+                    elif serv_val > 0:
+                        styles.loc[idx, "🏢 Services"] = 'background-color: #f8d7da; color: #721c24'  # Rosso
+                except:
+                    pass
+                
+                # Colora Delta Manufacturing
+                try:
+                    delta_manuf = row["Δ Manuf"].replace("+", "").replace("N/A", "0")
+                    delta_val = float(delta_manuf)
+                    if delta_val > 0:
+                        styles.loc[idx, "Δ Manuf"] = 'background-color: #d4edda; color: #155724'  # Verde
+                    elif delta_val < 0:
+                        styles.loc[idx, "Δ Manuf"] = 'background-color: #f8d7da; color: #721c24'  # Rosso
+                except:
+                    pass
+                
+                # Colora Delta Services
+                try:
+                    delta_serv = row["Δ Serv"].replace("+", "").replace("N/A", "0")
+                    delta_val = float(delta_serv)
+                    if delta_val > 0:
+                        styles.loc[idx, "Δ Serv"] = 'background-color: #d4edda; color: #155724'  # Verde
+                    elif delta_val < 0:
+                        styles.loc[idx, "Δ Serv"] = 'background-color: #f8d7da; color: #721c24'  # Rosso
+                except:
+                    pass
+            
+            return styles
+        
+        # Applica stile e mostra
+        styled_df = df.style.apply(lambda _: style_pmi_table(df), axis=None)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Legenda
+        st.caption("""
+        **Legenda:** 🟢 PMI ≥ 50 (espansione) | 🔴 PMI < 50 (contrazione) | 
+        Δ > 0 ↗ miglioramento | Δ < 0 ↘ peggioramento | 
+        **Analisi:** 🏭↑/↓ trend manifattura | 🏢↑/↓ trend servizi
+        """)
+        
+        # Verifica completezza
+        if missing_data:
+            st.warning(f"⚠️ Dati PMI mancanti: {', '.join(missing_data[:5])}{'...' if len(missing_data) > 5 else ''}")
+        else:
+            st.success("✅ Tutti i dati PMI recuperati!")
+    else:
+        st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
 def display_analysis_matrix(analysis: dict):
@@ -2610,11 +2870,16 @@ def main():
         
         # === ORDINE VISUALIZZAZIONE ===
         # 1. Dati Macro
-        # 2. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
-        # 3. Notizie Web (alla fine)
+        # 2. Dati PMI
+        # 3. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
+        # 4. Notizie Web (alla fine)
         
         if macro_data:
             display_macro_data(macro_data)
+            st.markdown("---")
+        
+        if pmi_data:
+            display_pmi_table(pmi_data)
             st.markdown("---")
         
         if claude_analysis:
