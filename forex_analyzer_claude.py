@@ -494,17 +494,21 @@ PMI_CONFIG = {
 }
 
 
-def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
+def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 3) -> dict:
     """
     Scarica i dati PMI da Investing.com per una valuta e tipo specifico.
     
     Args:
         currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
         pmi_type: "manufacturing" o "services"
+        max_retries: Numero massimo di tentativi
     
     Returns:
         dict con: current, previous, delta, date, source
     """
+    import time
+    import random
+    
     config = PMI_CONFIG.get(currency, {}).get(pmi_type)
     
     if config is None:
@@ -512,160 +516,140 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
     
     url = f"https://www.investing.com/economic-calendar/{config['name']}-{config['id']}"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-    }
-    
-    try:
-        # Prova con cloudscraper se disponibile (bypassa Cloudflare/protezioni)
+    for attempt in range(max_retries):
         try:
-            import cloudscraper
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(url, timeout=20)
-        except ImportError:
-            # Fallback a requests normale
-            response = requests.get(url, headers=headers, timeout=20)
-        
-        if response.status_code != 200:
-            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
-        
-        html = response.text
-        
-        # Debug: log lunghezza HTML ricevuto
-        html_length = len(html)
-        
-        current_value = None
-        previous_value = None
-        release_date = None
-        
-        # ===== METODO 1: Pattern per "Latest Release" block =====
-        # Cerca: Actual\n48.2 (con possibili spazi/newline multipli)
-        actual_patterns = [
-            r'Actual\s*\n+\s*([0-9]+\.?[0-9]*)',  # Actual seguito da newline(s) e numero
-            r'Actual\s+([0-9]+\.?[0-9]*)',  # Actual seguito da spazi e numero
-            r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
-            r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
-            r'Actual</th>\s*</tr>\s*<tr[^>]*>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',  # Table header
-            r'>\s*Actual\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
-            r'Actual.*?([0-9]{2}\.[0-9])',  # Fallback: Actual seguito da numero PMI-like
-        ]
-        
-        for pattern in actual_patterns:
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                try:
-                    val = float(match.group(1))
-                    if 30 <= val <= 70:  # Range tipico PMI
-                        current_value = val
-                        break
-                except:
-                    pass
-        
-        # Cerca Previous
-        previous_patterns = [
-            r'Previous\s*\n+\s*([0-9]+\.?[0-9]*)',  # Previous seguito da newline(s) e numero
-            r'Previous\s+([0-9]+\.?[0-9]*)',  # Previous seguito da spazi e numero
-            r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
-            r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
-            r'>\s*Previous\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
-            r'Previous.*?([0-9]{2}\.[0-9])',  # Fallback: Previous seguito da numero PMI-like
-        ]
-        
-        for pattern in previous_patterns:
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                try:
-                    val = float(match.group(1))
-                    if 30 <= val <= 70:  # Range tipico PMI
-                        previous_value = val
-                        break
-                except:
-                    pass
-        
-        # ===== METODO 2: Cerca nella tabella storica (formato markdown-like) =====
-        if current_value is None or previous_value is None:
-            # Pattern: | Dec 01, 2025 (Nov) | 10:00 | 48.2 | 49.0 | 48.7 |
-            table_pattern = r'\|\s*([A-Za-z]{3}\s+\d{1,2},\s*\d{4})[^|]*\|\s*\d{1,2}:\d{2}\s*\|\s*([0-9]+\.?[0-9]*)\s*\|\s*[0-9.]*\s*\|\s*([0-9]+\.?[0-9]*)\s*\|'
-            matches = re.findall(table_pattern, html)
+            headers = {
+                'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100, 120)}.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+            }
             
-            if matches and len(matches) >= 1:
-                try:
-                    release_date = matches[0][0]
-                    val_actual = float(matches[0][1])
-                    val_previous = float(matches[0][2])
-                    if 30 <= val_actual <= 70:
-                        current_value = val_actual
-                    if 30 <= val_previous <= 70:
-                        previous_value = val_previous
-                except:
-                    pass
-        
-        # ===== METODO 3: Pattern HTML tabella classica =====
-        if current_value is None or previous_value is None:
-            # Cerca righe tabella HTML
-            table_html_pattern = r'<td[^>]*>([A-Za-z]{3}\s+\d{1,2},\s*\d{4})[^<]*</td>\s*<td[^>]*>\d{1,2}:\d{2}</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)</td>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)</td>'
-            matches = re.findall(table_html_pattern, html, re.DOTALL)
+            # Prova con cloudscraper se disponibile
+            try:
+                import cloudscraper
+                scraper = cloudscraper.create_scraper(
+                    browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+                )
+                response = scraper.get(url, timeout=25)
+            except ImportError:
+                response = requests.get(url, headers=headers, timeout=25)
             
-            if matches and len(matches) >= 1:
-                try:
-                    release_date = matches[0][0]
-                    val_actual = float(matches[0][1])
-                    val_previous = float(matches[0][2])
-                    if 30 <= val_actual <= 70:
-                        current_value = val_actual
-                    if 30 <= val_previous <= 70:
-                        previous_value = val_previous
-                except:
-                    pass
-        
-        # ===== METODO 4: Fallback - cerca tutti i numeri PMI-like vicino a "Actual/Previous" =====
-        if current_value is None:
-            # Cerca blocco con Actual e numeri vicini
-            block_match = re.search(r'Actual.{0,50}?([0-9]{2}\.[0-9])', html, re.IGNORECASE | re.DOTALL)
-            if block_match:
-                try:
-                    val = float(block_match.group(1))
-                    if 30 <= val <= 70:
-                        current_value = val
-                except:
-                    pass
-        
-        if previous_value is None:
-            block_match = re.search(r'Previous.{0,50}?([0-9]{2}\.[0-9])', html, re.IGNORECASE | re.DOTALL)
-            if block_match:
-                try:
-                    val = float(block_match.group(1))
-                    if 30 <= val <= 70:
-                        previous_value = val
-                except:
-                    pass
-        
-        # Calcola delta
-        delta = None
-        if current_value is not None and previous_value is not None:
-            delta = round(current_value - previous_value, 1)
-        
-        return {
-            "current": current_value,
-            "previous": previous_value,
-            "delta": delta,
-            "date": release_date,
-            "source": url,
-            "label": config['label']
-        }
-        
-    except Exception as e:
-        return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+            if response.status_code != 200:
+                if attempt < max_retries - 1:
+                    time.sleep(2 + attempt * 2)
+                    continue
+                return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
+            
+            html = response.text
+            
+            # Verifica contenuto valido
+            if len(html) < 5000 or "Actual" not in html:
+                if attempt < max_retries - 1:
+                    time.sleep(2 + attempt * 2)
+                    continue
+            
+            current_value = None
+            previous_value = None
+            release_date = None
+            
+            # ===== METODO 1: Pattern per "Latest Release" block =====
+            actual_patterns = [
+                r'Actual\s*\n+\s*([0-9]+\.?[0-9]*)',
+                r'Actual\s+([0-9]+\.?[0-9]*)',
+                r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
+                r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
+                r'Actual.*?([0-9]{2}\.[0-9])',
+            ]
+            
+            for pattern in actual_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    try:
+                        val = float(match.group(1))
+                        if 30 <= val <= 70:
+                            current_value = val
+                            break
+                    except:
+                        pass
+            
+            # Cerca Previous
+            previous_patterns = [
+                r'Previous\s*\n+\s*([0-9]+\.?[0-9]*)',
+                r'Previous\s+([0-9]+\.?[0-9]*)',
+                r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
+                r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
+                r'Previous.*?([0-9]{2}\.[0-9])',
+            ]
+            
+            for pattern in previous_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    try:
+                        val = float(match.group(1))
+                        if 30 <= val <= 70:
+                            previous_value = val
+                            break
+                    except:
+                        pass
+            
+            # ===== METODO 2: Tabella storica =====
+            if current_value is None or previous_value is None:
+                table_pattern = r'\|\s*([A-Za-z]{3}\s+\d{1,2},\s*\d{4})[^|]*\|\s*\d{1,2}:\d{2}\s*\|\s*([0-9]+\.?[0-9]*)\s*\|\s*[0-9.]*\s*\|\s*([0-9]+\.?[0-9]*)\s*\|'
+                matches = re.findall(table_pattern, html)
+                if matches:
+                    try:
+                        release_date = matches[0][0]
+                        if current_value is None:
+                            val = float(matches[0][1])
+                            if 30 <= val <= 70:
+                                current_value = val
+                        if previous_value is None:
+                            val = float(matches[0][2])
+                            if 30 <= val <= 70:
+                                previous_value = val
+                    except:
+                        pass
+            
+            # Calcola delta
+            delta = None
+            if current_value is not None and previous_value is not None:
+                delta = round(current_value - previous_value, 1)
+            
+            # Se abbiamo trovato il valore current, restituiamo
+            if current_value is not None:
+                return {
+                    "current": current_value,
+                    "previous": previous_value,
+                    "delta": delta,
+                    "date": release_date,
+                    "source": url,
+                    "label": config['label']
+                }
+            
+            # Se non abbiamo trovato dati, retry
+            if attempt < max_retries - 1:
+                time.sleep(2 + attempt * 2)
+                continue
+            
+            # Ultimo tentativo fallito
+            return {
+                "current": current_value,
+                "previous": previous_value,
+                "delta": delta,
+                "date": release_date,
+                "source": url,
+                "label": config['label']
+            }
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(2 + attempt * 2)
+                continue
+            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+    
+    return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": "Max retries exceeded"}
 
 
 def fetch_chf_services_pmi_tradingeconomics() -> dict:
