@@ -459,77 +459,456 @@ FOREX_PAIRS = [
 
 
 # ============================================================================
+# CONFIGURAZIONE PMI - INVESTING.COM IDs
+# ============================================================================
+
+PMI_CONFIG = {
+    "USD": {
+        "manufacturing": {"id": 173, "name": "ism-manufacturing-pmi", "label": "ISM Manufacturing"},
+        "services": {"id": 176, "name": "ism-non-manufacturing-pmi", "label": "ISM Services"}
+    },
+    "EUR": {
+        "manufacturing": {"id": 201, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 272, "name": "services-pmi", "label": "Services PMI"}
+    },
+    "GBP": {
+        "manufacturing": {"id": 204, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 274, "name": "services-pmi", "label": "Services PMI"}
+    },
+    "JPY": {
+        "manufacturing": {"id": 202, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 1912, "name": "services-pmi", "label": "Services PMI"}
+    },
+    "CHF": {
+        "manufacturing": {"id": 278, "name": "procure.ch-pmi", "label": "procure.ch PMI"},
+        "services": None  # CHF Services PMI non disponibile su Investing.com
+    },
+    "AUD": {
+        "manufacturing": {"id": 1838, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI"}
+    },
+    "CAD": {
+        "manufacturing": {"id": 1029, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 2265, "name": "services-pmi", "label": "Services PMI"}
+    }
+}
+
+
+def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
+    """
+    Scarica i dati PMI da Investing.com per una valuta e tipo specifico.
+    
+    Args:
+        currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
+        pmi_type: "manufacturing" o "services"
+    
+    Returns:
+        dict con: current, previous, delta, date, source
+    """
+    config = PMI_CONFIG.get(currency, {}).get(pmi_type)
+    
+    if config is None:
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": "N/A"}
+    
+    url = f"https://www.investing.com/economic-calendar/{config['name']}-{config['id']}"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Connection': 'keep-alive',
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
+        
+        html = response.text
+        
+        # Pattern per estrarre i valori dalla tabella storica
+        # Cerca nella tabella dei dati storici: Release Date, Actual, Forecast, Previous
+        
+        # Pattern per trovare l'ultima riga della tabella con i dati
+        # La struttura tipica è: <td>data</td><td>actual</td><td>forecast</td><td>previous</td>
+        
+        current_value = None
+        previous_value = None
+        release_date = None
+        
+        # Metodo 1: Cerca nel summary box (più affidabile)
+        # Pattern: id="releaseInfo" contiene i valori recenti
+        actual_match = re.search(r'Actual[:\s]*</span>\s*<span[^>]*>([0-9.]+)', html, re.IGNORECASE)
+        if actual_match:
+            try:
+                current_value = float(actual_match.group(1))
+            except:
+                pass
+        
+        previous_match = re.search(r'Previous[:\s]*</span>\s*<span[^>]*>([0-9.]+)', html, re.IGNORECASE)
+        if previous_match:
+            try:
+                previous_value = float(previous_match.group(1))
+            except:
+                pass
+        
+        # Metodo 2: Cerca nella tabella storica se metodo 1 fallisce
+        if current_value is None or previous_value is None:
+            # Pattern per righe tabella: cerca valori numerici tra 30 e 70 (range tipico PMI)
+            table_pattern = r'<td[^>]*>(\d{1,2}[./]\d{1,2}[./]\d{2,4})</td>\s*<td[^>]*>([0-9.]+)</td>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9.]+)</td>'
+            matches = re.findall(table_pattern, html)
+            
+            if matches and len(matches) >= 1:
+                # Prima riga = dato più recente
+                try:
+                    release_date = matches[0][0]
+                    current_value = float(matches[0][1])
+                    previous_value = float(matches[0][2])
+                except:
+                    pass
+        
+        # Calcola delta
+        delta = None
+        if current_value is not None and previous_value is not None:
+            delta = round(current_value - previous_value, 1)
+        
+        return {
+            "current": current_value,
+            "previous": previous_value,
+            "delta": delta,
+            "date": release_date,
+            "source": url,
+            "label": config['label']
+        }
+        
+    except Exception as e:
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+
+
+def fetch_chf_services_pmi_tradingeconomics() -> dict:
+    """
+    Scarica CHF Services PMI da TradingEconomics (unica fonte disponibile).
+    
+    Returns:
+        dict con: current, previous, delta, date, source
+    """
+    url = "https://tradingeconomics.com/switzerland/services-pmi"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
+        
+        html = response.text
+        
+        current_value = None
+        previous_value = None
+        
+        # TradingEconomics mostra il valore attuale in un elemento prominente
+        # Pattern: cerca valori numerici tipici PMI (40-60 range)
+        
+        # Cerca il valore principale (current)
+        current_match = re.search(r'id="p"[^>]*>([0-9.]+)<', html)
+        if current_match:
+            try:
+                current_value = float(current_match.group(1))
+            except:
+                pass
+        
+        # Cerca previous
+        previous_match = re.search(r'Previous[:\s]*</td>\s*<td[^>]*>([0-9.]+)', html, re.IGNORECASE)
+        if previous_match:
+            try:
+                previous_value = float(previous_match.group(1))
+            except:
+                pass
+        
+        # Fallback: cerca nella tabella
+        if current_value is None:
+            values = re.findall(r'>(\d{2}\.\d)<', html)
+            pmi_values = [float(v) for v in values if 35 <= float(v) <= 65]
+            if len(pmi_values) >= 2:
+                current_value = pmi_values[0]
+                previous_value = pmi_values[1]
+        
+        delta = None
+        if current_value is not None and previous_value is not None:
+            delta = round(current_value - previous_value, 1)
+        
+        return {
+            "current": current_value,
+            "previous": previous_value,
+            "delta": delta,
+            "date": None,
+            "source": url,
+            "label": "Services PMI"
+        }
+        
+    except Exception as e:
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+
+
+def fetch_all_pmi_data() -> dict:
+    """
+    Recupera tutti i dati PMI per le 7 valute.
+    
+    Returns:
+        dict con struttura:
+        {
+            "USD": {
+                "manufacturing": {"current": 47.9, "previous": 48.2, "delta": -0.3, ...},
+                "services": {"current": 54.4, "previous": 52.6, "delta": 1.8, ...}
+            },
+            ...
+        }
+    """
+    pmi_data = {}
+    
+    for currency in PMI_CONFIG.keys():
+        pmi_data[currency] = {}
+        
+        # Manufacturing PMI
+        pmi_data[currency]["manufacturing"] = fetch_pmi_from_investing(currency, "manufacturing")
+        
+        # Services PMI
+        if currency == "CHF":
+            # CHF Services da TradingEconomics
+            pmi_data[currency]["services"] = fetch_chf_services_pmi_tradingeconomics()
+        else:
+            pmi_data[currency]["services"] = fetch_pmi_from_investing(currency, "services")
+    
+    return pmi_data
+
+
+def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
+    """
+    Restituisce interpretazione e emoji per i PMI.
+    
+    Returns:
+        (trend_text, interpretation)
+    """
+    if manuf_delta is None:
+        manuf_delta = 0
+    if services_delta is None:
+        services_delta = 0
+    
+    # Determina trend per ciascun settore
+    manuf_trend = "↗" if manuf_delta > 0.1 else "↘" if manuf_delta < -0.1 else "→"
+    services_trend = "↗" if services_delta > 0.1 else "↘" if services_delta < -0.1 else "→"
+    
+    # Emoji compatto
+    manuf_emoji = "🏭↑" if manuf_delta > 0.1 else "🏭↓" if manuf_delta < -0.1 else "🏭→"
+    services_emoji = "🏢↑" if services_delta > 0.1 else "🏢↓" if services_delta < -0.1 else "🏢→"
+    
+    trend_text = f"{manuf_emoji} {services_emoji}"
+    
+    # Interpretazione
+    if manuf_delta > 0.1 and services_delta > 0.1:
+        interpretation = "Bullish"
+    elif manuf_delta < -0.1 and services_delta < -0.1:
+        interpretation = "Bearish"
+    elif manuf_delta > 0.1 or services_delta > 0.1:
+        interpretation = "Misto+"
+    elif manuf_delta < -0.1 or services_delta < -0.1:
+        interpretation = "Misto-"
+    else:
+        interpretation = "Neutro"
+    
+    return trend_text, interpretation
+
+
+# ============================================================================
 # SYSTEM PROMPT PER ANALISI GLOBALE
 # ============================================================================
 
 SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 19 coppie forex separatamente.
 
-## ⚠️ REGOLA CRITICA: USA LE NOTIZIE WEB, NON CONOSCENZE OBSOLETE!
+## ⚠️ REGOLA CRITICA: USA I DATI FORNITI, NON CONOSCENZE OBSOLETE!
 
-Le tue conoscenze potrebbero essere OBSOLETE. Per le ASPETTATIVE SUI TASSI devi:
-1. **LEGGERE ATTENTAMENTE** tutte le notizie web fornite (sezione [RATE EXPECTATIONS])
-2. **BASARTI SOLO** sulle informazioni trovate nelle notizie
+Le tue conoscenze potrebbero essere OBSOLETE. Devi:
+1. **LEGGERE ATTENTAMENTE** tutti i dati macro, PMI e notizie web forniti
+2. **BASARTI SOLO** sulle informazioni fornite nel prompt
 3. **NON ASSUMERE** che le banche centrali mantengano politiche passate
+4. **VERIFICARE** sempre nelle notizie web prima di scrivere
 
-⚠️ ESEMPIO ERRORE DA EVITARE:
-- NON dire "BoJ ultra-dovish" se le notizie mostrano che ha alzato i tassi!
-- NON dire "Fed hawkish" se le notizie mostrano tagli imminenti!
-- VERIFICA SEMPRE nelle notizie web prima di scrivere!
-
-## REGOLA FONDAMENTALE: ANALISI COPPIA PER COPPIA
+## REGOLA FONDAMENTALE: CONFRONTO DIRETTO TRA VALUTE
 
 Devi fare **19 ANALISI INDIPENDENTI**, una per ogni coppia forex.
-Per ogni coppia (es: AUD/CAD) devi:
-1. Analizzare il confronto DIRETTO tra le due valute della coppia
-2. Assegnare punteggi SPECIFICI per quella coppia
+Per ogni coppia (es: EUR/USD) devi:
+1. **CONFRONTARE DIRETTAMENTE** le due valute su ogni parametro
+2. Assegnare punteggi basati su **CHI HA IL VANTAGGIO RELATIVO**
 3. I punteggi sono RELATIVI al confronto, NON assoluti
 
 ⚠️ LA STESSA VALUTA PUÒ AVERE PUNTEGGI DIVERSI IN COPPIE DIVERSE!
-Esempio:
-- In AUD/CAD → AUD potrebbe avere score +3 (AUD più forte di CAD)
-- In AUD/USD → AUD potrebbe avere score -2 (AUD più debole di USD)
 
 ## LINGUA: TUTTO IN ITALIANO
 
 ## STRUTTURA JSON OBBLIGATORIA
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
-## SISTEMA DI SCORING (6 PARAMETRI PER OGNI COPPIA)
+## ═══════════════════════════════════════════════════════════════════
+## SISTEMA DI SCORING - 7 PARAMETRI CON CRITERI OGGETTIVI
+## ═══════════════════════════════════════════════════════════════════
 
-⚠️ RANGE PUNTEGGI SPECIFICI:
-- **Aspettative Tassi**: da -2 a +2 (parametro più importante!)
-- **Tutti gli altri parametri**: da -1 a +1
+### 1️⃣ TASSI ATTUALI [-1 a +1]
+**Logica:** Il differenziale di tasso (carry) attrae flussi di capitale verso la valuta con rendimento maggiore.
 
-I 6 PARAMETRI:
-1. **Tassi Attuali** [-1 a +1]: chi ha il vantaggio sui tassi BC nel confronto?
-2. **Aspettative Tassi** [-2 a +2]: chi ha outlook migliore (hawkish vs dovish)? PESO DOPPIO! ⚠️ USA LE NOTIZIE WEB!
-3. **Inflazione** [-1 a +1]: chi gestisce meglio l'inflazione?
-4. **Crescita/PIL** [-1 a +1]: chi ha crescita economica migliore?
-5. **Risk Sentiment** [-1 a +1]: chi è favorito dal sentiment attuale?
-6. **Bilancia/Fiscale** [-1 a +1]: chi ha situazione fiscale migliore?
+| Spread (Base - Quote) | Score Base | Score Quote |
+|-----------------------|------------|-------------|
+| ≥ +150 bp             | +1         | -1          |
+| +50 bp a +149 bp      | +1         | 0           |
+| -49 bp a +49 bp       | 0          | 0           |
+| -50 bp a -149 bp      | 0          | +1          |
+| ≤ -150 bp             | -1         | +1          |
 
-SCALA:
-- Per Aspettative Tassi: +2/-2 = netto vantaggio/svantaggio, +1/-1 = leggero, 0 = neutro
-- Per altri parametri: +1/-1 = vantaggio/svantaggio, 0 = neutro
+**Esempio:** EUR (2.15%) vs USD (3.75%) → Spread = -160bp → EUR: -1, USD: +1
 
-RANGE TOTALI POSSIBILI:
-- score_base: da -7 a +7
-- score_quote: da -7 a +7
-- differenziale: da -14 a +14
+---
 
-## ⚠️ MOTIVAZIONI DETTAGLIATE (IMPORTANTE!)
+### 2️⃣ ASPETTATIVE TASSI [-2 a +2] ⭐ PESO DOPPIO
+**Logica:** Il mercato guarda avanti. Le aspettative sui tassi futuri sono più importanti dei tassi attuali.
 
-Le motivazioni per ogni punteggio devono essere ESPLICATIVE e COMPLETE:
-- Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %)
-- Citare le ASPETTATIVE delle banche centrali DALLE NOTIZIE WEB (tagli/rialzi previsti, date meeting)
-- Citare SPECIFICAMENTE le fonti dalle notizie web (es: "secondo Reuters...", "come riportato da Bloomberg...")
-- Spiegare il RAGIONAMENTO dietro il punteggio
+**Criteri per singola valuta:**
+| Scenario | Score |
+|----------|-------|
+| BC hawkish con rialzi attesi O prob. taglio <20% nei prossimi 3 mesi | +2 |
+| BC neutrale/leggermente hawkish O prob. taglio 20-40% | +1 |
+| BC neutrale O incertezza elevata | 0 |
+| BC leggermente dovish O prob. taglio 60-80% | -1 |
+| BC molto dovish con tagli attesi O prob. taglio >80% | -2 |
 
-ESEMPIO MOTIVAZIONE CORRETTA (dettagliata):
-"EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole. Secondo le notizie, BCE ha tagliato a dicembre e mercati prezzano ulteriori 50bp di tagli nel 2025, mentre Fed mantiene stance hawkish con possibile hold prolungato"
+**Confronto:** Assegna score a ciascuna valuta, poi il vantaggio relativo determina i punti.
 
-ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
-"EUR tassi inferiori a USD"
+⚠️ USA SOLO LE NOTIZIE WEB FORNITE per determinare stance e probabilità!
+
+---
+
+### 3️⃣ INFLAZIONE [-1 a +1]
+**Logica:** Non conta solo il livello, ma quanto l'inflazione SUPPORTA la politica monetaria.
+
+| Scenario | Score |
+|----------|-------|
+| Inflazione 1.5%-2.5% + trend stabile/discesa | +1 (situazione ideale) |
+| Inflazione 2.5%-3.5% + trend incerto | 0 (gestibile) |
+| Inflazione >3.5% + trend in salita | -1 (BC sotto pressione) |
+| Inflazione <1.5% + trend in discesa | -1 (rischio deflazione) |
+
+**Confronto DIRETTO:** Chi ha situazione inflattiva più favorevole per la propria BC?
+
+---
+
+### 4️⃣ CRESCITA/PIL [-1 a +1] - LAGGING INDICATOR
+**Logica:** Il PIL da solo non basta. Va contestualizzato con inflazione e sostenibilità.
+
+| Scenario | Score |
+|----------|-------|
+| PIL >2% + inflazione controllata + trend stabile | +1 (crescita sana) |
+| PIL 1%-2% + situazione bilanciata | 0 (crescita moderata) |
+| PIL <1% O trend in forte decelerazione | -1 (rischio recessione) |
+| PIL alto MA inflazione fuori controllo | 0 (NON +1! crescita non sostenibile) |
+| STAGFLAZIONE (PIL basso + inflazione alta) | -1 (scenario peggiore) |
+
+**Confronto DIRETTO:**
+- Differenziale PIL > 1.5pp → vantaggio netto per chi ha PIL maggiore
+- Differenziale PIL 0.5-1.5pp → vantaggio leggero
+- Differenziale PIL < 0.5pp → situazione simile, considera altri fattori
+
+---
+
+### 5️⃣ PMI [-1 a +1] - LEADING INDICATOR
+**Logica:** PMI anticipa il PIL di 3-6 mesi. Considera livello (>50 = espansione) E direzione (delta).
+
+**⚠️ PESI DIVERSI PER STRUTTURA ECONOMICA:**
+| Valuta | Peso Services | Peso Manufacturing | Motivo |
+|--------|---------------|-------------------|--------|
+| USD    | 70%           | 30%               | Economia basata su servizi |
+| EUR    | 50%           | 50%               | Mista (Germania manifattura + resto servizi) |
+| GBP    | 70%           | 30%               | Finanza e servizi professionali |
+| JPY    | 40%           | 60%               | Export e manifattura (auto, elettronica) |
+| CHF    | 60%           | 40%               | Finanza + pharma |
+| AUD    | 50%           | 50%               | Mining + servizi domestici |
+| CAD    | 50%           | 50%               | Energia + servizi |
+
+**Criteri di valutazione:**
+| Condizione | Valutazione |
+|------------|-------------|
+| PMI ponderato ≥52 + Delta positivo | Forte espansione (+1) |
+| PMI ponderato 50-52 + Delta positivo | Espansione moderata (+1) |
+| PMI ponderato 50-52 + Delta negativo | Rallentamento (0) |
+| PMI ponderato 48-50 + Delta positivo | Contrazione in recupero (0) |
+| PMI ponderato 48-50 + Delta negativo | Contrazione in peggioramento (-1) |
+| PMI ponderato <48 | Contrazione significativa (-1) |
+
+**Confronto DIRETTO:** Chi ha momentum economico migliore considerando i pesi settoriali?
+
+---
+
+### 6️⃣ RISK SENTIMENT [-1 a +1]
+**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso valute cicliche.
+
+**Classificazione valute:**
+- **Safe-haven:** USD, JPY, CHF
+- **Cicliche/Commodity:** AUD, CAD, GBP
+- **Semi-cicliche:** EUR
+
+**Determinazione regime mercato:**
+- VIX > 25 O equity in forte calo O tensioni geopolitiche acute → **Risk-OFF**
+- VIX < 18 E equity positivo E sentiment ottimista → **Risk-ON**
+- Altrimenti → **Neutro**
+
+**Matrice punteggi in base al TIPO di coppia:**
+| Tipo Coppia | Risk-OFF | Neutro | Risk-ON |
+|-------------|----------|--------|---------|
+| Ciclica vs Safe-haven (es: AUD/JPY) | Ciclica: -1, Safe: +1 | 0, 0 | Ciclica: +1, Safe: -1 |
+| Semi-ciclica vs Safe-haven (es: EUR/USD) | Semi: -1, Safe: +1 | 0, 0 | Semi: +1, Safe: -1 |
+| Entrambe cicliche (es: AUD/CAD) | 0, 0 | 0, 0 | 0, 0 |
+| Entrambe safe-haven (es: USD/JPY) | Analisi specifica | 0, 0 | Analisi specifica |
+
+---
+
+### 7️⃣ BILANCIA/FISCALE [-1 a +1]
+**Logica:** Importante nel lungo termine, meno nel breve. Assegnare peso solo se notizie specifiche.
+
+| Scenario | Score |
+|----------|-------|
+| Current Account surplus >2% PIL + debito gestibile | +1 |
+| Situazione nella media O nessuna notizia rilevante | 0 |
+| Deficit gemelli elevati O crisi debito in corso | -1 |
+
+**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito, assegnare 0 a entrambe le valute.
+
+## ═══════════════════════════════════════════════════════════════════
+## RANGE TOTALI
+## ═══════════════════════════════════════════════════════════════════
+
+- **Aspettative Tassi**: da -2 a +2 (peso doppio)
+- **Altri 6 parametri**: da -1 a +1
+- **score_base**: da -8 a +8
+- **score_quote**: da -8 a +8
+- **differenziale**: da -16 a +16
+
+## ═══════════════════════════════════════════════════════════════════
+## MOTIVAZIONI DETTAGLIATE (OBBLIGATORIO!)
+## ═══════════════════════════════════════════════════════════════════
+
+Le motivazioni devono essere ESPLICATIVE e COMPLETE:
+- Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %, PMI)
+- Citare i DELTA dei PMI e il peso settoriale applicato
+- Citare le ASPETTATIVE delle BC DALLE NOTIZIE WEB
+- Spiegare il RAGIONAMENTO COMPARATIVO dietro il punteggio
+
+ESEMPIO CORRETTO:
+"EUR: PIL 0.7% vs USD: PIL 2.1% - differenziale di 1.4pp favorevole a USD. EUR in stagnazione con rischi recessione in Germania, mentre USA mostra crescita sostenibile con inflazione in calo. Vantaggio netto per USD nel confronto."
+
+ESEMPIO SBAGLIATO:
+"EUR crescita debole, USD crescita forte"
 
 ## FORMATO OUTPUT JSON:
 {
@@ -539,7 +918,7 @@ ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
         "EUR/USD": {
             "bias": "bullish/bearish/neutral",
             "strength": 1-5,
-            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO",
+            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO con riferimenti numerici",
             "key_drivers": ["driver1", "driver2"],
             "score_base": 3,
             "score_quote": -3,
@@ -552,61 +931,64 @@ ESEMPIO MOTIVAZIONE SBAGLIATA (troppo breve):
             "scores": {
                 "tassi_attuali": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "EUR tasso BCE al 2.15% vs USD Fed al 3.75% - spread di 160bp sfavorevole per EUR nel confronto diretto",
-                    "motivation_quote": "USD tasso Fed al 3.75% vs EUR BCE al 2.15% - spread di 160bp favorevole per USD, rendimenti più attraenti"
+                    "motivation_base": "EUR tasso BCE 2.15% vs USD Fed 3.75% - spread -160bp sfavorevole per EUR. Carry trade favorisce USD.",
+                    "motivation_quote": "USD tasso Fed 3.75% vs EUR BCE 2.15% - spread +160bp favorevole. Rendimenti più attraenti per capitali."
                 },
                 "aspettative_tassi": {
                     "base": -2, "quote": 2,
-                    "motivation_base": "BCE molto più dovish: ha tagliato a dicembre, mercati prezzano altri 50bp di tagli nel 2025. Lagarde conferma stance accomodante",
-                    "motivation_quote": "Fed hawkish: Powell segnala hold prolungato, inflazione USA sticky al 2.7% ritarda i tagli. Dot plot indica solo 2 tagli nel 2025"
+                    "motivation_base": "BCE dovish: taglio a dicembre, mercati prezzano 80% prob. ulteriori tagli. Lagarde conferma stance accomodante.",
+                    "motivation_quote": "Fed hawkish: Powell segnala hold prolungato, solo 25% prob. taglio prossimi 3 mesi. Dot plot indica 2 soli tagli nel 2025."
                 },
                 "inflazione": {
-                    "base": 1, "quote": -1,
-                    "motivation_base": "Inflazione EUR al 2.14% vicina al target BCE del 2%, trend in discesa stabile",
-                    "motivation_quote": "Inflazione USA al 2.74% ancora sopra target Fed del 2%, core PCE persistente"
+                    "base": 1, "quote": 0,
+                    "motivation_base": "Inflazione EUR 2.14% vicina al target 2%, trend stabile. BCE ha margine di manovra.",
+                    "motivation_quote": "Inflazione USA 2.74% sopra target, core PCE sticky. Situazione gestibile ma non ideale."
                 },
                 "crescita_pil": {
                     "base": -1, "quote": 1,
-                    "motivation_base": "PIL Eurozona debole allo 0.7%, Germania in stagnazione, rischi recessione",
-                    "motivation_quote": "PIL USA robusto al 2.1%, mercato lavoro resiliente, consumi solidi"
+                    "motivation_base": "PIL EUR 0.7% vs PIL USA 2.1% - differenziale 1.4pp sfavorevole. Germania in stagnazione, rischi recessione.",
+                    "motivation_quote": "PIL USA 2.1% con inflazione in calo - crescita sana e sostenibile. Mercato lavoro resiliente."
+                },
+                "pmi": {
+                    "base": -1, "quote": 1,
+                    "motivation_base": "PMI EUR pesato (50/50): Manuf 45.1 (Δ-1.2) + Services 51.4 (Δ-0.8) = 48.25. Contrazione manifatturiera, trend negativo.",
+                    "motivation_quote": "PMI USA pesato (30/70): Manuf 49.3 (Δ+1.3) + Services 54.1 (Δ+2.1) = 52.66. Servizi forti, momentum positivo."
                 },
                 "risk_sentiment": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Risk sentiment attuale neutro per EUR/USD, nessun flight-to-safety significativo",
-                    "motivation_quote": "Risk sentiment neutro, USD non beneficia di particolare avversione al rischio"
+                    "motivation_base": "Regime neutro (VIX 18-25). EUR semi-ciclica non beneficia né soffre particolarmente.",
+                    "motivation_quote": "Regime neutro. USD safe-haven non attrae flussi risk-off significativi al momento."
                 },
                 "bilancia_fiscale": {
                     "base": 0, "quote": 0,
-                    "motivation_base": "Situazione fiscale Eurozona mista ma gestibile, spread BTP contenuti",
-                    "motivation_quote": "Deficit USA elevato ma sostenibile, nessun impatto immediato su USD"
+                    "motivation_base": "Nessuna notizia rilevante su crisi fiscale Eurozona. Situazione stabile.",
+                    "motivation_quote": "Deficit USA elevato ma nessun impatto immediato su mercati. Situazione gestibile."
                 }
             }
-        },
-        ... RIPETI PER TUTTE LE 19 COPPIE
+        }
     },
     "rate_outlook": {
         "USD": {
             "current_rate": "X.XX%",
-            "next_meeting": "data (es: 2026-01-29)",
+            "next_meeting": "YYYY-MM-DD",
             "expectation": "hold/cut/hike",
             "probability": "XX%",
             "stance": "hawkish/dovish/neutral",
-            "notes": "Breve spiegazione basata sulle notizie web (es: Fed segnala pausa, mercati prezzano 2 tagli nel 2025)"
-        },
-        ... PER OGNI VALUTA (USD, EUR, GBP, JPY, CHF, AUD, CAD)
+            "notes": "Spiegazione basata sulle notizie web"
+        }
     },
     "risk_sentiment": "risk-on/risk-off/neutral",
     "events_calendar": []
 }
 
-## REGOLE CRITICHE:
-- ⚠️ PER RATE_OUTLOOK: BASA LE INFORMAZIONI SULLE NOTIZIE WEB, NON SU CONOSCENZE OBSOLETE!
-- La BoJ potrebbe aver alzato i tassi di recente - VERIFICA nelle notizie!
-- La Fed potrebbe aver cambiato stance - VERIFICA nelle notizie!
-- OGNI COPPIA È UN'ANALISI INDIPENDENTE
-- Aspettative Tassi ha peso doppio (-2 a +2), gli altri -1 a +1
-- score_base = SOMMA dei 6 punteggi "base"
-- score_quote = SOMMA dei 6 punteggi "quote"
+## REGOLE CRITICHE FINALI:
+- ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web)
+- ⚠️ CONFRONTO DIRETTO tra le due valute su ogni parametro
+- ⚠️ PMI: applica i PESI SETTORIALI corretti per ogni valuta
+- ⚠️ PIL: contestualizza con inflazione (no punti per crescita non sostenibile)
+- ⚠️ RISK SENTIMENT: dipende dal TIPO di coppia (safe-haven vs cicliche)
+- score_base = SOMMA dei 7 punteggi "base"
+- score_quote = SOMMA dei 7 punteggi "quote"
 - differenziale = score_base - score_quote
 """
 
@@ -969,7 +1351,7 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "") -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -978,6 +1360,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         macro_data: Dati macroeconomici (opzionale)
         news_text: Testo delle notizie web (opzionale)
         additional_text: Testo delle risorse aggiuntive (opzionale)
+        pmi_data: Dati PMI per valuta (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -995,6 +1378,36 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         macro_section = f"""
 ## 📊 DATI NUMERICI DA FONTI UFFICIALI:
 {macro_formatted}
+
+---
+"""
+    
+    # Sezione PMI (se presente)
+    pmi_section = ""
+    if pmi_data:
+        pmi_lines = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+            if curr in pmi_data:
+                manuf = pmi_data[curr].get("manufacturing", {})
+                serv = pmi_data[curr].get("services", {})
+                
+                manuf_current = manuf.get("current", "N/A")
+                manuf_delta = manuf.get("delta")
+                manuf_delta_str = f"(Δ {manuf_delta:+.1f})" if manuf_delta is not None else ""
+                
+                serv_current = serv.get("current", "N/A")
+                serv_delta = serv.get("delta")
+                serv_delta_str = f"(Δ {serv_delta:+.1f})" if serv_delta is not None else ""
+                
+                label = "ISM" if curr == "USD" else "PMI"
+                pmi_lines.append(f"**{curr}:** Manufacturing {label}: {manuf_current} {manuf_delta_str} | Services {label}: {serv_current} {serv_delta_str}")
+        
+        if pmi_lines:
+            pmi_section = f"""
+## 📈 DATI PMI (LEADING INDICATORS):
+{chr(10).join(pmi_lines)}
+
+⚠️ NOTA: PMI > 50 = espansione, PMI < 50 = contrazione. Il delta indica la variazione rispetto al mese precedente.
 
 ---
 """
@@ -1031,6 +1444,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 ---
 
 {macro_section}
+{pmi_section}
 {news_section}
 {additional_section}
 
@@ -1038,10 +1452,12 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 1. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il bias
 2. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
-3. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
-4. **events_calendar** = []
-5. Ogni **summary** deve spiegare PERCHÉ quel bias
-6. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
+3. **PMI sono LEADING indicators**: anticipano la crescita futura
+4. **PIL è LAGGING indicator**: conferma la crescita passata
+5. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
+6. **events_calendar** = []
+7. Ogni **summary** deve spiegare PERCHÉ quel bias
+8. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -1254,6 +1670,68 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
     
+    # ===== TABELLA PMI INDICATORS =====
+    pmi_data = st.session_state.get('last_pmi_data', {})
+    if pmi_data:
+        st.markdown("### 📈 PMI Indicators")
+        
+        pmi_rows = []
+        for curr in ["AUD", "CAD", "CHF", "EUR", "GBP", "JPY", "USD"]:
+            if curr in pmi_data:
+                manuf = pmi_data[curr].get("manufacturing", {})
+                serv = pmi_data[curr].get("services", {})
+                
+                # Manufacturing
+                manuf_current = manuf.get("current")
+                manuf_delta = manuf.get("delta")
+                manuf_label = manuf.get("label", "Manuf.")
+                
+                # Services
+                serv_current = serv.get("current")
+                serv_delta = serv.get("delta")
+                
+                # Formattazione valori
+                manuf_str = f"{manuf_current:.1f}" if manuf_current else "N/A"
+                if curr == "USD":
+                    manuf_str += " ISM"
+                
+                serv_str = f"{serv_current:.1f}" if serv_current else "N/A"
+                if curr == "USD":
+                    serv_str += " ISM"
+                
+                # Delta con frecce
+                if manuf_delta is not None:
+                    manuf_delta_str = f"{'↗' if manuf_delta > 0 else '↘' if manuf_delta < 0 else '→'} {manuf_delta:+.1f}"
+                else:
+                    manuf_delta_str = "N/A"
+                
+                if serv_delta is not None:
+                    serv_delta_str = f"{'↗' if serv_delta > 0 else '↘' if serv_delta < 0 else '→'} {serv_delta:+.1f}"
+                else:
+                    serv_delta_str = "N/A"
+                
+                # Interpretazione
+                trend_text, interpretation = get_pmi_interpretation(manuf_delta, serv_delta)
+                
+                pmi_rows.append({
+                    "Valuta": curr,
+                    "🏭 Manuf.": manuf_str,
+                    "Δ Manuf.": manuf_delta_str,
+                    "🏢 Services": serv_str,
+                    "Δ Services": serv_delta_str,
+                    "Trend": trend_text
+                })
+        
+        if pmi_rows:
+            df_pmi = pd.DataFrame(pmi_rows)
+            st.dataframe(df_pmi, use_container_width=True, hide_index=True)
+            
+            # Legenda
+            st.caption("📊 Legenda: PMI ≥ 50 = espansione | PMI < 50 = contrazione | 🏭 Manufacturing | 🏢 Services")
+            st.caption("🔗 Fonte: Investing.com (CHF Services: TradingEconomics)")
+        
+        st.markdown("---")
+    
     # ===== TOP BULLISH / TOP BEARISH =====
     pair_analysis = analysis.get("pair_analysis", {})
     
@@ -1462,6 +1940,7 @@ def display_analysis_matrix(analysis: dict):
                 "aspettative_tassi": "Aspettative Tassi [-2/+2]",
                 "inflazione": "Inflazione [-1/+1]",
                 "crescita_pil": "Crescita/PIL [-1/+1]",
+                "pmi": "PMI [-1/+1]",
                 "risk_sentiment": "Risk Sentiment [-1/+1]",
                 "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]"
             }
@@ -1794,6 +2273,12 @@ def main():
             help="Recupera tassi, inflazione, PIL, disoccupazione (GRATIS)"
         )
         
+        opt_pmi = st.checkbox(
+            "📈 Aggiorna Dati PMI",
+            value=True,
+            help="Recupera PMI Manufacturing e Services da Investing.com (GRATIS)"
+        )
+        
         opt_news = st.checkbox(
             "📰 Ricerca Notizie Web",
             value=True,
@@ -1833,13 +2318,13 @@ def main():
             st.warning("⚠️ L'analisi Claude consuma token API")
         
         # Validazione: almeno un'opzione dati se Claude attivo
-        if opt_claude and not (opt_macro or opt_news or opt_links):
+        if opt_claude and not (opt_macro or opt_pmi or opt_news or opt_links):
             st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
         
         st.markdown("---")
         
         # ===== BOTTONE ANALISI =====
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_news or opt_links)
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_news or opt_links)
         
         analyze_btn = st.button(
             "🚀 AVVIA ANALISI",
@@ -1850,7 +2335,7 @@ def main():
         
         # Calcola tipo analisi
         analysis_type = "custom"
-        if opt_macro and opt_news and opt_claude and not opt_links:
+        if opt_macro and opt_pmi and opt_news and opt_claude and not opt_links:
             analysis_type = "full"
         elif opt_macro and not opt_news and not opt_links:
             analysis_type = "macro_only"
@@ -1940,6 +2425,7 @@ def main():
         
         # Variabili per raccogliere i dati
         macro_data = None
+        pmi_data = None
         news_text = ""
         news_structured = {}
         additional_text = ""
@@ -1948,13 +2434,14 @@ def main():
         
         options_selected = {
             "macro": opt_macro,
+            "pmi": opt_pmi,
             "news": opt_news,
             "links": opt_links,
             "claude": opt_claude
         }
         
         step = 0
-        total_steps = sum([opt_macro, opt_news, opt_links, opt_claude])
+        total_steps = sum([opt_macro, opt_pmi, opt_news, opt_links, opt_claude])
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
@@ -1986,7 +2473,18 @@ def main():
                     # Se fallisce il caricamento, continua senza dati macro
                     pass
         
-        # FASE 2: Notizie Web
+        # FASE 2: Dati PMI
+        if opt_pmi:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📈 Recupero dati PMI...")
+            pmi_data = fetch_all_pmi_data()
+            st.session_state['last_pmi_data'] = pmi_data
+        else:
+            # Usa dati PMI dalla sessione
+            if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
+                pmi_data = st.session_state['last_pmi_data']
+        
+        # FASE 3: Notizie Web
         if opt_news:
             step += 1
             progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
@@ -1994,7 +2492,7 @@ def main():
             st.session_state['last_news_text'] = news_text
             st.session_state['last_news_structured'] = news_structured
         
-        # FASE 3: Link Aggiuntivi
+        # FASE 4: Link Aggiuntivi
         if opt_links and additional_urls.strip():
             step += 1
             progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
@@ -2003,22 +2501,25 @@ def main():
             st.session_state['last_links_text'] = additional_text
             st.session_state['last_links_structured'] = links_structured
         
-        # FASE 4: Analisi Claude
+        # FASE 5: Analisi Claude
         if opt_claude:
             step += 1
             progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
             
-            # Usa dati dalla sessione se non aggiornati ora (macro_data già gestito sopra)
+            # Usa dati dalla sessione se non aggiornati ora
             if not opt_news and 'last_news_text' in st.session_state:
                 news_text = st.session_state['last_news_text']
             if not opt_links and 'last_links_text' in st.session_state:
                 additional_text = st.session_state['last_links_text']
+            if not opt_pmi and 'last_pmi_data' in st.session_state:
+                pmi_data = st.session_state['last_pmi_data']
             
             claude_analysis = analyze_with_claude(
                 ANTHROPIC_API_KEY,
                 macro_data,
                 news_text,
-                additional_text
+                additional_text,
+                pmi_data
             )
         
         # ===== SALVATAGGIO =====
@@ -2026,6 +2527,7 @@ def main():
         
         analysis_result = {
             "macro_data": macro_data,
+            "pmi_data": pmi_data,
             "news_structured": news_structured,
             "links_structured": links_structured,
             "claude_analysis": claude_analysis,
@@ -2071,6 +2573,7 @@ def main():
         
         # Inizializza variabili
         macro_data = None
+        pmi_data = None
         news_structured = {}
         links_structured = []
         claude_analysis = None
@@ -2079,6 +2582,7 @@ def main():
         if 'claude_analysis' in data_container:
             # Formato v3 nuovo
             macro_data = data_container.get('macro_data')
+            pmi_data = data_container.get('pmi_data')
             news_structured = data_container.get('news_structured', {})
             links_structured = data_container.get('links_structured', [])
             claude_analysis = data_container.get('claude_analysis')
@@ -2088,11 +2592,16 @@ def main():
         elif 'macro_data' in data_container:
             # Formato v3 senza Claude
             macro_data = data_container.get('macro_data')
+            pmi_data = data_container.get('pmi_data')
             news_structured = data_container.get('news_structured', {})
             links_structured = data_container.get('links_structured', [])
         
+        # Salva in session_state per visualizzazione tabella PMI
+        if pmi_data:
+            st.session_state['last_pmi_data'] = pmi_data
+        
         # Verifica se c'è qualcosa da mostrare
-        has_content = macro_data or news_structured or links_structured or claude_analysis
+        has_content = macro_data or pmi_data or news_structured or links_structured or claude_analysis
         
         if not has_content:
             st.warning("⚠️ Questa analisi non contiene dati visualizzabili")
@@ -2125,6 +2634,7 @@ def main():
         
         **Opzioni disponibili:**
         - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
+        - 📈 **Dati PMI** - Manufacturing & Services PMI (gratis)
         - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
         - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
         - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
