@@ -541,18 +541,23 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
         
         html = response.text
         
+        # Debug: log lunghezza HTML ricevuto
+        html_length = len(html)
+        
         current_value = None
         previous_value = None
         release_date = None
         
         # ===== METODO 1: Pattern per "Latest Release" block =====
-        # Cerca: Actual\n48.2 (con possibili spazi/newline)
+        # Cerca: Actual\n48.2 (con possibili spazi/newline multipli)
         actual_patterns = [
-            r'Actual\s*\n\s*([0-9]+\.?[0-9]*)',  # Actual seguito da newline e numero
+            r'Actual\s*\n+\s*([0-9]+\.?[0-9]*)',  # Actual seguito da newline(s) e numero
+            r'Actual\s+([0-9]+\.?[0-9]*)',  # Actual seguito da spazi e numero
             r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
             r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
             r'Actual</th>\s*</tr>\s*<tr[^>]*>\s*<td[^>]*>[^<]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',  # Table header
             r'>\s*Actual\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
+            r'Actual.*?([0-9]{2}\.[0-9])',  # Fallback: Actual seguito da numero PMI-like
         ]
         
         for pattern in actual_patterns:
@@ -568,10 +573,12 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str) -> dict:
         
         # Cerca Previous
         previous_patterns = [
-            r'Previous\s*\n\s*([0-9]+\.?[0-9]*)',  # Previous seguito da newline e numero
+            r'Previous\s*\n+\s*([0-9]+\.?[0-9]*)',  # Previous seguito da newline(s) e numero
+            r'Previous\s+([0-9]+\.?[0-9]*)',  # Previous seguito da spazi e numero
             r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',  # Span HTML
             r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON format
             r'>\s*Previous\s*<[^>]*>\s*([0-9]+\.?[0-9]*)',  # Generic tag
+            r'Previous.*?([0-9]{2}\.[0-9])',  # Fallback: Previous seguito da numero PMI-like
         ]
         
         for pattern in previous_patterns:
@@ -777,6 +784,8 @@ def fetch_all_pmi_data() -> dict:
             ...
         }
     """
+    import time
+    
     pmi_data = {}
     
     for currency in PMI_CONFIG.keys():
@@ -785,19 +794,25 @@ def fetch_all_pmi_data() -> dict:
         # Manufacturing PMI
         pmi_data[currency]["manufacturing"] = fetch_pmi_from_investing(currency, "manufacturing")
         
+        # Delay per evitare rate limiting (1.5 secondi tra richieste)
+        time.sleep(1.5)
+        
         # Services PMI
         if currency == "CHF":
             # CHF Services da TradingEconomics
             pmi_data[currency]["services"] = fetch_chf_services_pmi_tradingeconomics()
         else:
             pmi_data[currency]["services"] = fetch_pmi_from_investing(currency, "services")
+        
+        # Delay tra valute
+        time.sleep(1.0)
     
     return pmi_data
 
 
 def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
     """
-    Restituisce interpretazione e emoji per i PMI.
+    Restituisce interpretazione e trend per i PMI.
     
     Returns:
         (trend_text, interpretation)
@@ -807,15 +822,12 @@ def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
     if services_delta is None:
         services_delta = 0
     
-    # Determina trend per ciascun settore
-    manuf_trend = "↗" if manuf_delta > 0.1 else "↘" if manuf_delta < -0.1 else "→"
-    services_trend = "↗" if services_delta > 0.1 else "↘" if services_delta < -0.1 else "→"
+    # Determina trend per ciascun settore con testo chiaro
+    manuf_trend = "↑" if manuf_delta > 0.1 else "↓" if manuf_delta < -0.1 else "→"
+    services_trend = "↑" if services_delta > 0.1 else "↓" if services_delta < -0.1 else "→"
     
-    # Emoji compatto
-    manuf_emoji = "🏭↑" if manuf_delta > 0.1 else "🏭↓" if manuf_delta < -0.1 else "🏭→"
-    services_emoji = "🏢↑" if services_delta > 0.1 else "🏢↓" if services_delta < -0.1 else "🏢→"
-    
-    trend_text = f"{manuf_emoji} {services_emoji}"
+    # Testo completo e leggibile
+    trend_text = f"Manuf.{manuf_trend} Serv.{services_trend}"
     
     # Interpretazione
     if manuf_delta > 0.1 and services_delta > 0.1:
@@ -1791,7 +1803,8 @@ def display_pmi_table(pmi_data: dict):
             "🏢 Services": services_display,
             "Prev ": str(services_previous) if services_previous else "N/A",  # Spazio per evitare duplicato colonna
             "Δ Serv": format_delta(services_delta),
-            "Analisi": trend_text
+            "Trend": trend_text,  # Es: "M↑ S↓"
+            "Outlook": interpretation  # Es: "Bullish", "Bearish", "Misto+", etc.
         }
         table_rows.append(row)
     
@@ -1844,6 +1857,22 @@ def display_pmi_table(pmi_data: dict):
                         styles.loc[idx, "Δ Serv"] = 'background-color: #f8d7da; color: #721c24'  # Rosso
                 except:
                     pass
+                
+                # Colora Outlook in base all'interpretazione
+                try:
+                    outlook = row["Outlook"]
+                    if outlook == "Bullish":
+                        styles.loc[idx, "Outlook"] = 'background-color: #d4edda; color: #155724; font-weight: bold'  # Verde
+                    elif outlook == "Bearish":
+                        styles.loc[idx, "Outlook"] = 'background-color: #f8d7da; color: #721c24; font-weight: bold'  # Rosso
+                    elif outlook == "Misto+":
+                        styles.loc[idx, "Outlook"] = 'background-color: #d1ecf1; color: #0c5460'  # Azzurro
+                    elif outlook == "Misto-":
+                        styles.loc[idx, "Outlook"] = 'background-color: #fff3cd; color: #856404'  # Giallo
+                    else:  # Neutro
+                        styles.loc[idx, "Outlook"] = 'background-color: #e2e3e5; color: #383d41'  # Grigio
+                except:
+                    pass
             
             return styles
         
@@ -1854,8 +1883,8 @@ def display_pmi_table(pmi_data: dict):
         # Legenda
         st.caption("""
         **Legenda:** 🟢 PMI ≥ 50 (espansione) | 🔴 PMI < 50 (contrazione) | 
-        Δ > 0 ↗ miglioramento | Δ < 0 ↘ peggioramento | 
-        **Analisi:** 🏭↑/↓ trend manifattura | 🏢↑/↓ trend servizi
+        **Trend:** M = Manufacturing, S = Services (↑ miglioramento, ↓ peggioramento) |
+        **Outlook:** Bullish (entrambi ↑) | Bearish (entrambi ↓) | Misto (+/-) | Neutro
         """)
         
         # Verifica completezza
