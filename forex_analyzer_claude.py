@@ -2113,68 +2113,6 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
     
-    # ===== TABELLA PMI INDICATORS =====
-    pmi_data = st.session_state.get('last_pmi_data', {})
-    if pmi_data:
-        st.markdown("### 📈 PMI Indicators")
-        
-        pmi_rows = []
-        for curr in ["AUD", "CAD", "CHF", "EUR", "GBP", "JPY", "USD"]:
-            if curr in pmi_data:
-                manuf = pmi_data[curr].get("manufacturing", {})
-                serv = pmi_data[curr].get("services", {})
-                
-                # Manufacturing
-                manuf_current = manuf.get("current")
-                manuf_delta = manuf.get("delta")
-                manuf_label = manuf.get("label", "Manuf.")
-                
-                # Services
-                serv_current = serv.get("current")
-                serv_delta = serv.get("delta")
-                
-                # Formattazione valori
-                manuf_str = f"{manuf_current:.1f}" if manuf_current else "N/A"
-                if curr == "USD":
-                    manuf_str += " ISM"
-                
-                serv_str = f"{serv_current:.1f}" if serv_current else "N/A"
-                if curr == "USD":
-                    serv_str += " ISM"
-                
-                # Delta con frecce
-                if manuf_delta is not None:
-                    manuf_delta_str = f"{'↗' if manuf_delta > 0 else '↘' if manuf_delta < 0 else '→'} {manuf_delta:+.1f}"
-                else:
-                    manuf_delta_str = "N/A"
-                
-                if serv_delta is not None:
-                    serv_delta_str = f"{'↗' if serv_delta > 0 else '↘' if serv_delta < 0 else '→'} {serv_delta:+.1f}"
-                else:
-                    serv_delta_str = "N/A"
-                
-                # Interpretazione
-                trend_text, interpretation = get_pmi_interpretation(manuf_delta, serv_delta)
-                
-                pmi_rows.append({
-                    "Valuta": curr,
-                    "🏭 Manuf.": manuf_str,
-                    "Δ Manuf.": manuf_delta_str,
-                    "🏢 Services": serv_str,
-                    "Δ Services": serv_delta_str,
-                    "Trend": trend_text
-                })
-        
-        if pmi_rows:
-            df_pmi = pd.DataFrame(pmi_rows)
-            st.dataframe(df_pmi, use_container_width=True, hide_index=True)
-            
-            # Legenda
-            st.caption("📊 Legenda: PMI ≥ 50 = espansione | PMI < 50 = contrazione | 🏭 Manufacturing | 🏢 Services")
-            st.caption("🔗 Fonte: Investing.com (CHF Services: TradingEconomics)")
-        
-        st.markdown("---")
-    
     # ===== TOP BULLISH / TOP BEARISH =====
     pair_analysis = analysis.get("pair_analysis", {})
     
@@ -2217,7 +2155,7 @@ def display_analysis_matrix(analysis: dict):
         
         # ===== TABELLA TUTTE LE COPPIE CON SELEZIONE SINGOLA =====
         st.markdown("### 📋 Tutte le Coppie")
-        st.caption("👆 Clicca su una riga per vedere il dettaglio completo")
+        st.caption("👆 **Seleziona una riga** per vedere la sintesi completa e tutti i dettagli sotto la tabella")
         
         # Crea lista con dati e ordina per differenziale (dal più bullish al più bearish)
         rows_data = []
@@ -2241,7 +2179,7 @@ def display_analysis_matrix(analysis: dict):
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                "Sintesi": summary[:150] + "..." if len(summary) > 150 else summary
+                "Sintesi": summary  # Testo completo - il dettaglio sotto mostra tutto
             })
         
         # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
