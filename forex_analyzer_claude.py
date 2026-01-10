@@ -1644,47 +1644,111 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
         try:
             analysis = json.loads(response_text)
         except json.JSONDecodeError as e:
-            # Se fallisce, chiedi a Claude di correggere il JSON
+            import time
             error_msg = str(e)
+            error_pos = e.pos if hasattr(e, 'pos') else None
             
-            fix_prompt = f"""Il seguente JSON ha un errore di sintassi:
+            # ===== TENTATIVO 1: Riparazione locale con regex (veloce, gratis) =====
+            def quick_fix_json(json_str, pos):
+                """Prova a fixare velocemente aggiungendo virgole mancanti"""
+                import re
+                
+                # Fix generico: aggiungi virgole dove mancano
+                fixed = json_str
+                
+                # Pattern: "valore" seguito da newline e "chiave":
+                fixed = re.sub(r'"\s*\n\s*"([^"]+)":', r'",\n"\1":', fixed)
+                
+                # Pattern: numero seguito da newline e "chiave":
+                fixed = re.sub(r'(\d)\s*\n\s*"([^"]+)":', r'\1,\n"\2":', fixed)
+                
+                # Pattern: } seguito da newline e "chiave":
+                fixed = re.sub(r'\}\s*\n\s*"([^"]+)":', r'},\n"\1":', fixed)
+                
+                # Pattern: ] seguito da newline e "chiave":
+                fixed = re.sub(r'\]\s*\n\s*"([^"]+)":', r'],\n"\1":', fixed)
+                
+                # Pattern: true/false/null seguito da "chiave":
+                fixed = re.sub(r'(true|false|null)\s*\n\s*"([^"]+)":', r'\1,\n"\2":', fixed)
+                
+                # Rimuovi virgole trailing
+                fixed = re.sub(r',\s*\}', '}', fixed)
+                fixed = re.sub(r',\s*\]', ']', fixed)
+                
+                # Se abbiamo la posizione dell'errore, prova fix mirato
+                if pos and pos < len(json_str):
+                    # Cerca indietro per trovare dove manca la virgola
+                    for i in range(pos - 1, max(0, pos - 100), -1):
+                        if json_str[i] in '"}]' and i < len(fixed):
+                            # Verifica se dopo c'è una virgola
+                            rest = json_str[i+1:pos].strip()
+                            if rest and not rest.startswith(',') and not rest.startswith('}') and not rest.startswith(']'):
+                                # Inserisci virgola
+                                fixed = fixed[:i+1] + ',' + fixed[i+1:]
+                                break
+                
+                return fixed
+            
+            # Prova fix locale
+            try:
+                fixed_local = quick_fix_json(response_text, error_pos)
+                analysis = json.loads(fixed_local)
+            except json.JSONDecodeError:
+                # ===== TENTATIVO 2: Chiedi a Claude Sonnet con delay =====
+                # Aspetta per evitare rate limit (la chiamata principale ha appena finito)
+                time.sleep(15)  # 15 secondi di pausa
+                
+                fix_prompt = f"""Il seguente JSON ha un errore di sintassi:
 
 ERRORE: {error_msg}
 
 JSON DA CORREGGERE:
-{response_text[:15000]}
+{response_text}
 
-Correggi SOLO l'errore di sintassi (probabilmente una virgola mancante o un carattere errato).
+Correggi SOLO l'errore di sintassi (probabilmente una virgola mancante).
 Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```."""
 
-            try:
-                fix_message = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=20000,
-                    messages=[{"role": "user", "content": fix_prompt}],
-                    system="Sei un correttore di JSON. Restituisci SOLO il JSON corretto, nient'altro."
-                )
-                
-                fixed_text = fix_message.content[0].text.strip()
-                
-                # Pulisci anche questo
-                if "```json" in fixed_text:
-                    fixed_text = fixed_text.split("```json")[1].split("```")[0]
-                elif "```" in fixed_text:
-                    fixed_text = fixed_text.split("```")[1].split("```")[0]
-                
-                fixed_text = fixed_text.strip()
-                start_idx = fixed_text.find('{')
-                end_idx = fixed_text.rfind('}')
-                
-                if start_idx != -1 and end_idx != -1:
-                    fixed_text = fixed_text[start_idx:end_idx+1]
-                
-                analysis = json.loads(fixed_text)
-                
-            except Exception as fix_error:
-                # Anche il fix è fallito
-                return {"error": f"Errore parsing JSON: {error_msg}. Tentativo di correzione fallito: {fix_error}"}
+                # Prova fino a 2 volte con delay
+                for attempt in range(2):
+                    try:
+                        if attempt > 0:
+                            time.sleep(20)  # Aspetta 20 secondi tra tentativi
+                        
+                        fix_message = client.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=25000,
+                            messages=[{"role": "user", "content": fix_prompt}],
+                            system="Sei un correttore di JSON. Restituisci SOLO il JSON corretto, nient'altro."
+                        )
+                        
+                        fixed_text = fix_message.content[0].text.strip()
+                        
+                        # Pulisci
+                        if "```json" in fixed_text:
+                            fixed_text = fixed_text.split("```json")[1].split("```")[0]
+                        elif "```" in fixed_text:
+                            fixed_text = fixed_text.split("```")[1].split("```")[0]
+                        
+                        fixed_text = fixed_text.strip()
+                        start_idx = fixed_text.find('{')
+                        end_idx = fixed_text.rfind('}')
+                        
+                        if start_idx != -1 and end_idx != -1:
+                            fixed_text = fixed_text[start_idx:end_idx+1]
+                        
+                        analysis = json.loads(fixed_text)
+                        break  # Successo!
+                        
+                    except json.JSONDecodeError:
+                        if attempt == 1:
+                            return {"error": f"Errore parsing JSON: {error_msg}. Correzione fallita."}
+                        continue
+                        
+                    except Exception as fix_error:
+                        if "rate_limit" in str(fix_error).lower() and attempt < 1:
+                            time.sleep(30)  # Aspetta 30 secondi per rate limit
+                            continue
+                        return {"error": f"Errore parsing JSON: {error_msg}. Correzione fallita: {fix_error}"}
         
         analysis["pairs_analyzed"] = FOREX_PAIRS
         analysis["currencies"] = list(CURRENCIES.keys())
