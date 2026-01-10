@@ -29,6 +29,117 @@ def get_italy_now():
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
 
+
+def repair_json(json_string: str) -> str:
+    """
+    Tenta di riparare JSON malformati comuni generati da LLM.
+    
+    Args:
+        json_string: stringa JSON potenzialmente malformata
+        
+    Returns:
+        stringa JSON riparata
+    """
+    import re
+    
+    # 1. Rimuovi caratteri di controllo (tranne newline e tab)
+    json_string = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', json_string)
+    
+    # 2. Fix virgole mancanti tra oggetti/array
+    json_string = re.sub(r'\}\s*\{', '}, {', json_string)
+    json_string = re.sub(r'\]\s*\{', '], {', json_string)
+    json_string = re.sub(r'\}\s*\[', '}, [', json_string)
+    json_string = re.sub(r'\]\s*\[', '], [', json_string)
+    
+    # 3. Fix virgole mancanti tra valori (pattern più aggressivo)
+    # "value" seguita da newline e poi "key": -> aggiungi virgola
+    json_string = re.sub(r'"\s*[\r\n]+\s*"([^"]+)":', r'",\n"\1":', json_string)
+    
+    # 4. Fix virgole mancanti dopo numeri seguiti da "key":
+    json_string = re.sub(r'(\d)\s*[\r\n]+\s*"([^"]+)":', r'\1,\n"\2":', json_string)
+    
+    # 5. Fix virgole mancanti dopo booleani/null seguiti da "key":
+    json_string = re.sub(r'(true|false|null)\s*[\r\n]+\s*"([^"]+)":', r'\1,\n"\2":', json_string)
+    
+    # 6. Fix virgole mancanti dopo } seguito da "key":
+    json_string = re.sub(r'\}\s*[\r\n]+\s*"([^"]+)":', r'},\n"\1":', json_string)
+    
+    # 7. Rimuovi virgole trailing prima di } o ]
+    json_string = re.sub(r',\s*\}', '}', json_string)
+    json_string = re.sub(r',\s*\]', ']', json_string)
+    
+    # 8. Fix doppi due punti
+    json_string = re.sub(r'::', ':', json_string)
+    
+    # 9. Fix virgolette non chiuse alla fine di valori lunghi
+    # Cerca pattern dove una stringa sembra non chiusa
+    
+    return json_string
+
+
+def safe_json_parse(json_string: str) -> tuple:
+    """
+    Parsing JSON sicuro con tentativi di riparazione.
+    
+    Args:
+        json_string: stringa JSON
+        
+    Returns:
+        tuple: (parsed_dict, error_message)
+        Se successo: (dict, None)
+        Se fallisce: (None, error_string)
+    """
+    # Tentativo 1: parsing diretto
+    try:
+        return json.loads(json_string), None
+    except json.JSONDecodeError as e:
+        first_error = str(e)
+    
+    # Tentativo 2: dopo riparazione base
+    try:
+        repaired = repair_json(json_string)
+        return json.loads(repaired), None
+    except json.JSONDecodeError:
+        pass
+    
+    # Tentativo 3: rimuovi tutto prima del primo { e dopo l'ultimo }
+    try:
+        start = json_string.find('{')
+        end = json_string.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            cleaned = json_string[start:end+1]
+            repaired = repair_json(cleaned)
+            return json.loads(repaired), None
+    except json.JSONDecodeError:
+        pass
+    
+    # Tentativo 4: fix aggressivo per virgole mancanti
+    try:
+        # Trova tutte le linee e aggiungi virgole dove necessario
+        lines = json_string.split('\n')
+        fixed_lines = []
+        for i, line in enumerate(lines):
+            stripped = line.rstrip()
+            # Se la linea finisce con " o } o ] o numero o true/false/null
+            # e la prossima linea inizia con "
+            if i < len(lines) - 1:
+                next_stripped = lines[i+1].lstrip()
+                if next_stripped.startswith('"') and ':' in next_stripped:
+                    # La prossima linea sembra essere una chiave
+                    if stripped.endswith('"') or stripped.endswith('}') or stripped.endswith(']'):
+                        if not stripped.endswith(',') and not stripped.endswith('{') and not stripped.endswith('['):
+                            line = stripped + ','
+            fixed_lines.append(line)
+        
+        fixed = '\n'.join(fixed_lines)
+        fixed = repair_json(fixed)
+        return json.loads(fixed), None
+    except json.JSONDecodeError:
+        pass
+    
+    # Tutti i tentativi falliti
+    return None, first_error
+
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(
     page_title="Forex Macro Analyst - Claude AI",
@@ -1624,20 +1735,28 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
         
         response_text = message.content[0].text
         
-        # Pulisci JSON
+        # Pulisci JSON da markdown
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0]
         
         response_text = response_text.strip()
+        
+        # Estrai solo il JSON
         start_idx = response_text.find('{')
         end_idx = response_text.rfind('}')
         
         if start_idx != -1 and end_idx != -1:
             response_text = response_text[start_idx:end_idx+1]
         
-        analysis = json.loads(response_text)
+        # Usa parser sicuro con riparazione automatica
+        analysis, parse_error = safe_json_parse(response_text)
+        
+        if analysis is None:
+            # Ultimo tentativo: log per debug e restituisci errore
+            return {"error": f"Errore parsing JSON: {parse_error}", "raw_response": response_text[:500]}
+        
         analysis["pairs_analyzed"] = FOREX_PAIRS
         analysis["currencies"] = list(CURRENCIES.keys())
         
