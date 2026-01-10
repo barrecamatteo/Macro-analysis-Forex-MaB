@@ -1,192 +1,288 @@
-# 📊 Forex Macro Analyst v3.0
+# 📊 Forex Macro Analyst - Powered by Claude AI
 
-Analizzatore forex macroeconomico powered by **Claude AI** con sistema di autenticazione e analisi modulare.
+## Panoramica
 
-## ✨ Novità v3.0
-
-### 🔐 Sistema di Autenticazione
-- Login con username/password
-- Multi-utente con Supabase
-- Ogni utente vede solo le proprie analisi
-- Gestione utenti con script utility
-
-### 🎛️ Analisi Modulare
-Risparmia sui costi scegliendo cosa analizzare:
-
-| Opzione | Descrizione | Costo |
-|---------|-------------|-------|
-| 📊 Dati Macro | Tassi, inflazione, PIL, disoccupazione | **GRATIS** |
-| 📰 Notizie Web | Forex Factory, outlook BC, geopolitica | **GRATIS** |
-| 📎 Link Aggiuntivi | Analizza URL personalizzati | **GRATIS** |
-| 🤖 Claude AI | Analisi completa forex | **$$$** |
-
-### 📰 Riepilogo Notizie
-Visualizza cosa ha trovato la ricerca web PRIMA di chiamare Claude!
-
-### 📜 Storico Completo
-Ogni analisi viene salvata con:
-- Timestamp
-- Tipo di analisi
-- Opzioni selezionate
-- Tutti i dati raccolti
+Applicazione web per l'analisi macroeconomica forex che utilizza Claude AI per generare analisi complete su 19 coppie di valute. L'app integra dati in tempo reale da fonti ufficiali, notizie web e indicatori PMI per fornire una visione completa del mercato forex.
 
 ---
 
-## 🚀 Installazione
+## 🔧 Caratteristiche Principali
 
-### 1. Requisiti
+- **19 coppie forex** analizzate simultaneamente
+- **7 valute** monitorate: USD, EUR, GBP, JPY, CHF, AUD, CAD
+- **Dati macro** da API ufficiali (tassi, inflazione, PIL, disoccupazione)
+- **PMI indicators** da Investing.com (Manufacturing + Services)
+- **Ricerca notizie** automatica (Forex Factory, outlook banche centrali, geopolitica)
+- **Autenticazione** multi-utente con Supabase
+- **Storico analisi** salvato su cloud
+
+---
+
+## 📈 Sistema di Scoring - 7 Parametri
+
+L'analisi si basa su **7 parametri fondamentali**, ciascuno con criteri oggettivi e misurabili.
+
+### Range Punteggi
+| Parametro | Range | Note |
+|-----------|-------|------|
+| Aspettative Tassi | -2 a +2 | **Peso doppio** - driver principale |
+| Altri 6 parametri | -1 a +1 | Peso standard |
+| **Score totale** | -8 a +8 | Per valuta |
+| **Differenziale** | -16 a +16 | Base - Quote |
+
+---
+
+## 📋 Criteri Dettagliati per Parametro
+
+### 1️⃣ Tassi Attuali [-1 a +1]
+
+**Logica:** Il differenziale di tasso (carry) attrae flussi di capitale verso la valuta con rendimento maggiore.
+
+| Spread (Base - Quote) | Score Base | Score Quote |
+|-----------------------|------------|-------------|
+| ≥ +150 bp | +1 | -1 |
+| +50 bp a +149 bp | +1 | 0 |
+| -49 bp a +49 bp | 0 | 0 |
+| -50 bp a -149 bp | 0 | +1 |
+| ≤ -150 bp | -1 | +1 |
+
+**Esempio:** EUR (2.15%) vs USD (3.75%) → Spread = -160bp → EUR: -1, USD: +1
+
+---
+
+### 2️⃣ Aspettative Tassi [-2 a +2] ⭐
+
+**Logica:** Il mercato guarda avanti. Le aspettative sui tassi futuri sono più importanti dei tassi attuali.
+
+| Scenario | Score |
+|----------|-------|
+| BC hawkish con rialzi attesi O prob. taglio <20% | **+2** |
+| BC neutrale/leggermente hawkish O prob. taglio 20-40% | **+1** |
+| BC neutrale O incertezza elevata | **0** |
+| BC leggermente dovish O prob. taglio 60-80% | **-1** |
+| BC molto dovish con tagli attesi O prob. taglio >80% | **-2** |
+
+**Fonte dati:** Notizie web (CME FedWatch, dichiarazioni BC, analisti)
+
+---
+
+### 3️⃣ Inflazione [-1 a +1]
+
+**Logica:** Non conta solo il livello, ma quanto l'inflazione supporta la politica monetaria.
+
+| Scenario | Score |
+|----------|-------|
+| Inflazione 1.5%-2.5% + trend stabile/discesa | **+1** (ideale) |
+| Inflazione 2.5%-3.5% + trend incerto | **0** (gestibile) |
+| Inflazione >3.5% + trend in salita | **-1** (BC sotto pressione) |
+| Inflazione <1.5% + trend in discesa | **-1** (rischio deflazione) |
+
+**Confronto:** Chi ha situazione inflattiva più favorevole per la propria BC?
+
+---
+
+### 4️⃣ Crescita/PIL [-1 a +1] - LAGGING
+
+**Logica:** Il PIL va contestualizzato con inflazione e sostenibilità. Crescita alta con inflazione fuori controllo NON è positiva.
+
+| Scenario | Score |
+|----------|-------|
+| PIL >2% + inflazione controllata | **+1** (crescita sana) |
+| PIL 1%-2% + situazione bilanciata | **0** (moderata) |
+| PIL <1% O trend in decelerazione | **-1** (rischio recessione) |
+| PIL alto + inflazione fuori controllo | **0** (non sostenibile) |
+| Stagflazione (PIL basso + inflazione alta) | **-1** (peggiore) |
+
+**Confronto diretto:**
+- Differenziale > 1.5pp → vantaggio netto
+- Differenziale 0.5-1.5pp → vantaggio leggero
+- Differenziale < 0.5pp → neutro
+
+---
+
+### 5️⃣ PMI [-1 a +1] - LEADING
+
+**Logica:** PMI anticipa il PIL di 3-6 mesi. Considera livello (>50 = espansione) E direzione (delta).
+
+#### Pesi Settoriali per Valuta
+
+| Valuta | Services | Manufacturing | Economia |
+|--------|----------|---------------|----------|
+| **USD** | 70% | 30% | Servizi (consumi, finanza) |
+| **EUR** | 50% | 50% | Mista |
+| **GBP** | 70% | 30% | Servizi (finanza) |
+| **JPY** | 40% | 60% | Export/Manifattura |
+| **CHF** | 60% | 40% | Finanza + Pharma |
+| **AUD** | 50% | 50% | Mining + Servizi |
+| **CAD** | 50% | 50% | Energia + Servizi |
+
+#### Criteri di Valutazione
+
+| PMI Ponderato | Delta | Score |
+|---------------|-------|-------|
+| ≥52 | Positivo | **+1** (forte espansione) |
+| 50-52 | Positivo | **+1** (espansione moderata) |
+| 50-52 | Negativo | **0** (rallentamento) |
+| 48-50 | Positivo | **0** (recupero) |
+| 48-50 | Negativo | **-1** (peggioramento) |
+| <48 | Qualsiasi | **-1** (contrazione) |
+
+**Fonte dati:** Investing.com (CHF Services: TradingEconomics)
+
+---
+
+### 6️⃣ Risk Sentiment [-1 a +1]
+
+**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso valute cicliche.
+
+#### Classificazione Valute
+
+| Tipo | Valute |
+|------|--------|
+| **Safe-haven** | USD, JPY, CHF |
+| **Cicliche/Commodity** | AUD, CAD, GBP |
+| **Semi-cicliche** | EUR |
+
+#### Determinazione Regime
+
+| Indicatore | Regime |
+|------------|--------|
+| VIX > 25 O equity in forte calo | **Risk-OFF** |
+| VIX < 18 E equity positivo | **Risk-ON** |
+| Altrimenti | **Neutro** |
+
+#### Matrice Punteggi
+
+| Tipo Coppia | Risk-OFF | Neutro | Risk-ON |
+|-------------|----------|--------|---------|
+| Ciclica vs Safe-haven | Cicl: -1, Safe: +1 | 0, 0 | Cicl: +1, Safe: -1 |
+| Entrambe stesso tipo | 0, 0 | 0, 0 | 0, 0 |
+
+---
+
+### 7️⃣ Bilancia/Fiscale [-1 a +1]
+
+**Logica:** Importante nel lungo termine. Assegnare peso solo se notizie specifiche.
+
+| Scenario | Score |
+|----------|-------|
+| Current Account surplus >2% + debito gestibile | **+1** |
+| Situazione nella media O nessuna notizia | **0** |
+| Deficit gemelli elevati O crisi debito | **-1** |
+
+**Regola pratica:** Se non ci sono notizie rilevanti → 0 per entrambe.
+
+---
+
+## 🎯 Interpretazione Risultati
+
+### Differenziale (score_base - score_quote)
+
+| Range | Interpretazione | Forza Segnale |
+|-------|-----------------|---------------|
+| +8 a +16 | **Strong Bullish** (long) | 🟢🟢 |
+| +3 a +7 | **Bullish** (long) | 🟢 |
+| -2 a +2 | **Neutral** | 🟡 |
+| -7 a -3 | **Bearish** (short) | 🔴 |
+| -16 a -8 | **Strong Bearish** (short) | 🔴🔴 |
+
+---
+
+## 📊 Fonti Dati
+
+| Dato | Fonte | Frequenza |
+|------|-------|-----------|
+| Tassi BC | API ufficiali | Real-time |
+| Inflazione | Trading Economics / API | Mensile |
+| PIL | API Ninjas | Trimestrale |
+| PMI Manufacturing | Investing.com | Mensile |
+| PMI Services | Investing.com (CHF: TradingEconomics) | Mensile |
+| Notizie | DuckDuckGo Search | On-demand |
+| Aspettative tassi | Forex Factory, Reuters, Bloomberg | On-demand |
+
+---
+
+## 🔐 Autenticazione
+
+L'app supporta autenticazione multi-utente tramite Supabase:
+- Login con username/password
+- Analisi salvate per utente
+- Storico consultabile
+
+---
+
+## ⚙️ Configurazione
+
+### Variabili d'ambiente richieste
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=eyJ...
+API_NINJAS_KEY=xxx (opzionale, per PIL/disoccupazione)
+```
+
+### Installazione
+
 ```bash
 pip install streamlit anthropic duckduckgo-search pandas requests
 ```
 
-### 2. Configurazione API Keys
-Crea `config.py`:
-```python
-ANTHROPIC_API_KEY = "sk-ant-..."
-SUPABASE_URL = "https://xxx.supabase.co"
-SUPABASE_KEY = "eyJ..."
-API_NINJAS_KEY = "xxx"  # Opzionale
-```
+### Esecuzione
 
-Oppure usa `st.secrets` su Streamlit Cloud.
-
-### 3. Setup Database Supabase
-
-1. Vai su [Supabase](https://supabase.com) e crea un progetto
-2. Vai su **SQL Editor**
-3. Esegui lo script `supabase_setup_v3.sql`
-4. Copia URL e anon key nelle impostazioni
-
-### 4. Crea Utente Admin
-L'utente viene creato automaticamente dallo script SQL:
-- **Username:** MBARRECA
-- **Password:** mbarreca
-
-### 5. Avvia
 ```bash
 streamlit run forex_analyzer_claude.py
 ```
 
 ---
 
-## 👥 Gestione Utenti
-
-Usa lo script `user_manager.py`:
-
-```bash
-# Lista utenti
-python user_manager.py list
-
-# Aggiungi utente
-python user_manager.py add mario password123 mario@email.com
-
-# Cambia password
-python user_manager.py password mario nuova_password
-
-# Elimina utente
-python user_manager.py delete mario
-
-# Genera hash password
-python user_manager.py hash mia_password
-```
-
----
-
-## 💡 Scenari d'Uso
-
-### Scenario 1: Analisi Completa
-Seleziona tutte le opzioni → Costa token Claude ma hai tutto
-
-### Scenario 2: Solo Aggiornamento Dati
-- ✅ Dati Macro
-- ✅ Notizie Web
-- ❌ Claude
-
-→ **GRATIS!** Vedi i dati aggiornati senza spendere
-
-### Scenario 3: Breaking News
-- ❌ Dati Macro (già aggiornati prima)
-- ❌ Notizie Web
-- ✅ Link Aggiuntivi (inserisci URL news)
-- ✅ Claude
-
-→ Analisi veloce su notizie specifiche
-
-### Scenario 4: Riepilogo Notizie
-- ❌ Dati Macro
-- ✅ Notizie Web
-- ❌ Claude
-
-→ **GRATIS!** Vedi cosa dice il mercato senza analisi
-
----
-
 ## 📁 Struttura File
 
 ```
-forex_analyzer_claude.py   # App principale
-macro_data_fetcher.py      # Modulo dati macro
-user_manager.py            # Utility gestione utenti
-config.py                  # Configurazione (non committare!)
-supabase_setup_v3.sql      # Script setup database
-requirements.txt           # Dipendenze Python
+forex_analyzer_claude.py    # App principale
+macro_data_fetcher.py       # Modulo fetch dati macro
+config.py                   # Configurazione locale (opzionale)
+README.md                   # Questa documentazione
+data/                       # Cartella analisi locali (fallback)
 ```
 
 ---
 
-## 🗄️ Struttura Database
+## 📝 Note Importanti
 
-### Tabella `users`
-| Campo | Tipo | Descrizione |
-|-------|------|-------------|
-| id | UUID | Chiave primaria |
-| username | VARCHAR | Unico |
-| password_hash | VARCHAR | SHA-256 |
-| email | VARCHAR | Opzionale |
-| is_active | BOOLEAN | Se può accedere |
-| created_at | TIMESTAMP | Data creazione |
-
-### Tabella `analyses`
-| Campo | Tipo | Descrizione |
-|-------|------|-------------|
-| id | UUID | Chiave primaria |
-| analysis_datetime | VARCHAR | Timestamp analisi |
-| user_id | UUID | Foreign key → users |
-| analysis_type | VARCHAR | full/macro_only/news_only/etc |
-| options_selected | JSONB | Opzioni selezionate |
-| data | JSONB | Tutti i dati dell'analisi |
-
----
-
-## 📝 Changelog
-
-### v3.0.0 (Gennaio 2026)
-- 🔐 **Sistema Autenticazione**: Login multi-utente con Supabase
-- 🎛️ **Analisi Modulare**: Scegli cosa includere nell'analisi
-- 📰 **Riepilogo Notizie**: Visualizza risultati ricerca web
-- 📜 **Storico Completo**: Ogni tipo di analisi viene salvata
-- 💾 **Database Multi-utente**: Ogni utente ha le sue analisi
-- 🛠️ **User Manager**: Script utility per gestione utenti
-
-### v2.3.0 (Dicembre 2025)
-- 📰 **Forex Factory News**: Ricerca automatica breaking news
-
-### v2.2.0 (Dicembre 2025)
-- 📎 **Risorse Aggiuntive**: URL custom per Claude
-
-### v2.1.0 (Dicembre 2025)
-- 🔍 **Query dinamiche**: Ricerche aggiornate automaticamente
-- 📊 **Tabella Meeting BC**: Date, probabilità, outlook
+1. **I punteggi sono RELATIVI al confronto diretto** tra le due valute della coppia
+2. **La stessa valuta può avere punteggi diversi** in coppie diverse
+3. **PIL + PMI sono complementari**: PIL conferma il passato, PMI anticipa il futuro
+4. **Risk Sentiment dipende dal tipo di coppia**, non solo dal regime di mercato
+5. **Le aspettative sui tassi hanno peso doppio** perché il mercato guarda avanti
 
 ---
 
 ## ⚠️ Disclaimer
 
-Questo strumento è solo per scopi informativi e educativi. 
-**Non costituisce consiglio di investimento.**
+Questa applicazione è fornita a scopo informativo e didattico. Non costituisce consulenza finanziaria o raccomandazione di investimento. Il trading forex comporta rischi significativi. Consultare sempre un consulente finanziario qualificato prima di prendere decisioni di investimento.
 
 ---
 
-## 📄 Licenza
+## 📜 Changelog
 
-MIT License - Vedi LICENSE per dettagli.
+### v3.1 (Gennaio 2026)
+- ✅ Aggiunta tabella PMI con scraping Investing.com
+- ✅ PMI come 7° criterio di scoring
+- ✅ Pesi PMI differenziati per struttura economica
+- ✅ Criteri di scoring oggettivi e documentati
+- ✅ Confronto diretto PIL contestualizzato con inflazione
+
+### v3.0
+- Autenticazione Supabase multi-utente
+- Opzioni analisi modulari (macro, news, link, Claude)
+- Storico analisi per utente
+
+### v2.0
+- Sistema 6 parametri
+- Ricerca notizie automatica
+- Outlook tassi di interesse
+
+### v1.0
+- Versione iniziale
+- Analisi Claude base
