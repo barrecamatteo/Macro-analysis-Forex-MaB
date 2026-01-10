@@ -659,99 +659,146 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
     Returns:
         dict con: current, previous, delta, date, source
     """
+    import time
+    import random
+    
     url = "https://tradingeconomics.com/switzerland/services-pmi"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    }
-    
-    try:
-        # Prova con cloudscraper se disponibile (bypassa Cloudflare)
+    for attempt in range(3):  # Max 3 tentativi
         try:
-            import cloudscraper
-            scraper = cloudscraper.create_scraper()
-            response = scraper.get(url, timeout=20)
-        except ImportError:
-            # Fallback a requests normale
-            response = requests.get(url, headers=headers, timeout=20)
-        
-        if response.status_code != 200:
-            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
-        
-        html = response.text
-        
-        current_value = None
-        previous_value = None
-        
-        # ===== Pattern multipli per TradingEconomics =====
-        
-        # Pattern 1: id="p" (valore principale)
-        current_patterns = [
-            r'id="p"[^>]*>([0-9]+\.?[0-9]*)<',
-            r'"Last"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-            r'>\s*([0-9]{2}\.[0-9])\s*</span>\s*</div>\s*<div[^>]*>\s*<span[^>]*>Switzerland',
-            r'Switzerland Services PMI[^0-9]*([0-9]{2}\.[0-9])',
-        ]
-        
-        for pattern in current_patterns:
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                try:
-                    val = float(match.group(1))
-                    if 30 <= val <= 70:  # Range tipico PMI
-                        current_value = val
-                        break
-                except:
-                    pass
-        
-        # Pattern Previous
-        previous_patterns = [
-            r'Previous[:\s]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',
-            r'"Previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-            r'Previous\s*\n\s*([0-9]+\.?[0-9]*)',
-        ]
-        
-        for pattern in previous_patterns:
-            match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
-            if match:
-                try:
-                    val = float(match.group(1))
-                    if 30 <= val <= 70:
-                        previous_value = val
-                        break
-                except:
-                    pass
-        
-        # Fallback: cerca tutti i numeri PMI-like
-        if current_value is None or previous_value is None:
-            values = re.findall(r'>(\d{2}\.\d)<', html)
-            pmi_values = [float(v) for v in values if 35 <= float(v) <= 65]
-            if len(pmi_values) >= 2:
-                if current_value is None:
-                    current_value = pmi_values[0]
-                if previous_value is None:
-                    previous_value = pmi_values[1]
-        
-        delta = None
-        if current_value is not None and previous_value is not None:
-            delta = round(current_value - previous_value, 1)
-        
-        return {
-            "current": current_value,
-            "previous": previous_value,
-            "delta": delta,
-            "date": None,
-            "source": url,
-            "label": "Services PMI"
-        }
-        
-    except Exception as e:
-        return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+            headers = {
+                'User-Agent': f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(100, 120)}.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+            }
+            
+            # Prova con cloudscraper
+            try:
+                import cloudscraper
+                scraper = cloudscraper.create_scraper(
+                    browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+                )
+                response = scraper.get(url, timeout=25)
+            except ImportError:
+                response = requests.get(url, headers=headers, timeout=25)
+            
+            if response.status_code != 200:
+                if attempt < 2:
+                    time.sleep(2 + attempt * 2)
+                    continue
+                return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": f"HTTP {response.status_code}"}
+            
+            html = response.text
+            
+            current_value = None
+            previous_value = None
+            
+            # ===== Pattern per TradingEconomics =====
+            
+            # Pattern per Current (valore principale grande nella pagina)
+            current_patterns = [
+                r'id="p"[^>]*>([0-9]+\.?[0-9]*)<',  # id="p" è il valore principale
+                r'"Last"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON
+                r'Switzerland Services PMI[^0-9]*([0-9]{2}\.[0-9])',  # Titolo + valore
+                r'<span[^>]*class="[^"]*value[^"]*"[^>]*>([0-9]{2}\.[0-9])</span>',  # Span con classe value
+            ]
+            
+            for pattern in current_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    try:
+                        val = float(match.group(1))
+                        if 30 <= val <= 70:
+                            current_value = val
+                            break
+                    except:
+                        pass
+            
+            # Pattern per Previous
+            previous_patterns = [
+                r'Previous[:\s]*</td>\s*<td[^>]*>([0-9]+\.?[0-9]*)',  # Tabella
+                r'"Previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',  # JSON
+                r'Previous\s*\n+\s*([0-9]+\.?[0-9]*)',  # Newline
+                r'Previous\s+([0-9]+\.?[0-9]*)',  # Spazio
+                r'>Previous<[^>]*>[^0-9]*([0-9]{2}\.[0-9])',  # Tag Previous
+                r'Previous.*?([0-9]{2}\.[0-9])',  # Fallback generico
+            ]
+            
+            for pattern in previous_patterns:
+                match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+                if match:
+                    try:
+                        val = float(match.group(1))
+                        if 30 <= val <= 70:
+                            previous_value = val
+                            break
+                    except:
+                        pass
+            
+            # Fallback: cerca tutti i numeri PMI-like nella pagina
+            if current_value is None or previous_value is None:
+                # Cerca numeri nel range 40-60 (tipico PMI)
+                values = re.findall(r'>([0-9]{2}\.[0-9])<', html)
+                pmi_values = []
+                for v in values:
+                    try:
+                        val = float(v)
+                        if 35 <= val <= 65:
+                            pmi_values.append(val)
+                    except:
+                        pass
+                
+                # Rimuovi duplicati mantenendo l'ordine
+                seen = set()
+                unique_pmi = []
+                for v in pmi_values:
+                    if v not in seen:
+                        seen.add(v)
+                        unique_pmi.append(v)
+                
+                if len(unique_pmi) >= 1 and current_value is None:
+                    current_value = unique_pmi[0]
+                if len(unique_pmi) >= 2 and previous_value is None:
+                    previous_value = unique_pmi[1]
+            
+            delta = None
+            if current_value is not None and previous_value is not None:
+                delta = round(current_value - previous_value, 1)
+            
+            # Se abbiamo almeno current, restituiamo
+            if current_value is not None:
+                return {
+                    "current": current_value,
+                    "previous": previous_value,
+                    "delta": delta,
+                    "date": None,
+                    "source": url,
+                    "label": "Services PMI"
+                }
+            
+            # Retry
+            if attempt < 2:
+                time.sleep(2 + attempt * 2)
+                continue
+            
+            return {
+                "current": current_value,
+                "previous": previous_value,
+                "delta": delta,
+                "date": None,
+                "source": url,
+                "label": "Services PMI"
+            }
+            
+        except Exception as e:
+            if attempt < 2:
+                time.sleep(2 + attempt * 2)
+                continue
+            return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": str(e)}
+    
+    return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": "Max retries exceeded"}
 
 
 def fetch_all_pmi_data() -> dict:
@@ -1773,11 +1820,15 @@ def display_pmi_table(pmi_data: dict):
         # Calcola interpretazione
         trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
         
-        # Traccia dati mancanti
+        # Traccia dati mancanti (controlla sia current che previous)
         if manuf_current is None:
-            missing_data.append(f"{curr}-Manufacturing")
+            missing_data.append(f"{curr}-Manuf")
+        elif manuf_previous is None:
+            missing_data.append(f"{curr}-Manuf(Prev)")
         if services_current is None:
-            missing_data.append(f"{curr}-Services")
+            missing_data.append(f"{curr}-Serv")
+        elif services_previous is None:
+            missing_data.append(f"{curr}-Serv(Prev)")
         
         row = {
             "Valuta": curr,
