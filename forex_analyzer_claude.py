@@ -2115,7 +2115,9 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # ============================================================================
 
 def display_forex_prices(forex_prices: dict):
-    """Mostra la tabella dei prezzi forex recuperati in un expander"""
+    """Mostra la tabella dei prezzi forex recuperati"""
+    
+    st.markdown("### 💱 Prezzi Forex")
     
     if not forex_prices:
         st.warning("⚠️ Nessun dato prezzi disponibile")
@@ -2137,53 +2139,52 @@ def display_forex_prices(forex_prices: dict):
                     st.text(f"• {err}")
         return
     
-    # Header con fonte (sempre visibile)
+    # Header con fonte
     if "Yahoo" in source or "yfinance" in source:
-        st.success(f"✅ Prezzi Forex: **{source}** ({found}/{total})")
+        st.success(f"✅ Fonte: **{source}** ({found}/{total})")
     else:
-        st.warning(f"⚠️ Prezzi Forex: **{source}** ({found}/{total})")
+        st.warning(f"⚠️ Fonte: **{source}** ({found}/{total})")
     
-    # Warning se non real-time (sempre visibile)
+    # Warning se non real-time
     if warning:
         st.warning(warning)
     
-    # Tabella dentro expander (chiuso di default)
-    with st.expander("💱 Mostra/Nascondi Tabella Prezzi", expanded=False):
-        pairs_order = [
-            "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
-            "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
-            "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
-        ]
+    # Tabella prezzi (sempre visibile)
+    pairs_order = [
+        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
+    ]
+    
+    # Dividi in 3 colonne
+    col1, col2, col3 = st.columns(3)
+    
+    for idx, pair in enumerate(pairs_order):
+        price = prices.get(pair)
         
-        # Dividi in 3 colonne
-        col1, col2, col3 = st.columns(3)
-        
-        for idx, pair in enumerate(pairs_order):
-            price = prices.get(pair)
-            
-            if price is not None:
-                if "JPY" in pair:
-                    price_str = f"{price:.3f}"
-                else:
-                    price_str = f"{price:.5f}"
-                display_text = f"**{pair}**: {price_str} ✅"
+        if price is not None:
+            if "JPY" in pair:
+                price_str = f"{price:.3f}"
             else:
-                display_text = f"**{pair}**: N/A ❌"
-            
-            # Distribuisci nelle colonne
-            if idx < 7:
-                col1.markdown(display_text)
-            elif idx < 13:
-                col2.markdown(display_text)
-            else:
-                col3.markdown(display_text)
+                price_str = f"{price:.5f}"
+            display_text = f"**{pair}**: {price_str} ✅"
+        else:
+            display_text = f"**{pair}**: N/A ❌"
         
-        # Mostra errori se presenti
-        if forex_prices.get("errors"):
-            st.divider()
-            st.caption("⚠️ Alcuni errori durante il recupero:")
-            for err in forex_prices.get("errors", [])[:5]:
-                st.text(f"• {err}")
+        # Distribuisci nelle colonne
+        if idx < 7:
+            col1.markdown(display_text)
+        elif idx < 13:
+            col2.markdown(display_text)
+        else:
+            col3.markdown(display_text)
+    
+    # Mostra errori se presenti
+    if forex_prices.get("errors"):
+        st.divider()
+        st.caption("⚠️ Alcuni errori durante il recupero:")
+        for err in forex_prices.get("errors", [])[:5]:
+            st.text(f"• {err}")
 
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
