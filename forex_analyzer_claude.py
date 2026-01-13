@@ -2128,9 +2128,7 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # ============================================================================
 
 def display_forex_prices(forex_prices: dict):
-    """Mostra la tabella dei prezzi forex recuperati"""
-    
-    st.markdown("### 💱 Prezzi Forex in Tempo Reale")
+    """Mostra la tabella dei prezzi forex recuperati in un expander"""
     
     if not forex_prices:
         st.warning("⚠️ Nessun dato prezzi disponibile")
@@ -2152,54 +2150,52 @@ def display_forex_prices(forex_prices: dict):
                     st.text(f"• {err}")
         return
     
-    # Mostra fonte
-    if "Investing.com" in source:
-        st.success(f"✅ Prezzi recuperati da: **{source}** ({found}/{total})")
+    # Header con fonte (sempre visibile)
+    if "Yahoo" in source or "yfinance" in source:
+        st.success(f"✅ Prezzi Forex: **{source}** ({found}/{total})")
     else:
-        st.warning(f"⚠️ Prezzi da: **{source}** ({found}/{total})")
+        st.warning(f"⚠️ Prezzi Forex: **{source}** ({found}/{total})")
     
-    # Warning se non real-time
+    # Warning se non real-time (sempre visibile)
     if warning:
         st.warning(warning)
     
-    # Crea DataFrame per la tabella - diviso in 3 colonne per visualizzazione compatta
-    pairs_order = [
-        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
-        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
-        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
-    ]
-    
-    # Dividi in 3 colonne
-    col1, col2, col3 = st.columns(3)
-    
-    for idx, pair in enumerate(pairs_order):
-        price = prices.get(pair)
+    # Tabella dentro expander (chiuso di default)
+    with st.expander("💱 Mostra/Nascondi Tabella Prezzi", expanded=False):
+        pairs_order = [
+            "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+            "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+            "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
+        ]
         
-        if price is not None:
-            if "JPY" in pair:
-                price_str = f"{price:.3f}"
+        # Dividi in 3 colonne
+        col1, col2, col3 = st.columns(3)
+        
+        for idx, pair in enumerate(pairs_order):
+            price = prices.get(pair)
+            
+            if price is not None:
+                if "JPY" in pair:
+                    price_str = f"{price:.3f}"
+                else:
+                    price_str = f"{price:.5f}"
+                display_text = f"**{pair}**: {price_str} ✅"
             else:
-                price_str = f"{price:.5f}"
-            display_text = f"**{pair}**: {price_str} ✅"
-        else:
-            display_text = f"**{pair}**: N/A ❌"
+                display_text = f"**{pair}**: N/A ❌"
+            
+            # Distribuisci nelle colonne
+            if idx < 7:
+                col1.markdown(display_text)
+            elif idx < 13:
+                col2.markdown(display_text)
+            else:
+                col3.markdown(display_text)
         
-        # Distribuisci nelle colonne
-        if idx < 7:
-            col1.markdown(display_text)
-        elif idx < 13:
-            col2.markdown(display_text)
-        else:
-            col3.markdown(display_text)
-    
-    # Statistiche
-    prices_found = len([p for p in prices.values() if p is not None])
-    st.caption(f"📊 {prices_found}/{len(pairs_order)} prezzi recuperati")
-    
-    # Mostra errori se presenti
-    if forex_prices.get("errors"):
-        with st.expander("⚠️ Errori durante il recupero"):
-            for err in forex_prices.get("errors", []):
+        # Mostra errori se presenti
+        if forex_prices.get("errors"):
+            st.divider()
+            st.caption("⚠️ Alcuni errori durante il recupero:")
+            for err in forex_prices.get("errors", [])[:5]:
                 st.text(f"• {err}")
 
 
@@ -3116,8 +3112,8 @@ def main():
         
         opt_prices = st.checkbox(
             "💱 Recupera Prezzi Forex",
-            value=False,
-            help="Recupera prezzi attuali delle 19 coppie forex (GRATIS - TEST)"
+            value=True,
+            help="Recupera prezzi attuali delle 19 coppie forex da Yahoo Finance (GRATIS)"
         )
         
         opt_news = st.checkbox(
@@ -3499,7 +3495,7 @@ def main():
             display_pmi_table(pmi_data)
             st.markdown("---")
         
-        # Mostra tabella prezzi forex se disponibili
+        # 1️⃣ Mostra tabella prezzi forex se disponibili
         forex_prices = analysis.get("forex_prices", {})
         if not forex_prices and 'last_forex_prices' in st.session_state:
             forex_prices = st.session_state['last_forex_prices']
@@ -3508,13 +3504,14 @@ def main():
             display_forex_prices(forex_prices)
             st.markdown("---")
         
-        if claude_analysis:
-            display_analysis_matrix(claude_analysis)
-            st.markdown("---")
-        
-        # Notizie alla fine
+        # 2️⃣ Notizie e Calendario (subito dopo prezzi)
         if news_structured or links_structured:
             display_news_summary(news_structured, links_structured)
+            st.markdown("---")
+        
+        # 3️⃣ Analisi Claude (alla fine, dopo tutti i dati)
+        if claude_analysis:
+            display_analysis_matrix(claude_analysis)
     
     else:
         # Stato iniziale
