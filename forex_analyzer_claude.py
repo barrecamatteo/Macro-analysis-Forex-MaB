@@ -30,6 +30,268 @@ def get_italy_now():
 from macro_data_fetcher import MacroDataFetcher
 
 
+# ============================================================================
+# FUNZIONI PREZZI FOREX IN TEMPO REALE
+# ============================================================================
+
+def fetch_forex_prices() -> dict:
+    """
+    Recupera i prezzi forex in tempo reale da API gratuite.
+    Prova multiple fonti per massima affidabilità.
+    
+    Returns:
+        dict con prezzi per ogni coppia forex
+    """
+    prices = {}
+    
+    # Lista coppie da recuperare
+    pairs = [
+        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", 
+        "AUD/USD", "USD/CAD", "EUR/GBP", "EUR/JPY",
+        "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD",
+        "EUR/AUD", "GBP/AUD", "GBP/CAD"
+    ]
+    
+    # ===== TENTATIVO 1: Frankfurter.app (ECB data, gratuito) =====
+    try:
+        # Ottieni tassi base USD
+        resp_usd = requests.get(
+            "https://api.frankfurter.app/latest?from=USD",
+            timeout=10
+        )
+        
+        # Ottieni tassi base EUR
+        resp_eur = requests.get(
+            "https://api.frankfurter.app/latest?from=EUR",
+            timeout=10
+        )
+        
+        if resp_usd.status_code == 200 and resp_eur.status_code == 200:
+            rates_usd = resp_usd.json().get("rates", {})
+            rates_eur = resp_eur.json().get("rates", {})
+            
+            # Calcola i prezzi per ogni coppia
+            for pair in pairs:
+                base, quote = pair.split("/")
+                try:
+                    if base == "USD":
+                        # USD/XXX = tasso diretto
+                        if quote in rates_usd:
+                            prices[pair] = round(rates_usd[quote], 5 if quote != "JPY" else 3)
+                    elif quote == "USD":
+                        # XXX/USD = 1 / tasso
+                        if base in rates_usd:
+                            prices[pair] = round(1 / rates_usd[base], 5)
+                    elif base == "EUR":
+                        # EUR/XXX = tasso diretto da EUR
+                        if quote in rates_eur:
+                            prices[pair] = round(rates_eur[quote], 5 if quote != "JPY" else 3)
+                    else:
+                        # Cross rate: BASE/QUOTE = (USD/QUOTE) / (USD/BASE)
+                        if base in rates_usd and quote in rates_usd:
+                            prices[pair] = round(rates_usd[quote] / rates_usd[base], 5 if quote != "JPY" else 3)
+                except:
+                    pass
+            
+            if prices:
+                return {"prices": prices, "source": "Frankfurter.app (ECB)", "success": True}
+    except Exception as e:
+        pass
+    
+    # ===== TENTATIVO 2: ExchangeRate.host =====
+    try:
+        resp = requests.get(
+            "https://api.exchangerate.host/latest?base=USD",
+            timeout=10
+        )
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("success"):
+                rates = data.get("rates", {})
+                
+                for pair in pairs:
+                    base, quote = pair.split("/")
+                    try:
+                        if base == "USD" and quote in rates:
+                            prices[pair] = round(rates[quote], 5 if quote != "JPY" else 3)
+                        elif quote == "USD" and base in rates:
+                            prices[pair] = round(1 / rates[base], 5)
+                        elif base in rates and quote in rates:
+                            prices[pair] = round(rates[quote] / rates[base], 5 if quote != "JPY" else 3)
+                    except:
+                        pass
+                
+                if prices:
+                    return {"prices": prices, "source": "ExchangeRate.host", "success": True}
+    except:
+        pass
+    
+    # ===== TENTATIVO 3: Scraping Investing.com =====
+    try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+        
+        # Mappa URL per le coppie principali
+        investing_urls = {
+            "EUR/USD": "https://www.investing.com/currencies/eur-usd",
+            "GBP/USD": "https://www.investing.com/currencies/gbp-usd",
+            "USD/JPY": "https://www.investing.com/currencies/usd-jpy",
+            "USD/CHF": "https://www.investing.com/currencies/usd-chf",
+            "AUD/USD": "https://www.investing.com/currencies/aud-usd",
+            "USD/CAD": "https://www.investing.com/currencies/usd-cad",
+        }
+        
+        for pair, url in investing_urls.items():
+            try:
+                resp = scraper.get(url, timeout=15)
+                if resp.status_code == 200:
+                    html = resp.text
+                    # Pattern per prezzo
+                    patterns = [
+                        r'data-test="instrument-price-last"[^>]*>([0-9]+\.[0-9]+)<',
+                        r'"last_numeric":\s*([0-9]+\.[0-9]+)',
+                        r'"last":\s*"?([0-9]+\.[0-9]+)"?',
+                    ]
+                    for pattern in patterns:
+                        match = re.search(pattern, html)
+                        if match:
+                            prices[pair] = float(match.group(1))
+                            break
+                import time
+                time.sleep(0.5)  # Delay tra richieste
+            except:
+                pass
+        
+        if prices:
+            return {"prices": prices, "source": "Investing.com", "success": True}
+    except:
+        pass
+    
+    return {"prices": {}, "source": None, "success": False, "error": "Nessuna fonte disponibile"}
+
+
+# ============================================================================
+# FUNZIONE SCRAPING FOREX FACTORY NEWS
+# ============================================================================
+
+def fetch_forexfactory_news() -> dict:
+    """
+    Scrape le news più recenti da ForexFactory.com/news
+    
+    Returns:
+        dict con lista di news e metadati
+    """
+    url = "https://www.forexfactory.com/news"
+    
+    try:
+        import cloudscraper
+        import time
+        
+        scraper = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+        
+        headers = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.forexfactory.com/',
+        }
+        
+        response = scraper.get(url, headers=headers, timeout=25)
+        
+        if response.status_code != 200:
+            return {"news": [], "error": f"HTTP {response.status_code}", "success": False}
+        
+        html = response.text
+        news_items = []
+        
+        # ===== Pattern per estrarre le news =====
+        # ForexFactory ha una struttura con titoli e dettagli
+        
+        # Pattern 1: Cerca titoli delle news
+        title_patterns = [
+            r'<a[^>]*class="[^"]*flexposts__title[^"]*"[^>]*>([^<]+)</a>',
+            r'<span[^>]*class="[^"]*flexposts__title[^"]*"[^>]*>([^<]+)</span>',
+            r'class="[^"]*news[^"]*title[^"]*"[^>]*>([^<]+)<',
+            r'<a[^>]*href="/news/[^"]*"[^>]*>([^<]{20,})</a>',
+        ]
+        
+        # Pattern 2: Cerca blocchi news completi
+        news_block_pattern = r'<div[^>]*class="[^"]*flexposts__item[^"]*"[^>]*>(.*?)</div>\s*</div>'
+        
+        # Prova a estrarre blocchi
+        blocks = re.findall(news_block_pattern, html, re.DOTALL | re.IGNORECASE)
+        
+        if blocks:
+            for block in blocks[:20]:  # Max 20 news
+                # Estrai titolo
+                title_match = re.search(r'>([^<]{20,200})</a>', block)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    
+                    # Estrai link
+                    link_match = re.search(r'href="(/news/[^"]+)"', block)
+                    link = f"https://www.forexfactory.com{link_match.group(1)}" if link_match else ""
+                    
+                    # Estrai tempo
+                    time_match = re.search(r'(\d+\s*(min|hour|hr|day)s?\s*ago)', block, re.IGNORECASE)
+                    time_ago = time_match.group(1) if time_match else ""
+                    
+                    # Estrai valuta/impatto se presente
+                    currency_match = re.search(r'class="[^"]*currency[^"]*"[^>]*>([A-Z]{3})</span>', block)
+                    currency = currency_match.group(1) if currency_match else ""
+                    
+                    news_items.append({
+                        "title": title,
+                        "url": link,
+                        "time": time_ago,
+                        "currency": currency
+                    })
+        
+        # Fallback: estrai solo titoli
+        if not news_items:
+            for pattern in title_patterns:
+                matches = re.findall(pattern, html, re.IGNORECASE)
+                for title in matches[:15]:
+                    title = title.strip()
+                    if len(title) > 20 and title not in [n["title"] for n in news_items]:
+                        news_items.append({
+                            "title": title,
+                            "url": "",
+                            "time": "",
+                            "currency": ""
+                        })
+        
+        # Ultimo fallback: cerca qualsiasi link a /news/
+        if not news_items:
+            links = re.findall(r'href="(/news/\d+[^"]*)"[^>]*>([^<]+)</a>', html)
+            for link, title in links[:15]:
+                title = title.strip()
+                if len(title) > 15:
+                    news_items.append({
+                        "title": title,
+                        "url": f"https://www.forexfactory.com{link}",
+                        "time": "",
+                        "currency": ""
+                    })
+        
+        return {
+            "news": news_items,
+            "count": len(news_items),
+            "source": "ForexFactory.com",
+            "success": len(news_items) > 0
+        }
+        
+    except ImportError:
+        return {"news": [], "error": "cloudscraper non installato", "success": False}
+    except Exception as e:
+        return {"news": [], "error": str(e), "success": False}
+
+
 # --- CONFIGURAZIONE PAGINA ---
 st.set_page_config(
     page_title="Forex Macro Analyst - Claude AI",
@@ -943,16 +1205,22 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ---
 
 ### 3️⃣ INFLAZIONE [-1 a +1]
-**Logica:** Non conta solo il livello, ma quanto l'inflazione SUPPORTA la politica monetaria.
+**Logica FOREX:** L'inflazione influenza la POLITICA MONETARIA. Per la VALUTA:
+- Inflazione ALTA → BC non può tagliare i tassi → tassi restano ALTI → VALUTA FORTE
+- Inflazione BASSA → BC può tagliare i tassi → tassi scendono → VALUTA DEBOLE
 
-| Scenario | Score |
-|----------|-------|
-| Inflazione 1.5%-2.5% + trend stabile/discesa | +1 (situazione ideale) |
-| Inflazione 2.5%-3.5% + trend incerto | 0 (gestibile) |
-| Inflazione >3.5% + trend in salita | -1 (BC sotto pressione) |
-| Inflazione <1.5% + trend in discesa | -1 (rischio deflazione) |
+⚠️ ATTENZIONE: Questo è l'opposto della logica economica tradizionale!
 
-**Confronto DIRETTO:** Chi ha situazione inflattiva più favorevole per la propria BC?
+| Scenario | Score | Motivo |
+|----------|-------|--------|
+| Inflazione > 3% | +1 | Pressione HAWKISH - BC non può tagliare, valuta forte |
+| Inflazione 2% - 3% | 0 | Al TARGET - BC ha flessibilità, neutro |
+| Inflazione < 2% | -1 | Pressione DOVISH - BC può/deve tagliare, valuta debole |
+
+**Confronto DIRETTO:** 
+- Chi ha inflazione PIÙ ALTA ha vantaggio (pressione per tassi alti)
+- Differenziale >1% = vantaggio significativo
+- Considerare anche le aspettative future dalle news
 
 ---
 
@@ -1503,7 +1771,7 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -1513,6 +1781,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         news_text: Testo delle notizie web (opzionale)
         additional_text: Testo delle risorse aggiuntive (opzionale)
         pmi_data: Dati PMI per valuta (opzionale)
+        forex_prices: Prezzi forex in tempo reale (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -1564,6 +1833,21 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
+    # Sezione prezzi forex (se presente)
+    prices_section = ""
+    if forex_prices and forex_prices.get("success") and forex_prices.get("prices"):
+        prices = forex_prices["prices"]
+        source = forex_prices.get("source", "API")
+        prices_lines = [f"**{pair}:** {price}" for pair, price in prices.items()]
+        prices_section = f"""
+## 💱 PREZZI FOREX ATTUALI (fonte: {source}):
+{chr(10).join(prices_lines)}
+
+⚠️ USA QUESTI PREZZI REALI per le proiezioni "current_price" e "price_scenarios" nel JSON.
+
+---
+"""
+    
     # Sezione notizie (se presente)
     news_section = ""
     if news_text:
@@ -1597,6 +1881,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 {macro_section}
 {pmi_section}
+{prices_section}
 {news_section}
 {additional_section}
 
@@ -1610,6 +1895,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 6. **events_calendar** = []
 7. Ogni **summary** deve spiegare PERCHÉ quel bias
 8. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
+9. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -1765,12 +2051,105 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # FUNZIONI VISUALIZZAZIONE
 # ============================================================================
 
+def display_forex_prices(forex_prices: dict):
+    """Mostra la tabella dei prezzi forex recuperati"""
+    
+    st.markdown("### 💱 Prezzi Forex in Tempo Reale")
+    
+    if not forex_prices:
+        st.warning("⚠️ Nessun dato prezzi disponibile")
+        return
+    
+    success = forex_prices.get("success", False)
+    source = forex_prices.get("source", "N/A")
+    prices = forex_prices.get("prices", {})
+    error = forex_prices.get("error", "")
+    
+    if not success or not prices:
+        st.error(f"❌ Recupero prezzi fallito: {error}")
+        return
+    
+    st.success(f"✅ Prezzi recuperati da: **{source}**")
+    
+    # Crea DataFrame per la tabella
+    data_rows = []
+    
+    # Lista coppie nell'ordine desiderato
+    pairs_order = [
+        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
+    ]
+    
+    for pair in pairs_order:
+        price = prices.get(pair)
+        if price is not None:
+            # Determina il formato in base alla coppia
+            if "JPY" in pair:
+                price_str = f"{price:.3f}"
+            else:
+                price_str = f"{price:.5f}"
+            
+            data_rows.append({
+                "Coppia": pair,
+                "Prezzo": price_str,
+                "Status": "✅"
+            })
+        else:
+            data_rows.append({
+                "Coppia": pair,
+                "Prezzo": "N/A",
+                "Status": "❌"
+            })
+    
+    df = pd.DataFrame(data_rows)
+    
+    # Mostra tabella con colori
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Coppia": st.column_config.TextColumn("Coppia", width="small"),
+            "Prezzo": st.column_config.TextColumn("Prezzo", width="medium"),
+            "Status": st.column_config.TextColumn("", width="small")
+        }
+    )
+    
+    # Statistiche
+    prices_found = len([p for p in prices.values() if p is not None])
+    st.caption(f"📊 {prices_found}/{len(pairs_order)} prezzi recuperati")
+
+
 def display_news_summary(news_structured: dict, links_structured: list = None):
     """Mostra il riepilogo delle notizie trovate con link"""
     
     st.markdown("### 📰 Notizie Web")
     
-    # Forex Factory
+    # ForexFactory News DIRETTE (scraping diretto)
+    if news_structured.get("forexfactory_direct"):
+        with st.expander(f"🔴 FOREX FACTORY NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
+            for item in news_structured["forexfactory_direct"][:12]:
+                title = item.get('title', '')
+                url = item.get('url', '')
+                time_ago = item.get('time', '')
+                currency = item.get('currency', '')
+                
+                # Formatta la riga
+                line = f"• **{title[:80]}**"
+                if currency:
+                    line += f" `{currency}`"
+                if time_ago:
+                    line += f" - _{time_ago}_"
+                
+                if url:
+                    st.markdown(f"[{line}]({url})")
+                else:
+                    st.markdown(line)
+            
+            st.caption("🔗 [Vai a ForexFactory News](https://www.forexfactory.com/news)")
+    
+    # Forex Factory (da DuckDuckGo search)
     if news_structured.get("forex_factory"):
         with st.expander(f"🔴 FOREX FACTORY ({len(news_structured['forex_factory'])} news)", expanded=True):
             for item in news_structured["forex_factory"][:8]:
@@ -2653,6 +3032,12 @@ def main():
             help="Recupera PMI Manufacturing e Services da Investing.com (GRATIS)"
         )
         
+        opt_prices = st.checkbox(
+            "💱 Recupera Prezzi Forex",
+            value=False,
+            help="Recupera prezzi attuali delle 19 coppie forex (GRATIS - TEST)"
+        )
+        
         opt_news = st.checkbox(
             "📰 Ricerca Notizie Web",
             value=True,
@@ -2698,7 +3083,7 @@ def main():
         st.markdown("---")
         
         # ===== BOTTONE ANALISI =====
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_news or opt_links)
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_prices or opt_news or opt_links)
         
         analyze_btn = st.button(
             "🚀 AVVIA ANALISI",
@@ -2809,13 +3194,14 @@ def main():
         options_selected = {
             "macro": opt_macro,
             "pmi": opt_pmi,
+            "prices": opt_prices,
             "news": opt_news,
             "links": opt_links,
             "claude": opt_claude
         }
         
         step = 0
-        total_steps = sum([opt_macro, opt_pmi, opt_news, opt_links, opt_claude])
+        total_steps = sum([opt_macro, opt_pmi, opt_prices, opt_news, opt_links, opt_claude])
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
@@ -2858,11 +3244,41 @@ def main():
             if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
                 pmi_data = st.session_state['last_pmi_data']
         
+        # FASE 2.5: Prezzi Forex
+        forex_prices = {}
+        if opt_prices:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="💱 Recupero prezzi forex...")
+            forex_prices = fetch_forex_prices()
+            st.session_state['last_forex_prices'] = forex_prices
+        else:
+            # Usa prezzi dalla sessione se disponibili
+            if 'last_forex_prices' in st.session_state:
+                forex_prices = st.session_state['last_forex_prices']
+        
         # FASE 3: Notizie Web
         if opt_news:
             step += 1
             progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
             news_text, news_structured = search_web_news()
+            
+            # Aggiungi news dirette da ForexFactory
+            progress.progress(int(step/total_steps*80), text="📰 Recupero ForexFactory news...")
+            ff_news = fetch_forexfactory_news()
+            if ff_news.get("success") and ff_news.get("news"):
+                # Aggiungi alle news structured
+                news_structured["forexfactory_direct"] = ff_news["news"]
+                # Aggiungi al testo per Claude
+                ff_text = "\n\n=== FOREX FACTORY NEWS (ULTIME) ===\n"
+                for item in ff_news["news"][:15]:
+                    ff_text += f"• {item['title']}"
+                    if item.get('currency'):
+                        ff_text += f" [{item['currency']}]"
+                    if item.get('time'):
+                        ff_text += f" ({item['time']})"
+                    ff_text += "\n"
+                news_text += ff_text
+            
             st.session_state['last_news_text'] = news_text
             st.session_state['last_news_structured'] = news_structured
         
@@ -2888,12 +3304,16 @@ def main():
             if not opt_pmi and 'last_pmi_data' in st.session_state:
                 pmi_data = st.session_state['last_pmi_data']
             
+            # Recupera prezzi forex dalla sessione
+            forex_prices = st.session_state.get('last_forex_prices', {})
+            
             claude_analysis = analyze_with_claude(
                 ANTHROPIC_API_KEY,
                 macro_data,
                 news_text,
                 additional_text,
-                pmi_data
+                pmi_data,
+                forex_prices
             )
         
         # ===== SALVATAGGIO =====
@@ -2902,6 +3322,7 @@ def main():
         analysis_result = {
             "macro_data": macro_data,
             "pmi_data": pmi_data,
+            "forex_prices": forex_prices,
             "news_structured": news_structured,
             "links_structured": links_structured,
             "claude_analysis": claude_analysis,
@@ -2996,6 +3417,15 @@ def main():
             display_pmi_table(pmi_data)
             st.markdown("---")
         
+        # Mostra tabella prezzi forex se disponibili
+        forex_prices = analysis.get("forex_prices", {})
+        if not forex_prices and 'last_forex_prices' in st.session_state:
+            forex_prices = st.session_state['last_forex_prices']
+        
+        if forex_prices and forex_prices.get("prices"):
+            display_forex_prices(forex_prices)
+            st.markdown("---")
+        
         if claude_analysis:
             display_analysis_matrix(claude_analysis)
             st.markdown("---")
@@ -3014,6 +3444,7 @@ def main():
         **Opzioni disponibili:**
         - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
         - 📈 **Dati PMI** - Manufacturing & Services PMI (gratis)
+        - 💱 **Prezzi Forex** - Prezzi attuali delle 19 coppie (gratis)
         - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
         - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
         - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
