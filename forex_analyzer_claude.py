@@ -1200,94 +1200,177 @@ def fetch_rate_outlook_rateprobability(currency: str) -> dict:
     }
     
     if currency not in currency_map:
-        return None
+        return {"error": "Currency not supported", "source": "rateprobability.com"}
     
     url = f"https://rateprobability.com/{currency_map[currency]}"
     
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
         }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
+        text_content = soup.get_text(separator=' ')
         
-        # Find the probability table
-        table = soup.find('table')
-        if not table:
-            return {"error": "No table found", "source": "rateprobability.com"}
-        
-        rows = table.find_all('tr')
-        if len(rows) < 2:
-            return {"error": "No data rows", "source": "rateprobability.com"}
-        
-        # Get first upcoming meeting (first data row)
-        first_meeting = None
-        implied_rate = None
-        prob_value = None
-        delta_bps = None
-        
-        for row in rows[1:3]:  # Check first 2 data rows
-            cells = row.find_all('td')
-            if len(cells) >= 4:
-                meeting_text = cells[0].get_text(strip=True)
-                if meeting_text and any(m in meeting_text for m in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
-                    first_meeting = meeting_text
-                    
-                    # Get implied rate
-                    implied_text = cells[1].get_text(strip=True)
-                    rate_match = re.search(r'(\d+\.?\d*)%', implied_text)
-                    if rate_match:
-                        implied_rate = rate_match.group(1) + "%"
-                    
-                    # Get probability
-                    prob_text = cells[2].get_text(strip=True)
-                    prob_match = re.search(r'(\d+\.?\d*)%?', prob_text)
-                    if prob_match:
-                        prob_value = float(prob_match.group(1))
-                    
-                    # Get delta (last column)
-                    if len(cells) >= 5:
-                        delta_text = cells[-1].get_text(strip=True)
-                        delta_match = re.search(r'(-?\d+\.?\d*)', delta_text)
-                        if delta_match:
-                            delta_bps = float(delta_match.group(1))
-                    break
-        
-        # Determine expectation based on delta
+        # Initialize defaults
+        next_meeting = None
         expectation = "HOLD"
         prob_hike = None
         prob_cut = None
-        
-        if delta_bps is not None:
-            if delta_bps > 10:
-                expectation = "HIKE"
-                prob_hike = prob_value
-            elif delta_bps < -10:
-                expectation = "CUT"
-                prob_cut = prob_value
-        
-        # Determine stance
+        implied_rate = None
         stance = "Neutral"
-        if expectation == "CUT":
+        
+        # Method 1: Find table
+        tables = soup.find_all('table')
+        for table in tables:
+            rows = table.find_all('tr')
+            for row in rows[1:4]:  # Check first few data rows
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 3:
+                    cell_texts = [c.get_text(strip=True) for c in cells]
+                    
+                    # Look for date pattern in first cell
+                    date_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{1,2}[,\s]+\d{4}', cell_texts[0], re.IGNORECASE)
+                    if date_match:
+                        next_meeting = date_match.group(0)
+                        
+                        # Look for percentages in other cells
+                        for cell_text in cell_texts[1:]:
+                            pct_match = re.search(r'(\d+\.?\d*)\s*%', cell_text)
+                            if pct_match:
+                                pct_val = float(pct_match.group(1))
+                                if 'cut' in cell_text.lower():
+                                    prob_cut = pct_val
+                                elif 'hike' in cell_text.lower() or 'raise' in cell_text.lower():
+                                    prob_hike = pct_val
+                                elif implied_rate is None and pct_val < 20:  # Likely a rate
+                                    implied_rate = f"{pct_val}%"
+                        break
+            if next_meeting:
+                break
+        
+        # Method 2: Search in text for patterns
+        if not next_meeting:
+            meeting_patterns = [
+                r'(?:next\s+)?meeting[:\s]+(\w+\s+\d{1,2},?\s*\d{4})',
+                r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]+\d{4}',
+            ]
+            for pattern in meeting_patterns:
+                match = re.search(pattern, text_content, re.IGNORECASE)
+                if match:
+                    next_meeting = match.group(1) if match.lastindex else match.group(0)
+                    break
+        
+        # Search for probabilities in text
+        if prob_cut is None:
+            cut_patterns = [
+                r'(\d+\.?\d*)\s*%\s*(?:probability\s+)?(?:of\s+)?(?:a\s+)?cut',
+                r'cut[:\s]+(\d+\.?\d*)\s*%',
+                r'prob.*cut[:\s]+(\d+\.?\d*)',
+            ]
+            for pattern in cut_patterns:
+                match = re.search(pattern, text_content, re.IGNORECASE)
+                if match:
+                    prob_cut = float(match.group(1))
+                    break
+        
+        if prob_hike is None:
+            hike_patterns = [
+                r'(\d+\.?\d*)\s*%\s*(?:probability\s+)?(?:of\s+)?(?:a\s+)?hike',
+                r'hike[:\s]+(\d+\.?\d*)\s*%',
+                r'prob.*hike[:\s]+(\d+\.?\d*)',
+            ]
+            for pattern in hike_patterns:
+                match = re.search(pattern, text_content, re.IGNORECASE)
+                if match:
+                    prob_hike = float(match.group(1))
+                    break
+        
+        # Determine expectation and stance
+        if prob_cut and prob_cut > 50:
+            expectation = "CUT"
             stance = "Dovish"
-        elif expectation == "HIKE":
+        elif prob_hike and prob_hike > 50:
+            expectation = "HIKE"
+            stance = "Hawkish"
+        elif prob_cut and prob_cut > 30:
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 30:
             stance = "Hawkish"
         
         return {
-            "next_meeting": first_meeting,
+            "next_meeting": next_meeting or "N/A",
             "expectation": expectation,
             "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
             "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
             "implied_rate": implied_rate,
             "stance": stance,
             "source": "rateprobability.com",
-            "data_quality": "⭐⭐⭐⭐⭐"
+            "data_quality": "⭐⭐⭐⭐⭐" if (prob_cut or prob_hike) else "⭐⭐⭐"
         }
         
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Connection failed: {str(e)[:50]}", "source": "rateprobability.com"}
     except Exception as e:
-        return {"error": str(e)[:100], "source": "rateprobability.com"}
+        return {"error": f"Parsing error: {str(e)[:50]}", "source": "rateprobability.com"}
+
+
+def fetch_rate_outlook_cme_fedwatch() -> dict:
+    """
+    Alternative: Try to get Fed rate outlook from CME FedWatch via web search
+    """
+    try:
+        # Use DuckDuckGo to find current Fed rate expectations
+        results = DDGS().text("CME FedWatch Fed rate probability next meeting 2026", max_results=5)
+        
+        prob_cut = None
+        prob_hike = None
+        next_meeting = None
+        
+        for r in results:
+            text = r.get('body', '') + ' ' + r.get('title', '')
+            
+            # Look for probability patterns
+            cut_match = re.search(r'(\d+\.?\d*)\s*%.*?(?:cut|reduction|lower)', text, re.IGNORECASE)
+            if cut_match and prob_cut is None:
+                prob_cut = float(cut_match.group(1))
+            
+            hike_match = re.search(r'(\d+\.?\d*)\s*%.*?(?:hike|raise|increase)', text, re.IGNORECASE)
+            if hike_match and prob_hike is None:
+                prob_hike = float(hike_match.group(1))
+            
+            # Look for meeting date
+            meeting_match = re.search(r'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]*\d{4}', text, re.IGNORECASE)
+            if meeting_match and next_meeting is None:
+                next_meeting = meeting_match.group(0)
+        
+        expectation = "HOLD"
+        stance = "Neutral"
+        
+        if prob_cut and prob_cut > 50:
+            expectation = "CUT"
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 50:
+            expectation = "HIKE"
+            stance = "Hawkish"
+        
+        if prob_cut or prob_hike or next_meeting:
+            return {
+                "next_meeting": next_meeting or "N/A",
+                "expectation": expectation,
+                "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
+                "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
+                "stance": stance,
+                "source": "CME FedWatch (via search)",
+                "data_quality": "⭐⭐⭐⭐"
+            }
+        return None
+    except:
+        return None
 
 
 def fetch_rate_outlook_asx_rba() -> dict:
@@ -1297,44 +1380,82 @@ def fetch_rate_outlook_asx_rba() -> dict:
     url = "https://www.asx.com.au/markets/trade-our-derivatives-market/futures-market/rba-rate-tracker"
     
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text()
+        text = soup.get_text(separator=' ')
         
-        # Try to find next meeting date
-        meeting_match = re.search(r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})', text, re.IGNORECASE)
-        next_meeting = meeting_match.group(1) if meeting_match else "N/A"
+        # Try multiple date patterns
+        next_meeting = None
+        date_patterns = [
+            r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
+            r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]+\d{4})',
+            r'RBA.*?(\d{1,2}/\d{1,2}/\d{4})',
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                next_meeting = match.group(1)
+                break
         
-        # Default values
-        expectation = "HOLD"
+        # Look for probabilities
         prob_cut = None
         prob_hike = None
+        
+        # Pattern: "XX% chance of cut" or "cut: XX%"
+        cut_patterns = [
+            r'(\d+\.?\d*)\s*%\s*(?:chance\s+of\s+)?(?:a\s+)?cut',
+            r'cut[:\s]+(\d+\.?\d*)\s*%',
+            r'easing[:\s]+(\d+\.?\d*)\s*%',
+        ]
+        for pattern in cut_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                prob_cut = float(match.group(1))
+                break
+        
+        hike_patterns = [
+            r'(\d+\.?\d*)\s*%\s*(?:chance\s+of\s+)?(?:a\s+)?hike',
+            r'hike[:\s]+(\d+\.?\d*)\s*%',
+            r'tightening[:\s]+(\d+\.?\d*)\s*%',
+        ]
+        for pattern in hike_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                prob_hike = float(match.group(1))
+                break
+        
+        expectation = "HOLD"
         stance = "Neutral"
         
-        # Check for cut/hike in text
-        text_lower = text.lower()
-        if 'cut' in text_lower:
-            cut_match = re.search(r'(\d{1,2}(?:\.\d+)?)\s*%.*?cut', text, re.IGNORECASE)
-            if cut_match:
-                prob_cut = float(cut_match.group(1))
-                if prob_cut > 50:
-                    expectation = "CUT"
-                    stance = "Dovish"
+        if prob_cut and prob_cut > 50:
+            expectation = "CUT"
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 50:
+            expectation = "HIKE"
+            stance = "Hawkish"
+        elif prob_cut and prob_cut > 30:
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 30:
+            stance = "Hawkish"
         
         return {
-            "next_meeting": next_meeting,
+            "next_meeting": next_meeting or "N/A",
             "expectation": expectation,
             "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
             "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
             "stance": stance,
             "source": "ASX RBA Tracker",
-            "data_quality": "⭐⭐⭐⭐⭐"
+            "data_quality": "⭐⭐⭐⭐⭐" if (prob_cut or prob_hike) else "⭐⭐⭐"
         }
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Connection failed: {str(e)[:50]}", "source": "ASX RBA Tracker"}
     except Exception as e:
-        return {"error": str(e)[:100], "source": "ASX RBA Tracker"}
+        return {"error": f"Parsing error: {str(e)[:50]}", "source": "ASX RBA Tracker"}
 
 
 def fetch_rate_outlook_boc_odds() -> dict:
@@ -1344,43 +1465,154 @@ def fetch_rate_outlook_boc_odds() -> dict:
     url = "https://www.bankofcanadaodds.com/"
     
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        text = soup.get_text()
+        text = soup.get_text(separator=' ')
         
-        # Try to find next meeting date
-        meeting_match = re.search(r'(\w+\s+\d{1,2},?\s*\d{4})', text)
-        next_meeting = meeting_match.group(1) if meeting_match else "N/A"
+        # Find next meeting date
+        next_meeting = None
+        date_patterns = [
+            r'(?:next\s+)?(?:meeting|announcement)[:\s]+(\w+\s+\d{1,2}[,\s]+\d{4})',
+            r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]+\d{4})',
+        ]
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                next_meeting = match.group(1)
+                break
         
-        expectation = "HOLD"
+        # Look for probabilities
         prob_cut = None
         prob_hike = None
+        
+        cut_patterns = [
+            r'(\d+\.?\d*)\s*%\s*(?:probability\s+)?(?:of\s+)?(?:a\s+)?cut',
+            r'cut[:\s]+(\d+\.?\d*)\s*%',
+        ]
+        for pattern in cut_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                prob_cut = float(match.group(1))
+                break
+        
+        hike_patterns = [
+            r'(\d+\.?\d*)\s*%\s*(?:probability\s+)?(?:of\s+)?(?:a\s+)?hike',
+            r'hike[:\s]+(\d+\.?\d*)\s*%',
+        ]
+        for pattern in hike_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                prob_hike = float(match.group(1))
+                break
+        
+        expectation = "HOLD"
         stance = "Neutral"
         
-        # Check for probabilities in text
-        text_lower = text.lower()
-        if 'cut' in text_lower:
-            prob_match = re.search(r'(\d{1,3}(?:\.\d+)?)\s*%', text)
-            if prob_match:
-                prob_cut = float(prob_match.group(1))
-                if prob_cut > 50:
-                    expectation = "CUT"
-                    stance = "Dovish"
+        if prob_cut and prob_cut > 50:
+            expectation = "CUT"
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 50:
+            expectation = "HIKE"
+            stance = "Hawkish"
+        elif prob_cut and prob_cut > 30:
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 30:
+            stance = "Hawkish"
         
         return {
-            "next_meeting": next_meeting,
+            "next_meeting": next_meeting or "N/A",
             "expectation": expectation,
             "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
             "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
             "stance": stance,
             "source": "BankOfCanadaOdds",
-            "data_quality": "⭐⭐⭐⭐⭐"
+            "data_quality": "⭐⭐⭐⭐⭐" if (prob_cut or prob_hike) else "⭐⭐⭐"
         }
+    except requests.exceptions.RequestException as e:
+        return {"error": f"Connection failed: {str(e)[:50]}", "source": "BankOfCanadaOdds"}
     except Exception as e:
-        return {"error": str(e)[:100], "source": "BankOfCanadaOdds"}
+        return {"error": f"Parsing error: {str(e)[:50]}", "source": "BankOfCanadaOdds"}
+
+
+def fetch_rate_outlook_via_search(currency: str) -> dict:
+    """
+    Fallback: Use DuckDuckGo search to find rate expectations
+    """
+    cb_names = {
+        "USD": "Federal Reserve Fed FOMC",
+        "EUR": "ECB European Central Bank",
+        "GBP": "Bank of England BoE",
+        "JPY": "Bank of Japan BoJ",
+        "AUD": "RBA Reserve Bank Australia",
+        "CAD": "Bank of Canada BoC",
+        "CHF": "SNB Swiss National Bank",
+    }
+    
+    try:
+        query = f"{cb_names.get(currency, currency)} interest rate decision probability 2026"
+        results = DDGS().text(query, max_results=5)
+        
+        prob_cut = None
+        prob_hike = None
+        next_meeting = None
+        
+        for r in results:
+            text = r.get('body', '') + ' ' + r.get('title', '')
+            
+            # Look for cut probability
+            if prob_cut is None:
+                cut_match = re.search(r'(\d+\.?\d*)\s*%.*?(?:cut|reduction|lower|dovish)', text, re.IGNORECASE)
+                if cut_match:
+                    val = float(cut_match.group(1))
+                    if val <= 100:
+                        prob_cut = val
+            
+            # Look for hike probability
+            if prob_hike is None:
+                hike_match = re.search(r'(\d+\.?\d*)\s*%.*?(?:hike|raise|increase|hawkish)', text, re.IGNORECASE)
+                if hike_match:
+                    val = float(hike_match.group(1))
+                    if val <= 100:
+                        prob_hike = val
+            
+            # Look for meeting date
+            if next_meeting is None:
+                date_match = re.search(r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}[,\s]*(?:20)?\d{2})', text, re.IGNORECASE)
+                if date_match:
+                    next_meeting = date_match.group(1)
+        
+        expectation = "HOLD"
+        stance = "Neutral"
+        
+        if prob_cut and prob_cut > 50:
+            expectation = "CUT"
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 50:
+            expectation = "HIKE"
+            stance = "Hawkish"
+        elif prob_cut and prob_cut > 30:
+            stance = "Dovish"
+        elif prob_hike and prob_hike > 30:
+            stance = "Hawkish"
+        
+        if prob_cut or prob_hike or next_meeting:
+            return {
+                "next_meeting": next_meeting or "N/A",
+                "expectation": expectation,
+                "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
+                "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
+                "stance": stance,
+                "source": "Web Search",
+                "data_quality": "⭐⭐⭐"
+            }
+        return None
+    except:
+        return None
 
 
 def fetch_rate_outlook_chf_qualitative() -> dict:
@@ -1389,14 +1621,21 @@ def fetch_rate_outlook_chf_qualitative() -> dict:
     # SNB has 4 quarterly meetings: March, June, September, December
     now = datetime.now()
     snb_months = [(3, "Mar"), (6, "Jun"), (9, "Sep"), (12, "Dec")]
-    next_meeting = "N/A"
+    next_meeting = None
     
     for month_num, month_name in snb_months:
-        if now.month < month_num or (now.month == month_num and now.day < 15):
+        if now.month < month_num or (now.month == month_num and now.day < 20):
             next_meeting = f"{month_name} {now.year}"
             break
-    else:
+    
+    if not next_meeting:
         next_meeting = f"Mar {now.year + 1}"
+    
+    # Try to get info from web search
+    search_result = fetch_rate_outlook_via_search("CHF")
+    if search_result:
+        search_result["source"] = "SNB (via search)"
+        return search_result
     
     return {
         "next_meeting": next_meeting,
@@ -1404,36 +1643,63 @@ def fetch_rate_outlook_chf_qualitative() -> dict:
         "prob_hike": None,
         "prob_cut": None,
         "stance": "Neutral",
-        "qualitative_note": "No market-implied tool - analyst consensus",
-        "source": "Analyst Consensus",
-        "data_quality": "⭐⭐⭐"
+        "qualitative_note": "No market-implied data - using calendar",
+        "source": "SNB Calendar",
+        "data_quality": "⭐⭐"
     }
 
 
 def fetch_all_rate_outlooks(macro_data: dict = None) -> dict:
-    """Fetch rate outlook data for all 7 currencies."""
+    """Fetch rate outlook data for all 7 currencies with fallbacks."""
     rate_outlooks = {}
     
-    currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF"]
+    currencies_config = {
+        "USD": [fetch_rate_outlook_rateprobability, lambda: fetch_rate_outlook_via_search("USD")],
+        "EUR": [fetch_rate_outlook_rateprobability, lambda: fetch_rate_outlook_via_search("EUR")],
+        "GBP": [fetch_rate_outlook_rateprobability, lambda: fetch_rate_outlook_via_search("GBP")],
+        "JPY": [fetch_rate_outlook_rateprobability, lambda: fetch_rate_outlook_via_search("JPY")],
+        "AUD": [fetch_rate_outlook_asx_rba, lambda: fetch_rate_outlook_via_search("AUD")],
+        "CAD": [fetch_rate_outlook_boc_odds, lambda: fetch_rate_outlook_via_search("CAD")],
+        "CHF": [fetch_rate_outlook_chf_qualitative],
+    }
     
-    for currency in currencies:
-        # Get current rate from macro_data if available
-        current_rate = None
+    for currency, fetch_functions in currencies_config.items():
+        outlook = None
+        
+        # Try each fetch function in order
+        for fetch_func in fetch_functions:
+            try:
+                if fetch_func.__name__ == 'fetch_rate_outlook_rateprobability':
+                    result = fetch_func(currency)
+                else:
+                    result = fetch_func()
+                
+                # Check if result is valid (no error and has some data)
+                if result and "error" not in result:
+                    outlook = result
+                    break
+                elif result and "error" in result:
+                    # Keep trying other methods
+                    continue
+            except Exception:
+                continue
+        
+        # If all methods failed, create default
+        if not outlook:
+            outlook = {
+                "next_meeting": "N/A",
+                "expectation": "HOLD",
+                "prob_hike": None,
+                "prob_cut": None,
+                "stance": "Neutral",
+                "source": "Unavailable",
+                "data_quality": "⭐",
+                "error": "All sources failed"
+            }
+        
+        # Add current rate from macro_data if available
         if macro_data and currency in macro_data:
             current_rate = macro_data[currency].get('interest_rate', 'N/A')
-        
-        if currency in ["USD", "EUR", "GBP", "JPY"]:
-            outlook = fetch_rate_outlook_rateprobability(currency)
-        elif currency == "AUD":
-            outlook = fetch_rate_outlook_asx_rba()
-        elif currency == "CAD":
-            outlook = fetch_rate_outlook_boc_odds()
-        elif currency == "CHF":
-            outlook = fetch_rate_outlook_chf_qualitative()
-        else:
-            outlook = {"error": "No source available"}
-        
-        if outlook and current_rate:
             outlook["current_rate"] = current_rate
         
         rate_outlooks[currency] = outlook
@@ -1748,16 +2014,6 @@ ESEMPIO SBAGLIATO:
                     "motivation_quote": "Deficit USA elevato ma nessun impatto immediato su mercati. Situazione gestibile."
                 }
             }
-        }
-    },
-    "rate_outlook": {
-        "USD": {
-            "current_rate": "X.XX%",
-            "next_meeting": "YYYY-MM-DD",
-            "expectation": "hold/cut/hike",
-            "probability": "XX%",
-            "stance": "hawkish/dovish/neutral",
-            "notes": "Spiegazione basata sulle notizie web"
         }
     },
     "risk_sentiment": "risk-on/risk-off/neutral",
@@ -3440,7 +3696,7 @@ def main():
         
         opt_prices = st.checkbox(
             "💱 Recupera Prezzi Forex",
-            value=False,
+            value=True,
             help="Recupera prezzi attuali delle 19 coppie forex da Yahoo Finance (GRATIS)"
         )
         
