@@ -1182,6 +1182,326 @@ def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
 
 
 # ============================================================================
+# RATE OUTLOOK - SCRAPING RATE PROBABILITIES
+# ============================================================================
+
+def fetch_rate_outlook_rateprobability(currency: str) -> dict:
+    """
+    Scrape rate probability data from rateprobability.com
+    Supports: USD (fed), EUR (ecb), GBP (boe), JPY (boj)
+    """
+    from bs4 import BeautifulSoup
+    
+    currency_map = {
+        "USD": "fed",
+        "EUR": "ecb",
+        "GBP": "boe",
+        "JPY": "boj"
+    }
+    
+    if currency not in currency_map:
+        return None
+    
+    url = f"https://rateprobability.com/{currency_map[currency]}"
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find the probability table
+        table = soup.find('table')
+        if not table:
+            return {"error": "No table found", "source": "rateprobability.com"}
+        
+        rows = table.find_all('tr')
+        if len(rows) < 2:
+            return {"error": "No data rows", "source": "rateprobability.com"}
+        
+        # Get first upcoming meeting (first data row)
+        first_meeting = None
+        implied_rate = None
+        prob_value = None
+        delta_bps = None
+        
+        for row in rows[1:3]:  # Check first 2 data rows
+            cells = row.find_all('td')
+            if len(cells) >= 4:
+                meeting_text = cells[0].get_text(strip=True)
+                if meeting_text and any(m in meeting_text for m in ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']):
+                    first_meeting = meeting_text
+                    
+                    # Get implied rate
+                    implied_text = cells[1].get_text(strip=True)
+                    rate_match = re.search(r'(\d+\.?\d*)%', implied_text)
+                    if rate_match:
+                        implied_rate = rate_match.group(1) + "%"
+                    
+                    # Get probability
+                    prob_text = cells[2].get_text(strip=True)
+                    prob_match = re.search(r'(\d+\.?\d*)%?', prob_text)
+                    if prob_match:
+                        prob_value = float(prob_match.group(1))
+                    
+                    # Get delta (last column)
+                    if len(cells) >= 5:
+                        delta_text = cells[-1].get_text(strip=True)
+                        delta_match = re.search(r'(-?\d+\.?\d*)', delta_text)
+                        if delta_match:
+                            delta_bps = float(delta_match.group(1))
+                    break
+        
+        # Determine expectation based on delta
+        expectation = "HOLD"
+        prob_hike = None
+        prob_cut = None
+        
+        if delta_bps is not None:
+            if delta_bps > 10:
+                expectation = "HIKE"
+                prob_hike = prob_value
+            elif delta_bps < -10:
+                expectation = "CUT"
+                prob_cut = prob_value
+        
+        # Determine stance
+        stance = "Neutral"
+        if expectation == "CUT":
+            stance = "Dovish"
+        elif expectation == "HIKE":
+            stance = "Hawkish"
+        
+        return {
+            "next_meeting": first_meeting,
+            "expectation": expectation,
+            "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
+            "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
+            "implied_rate": implied_rate,
+            "stance": stance,
+            "source": "rateprobability.com",
+            "data_quality": "⭐⭐⭐⭐⭐"
+        }
+        
+    except Exception as e:
+        return {"error": str(e)[:100], "source": "rateprobability.com"}
+
+
+def fetch_rate_outlook_asx_rba() -> dict:
+    """Scrape RBA rate probability from ASX Rate Tracker"""
+    from bs4 import BeautifulSoup
+    
+    url = "https://www.asx.com.au/markets/trade-our-derivatives-market/futures-market/rba-rate-tracker"
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
+        
+        # Try to find next meeting date
+        meeting_match = re.search(r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})', text, re.IGNORECASE)
+        next_meeting = meeting_match.group(1) if meeting_match else "N/A"
+        
+        # Default values
+        expectation = "HOLD"
+        prob_cut = None
+        prob_hike = None
+        stance = "Neutral"
+        
+        # Check for cut/hike in text
+        text_lower = text.lower()
+        if 'cut' in text_lower:
+            cut_match = re.search(r'(\d{1,2}(?:\.\d+)?)\s*%.*?cut', text, re.IGNORECASE)
+            if cut_match:
+                prob_cut = float(cut_match.group(1))
+                if prob_cut > 50:
+                    expectation = "CUT"
+                    stance = "Dovish"
+        
+        return {
+            "next_meeting": next_meeting,
+            "expectation": expectation,
+            "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
+            "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
+            "stance": stance,
+            "source": "ASX RBA Tracker",
+            "data_quality": "⭐⭐⭐⭐⭐"
+        }
+    except Exception as e:
+        return {"error": str(e)[:100], "source": "ASX RBA Tracker"}
+
+
+def fetch_rate_outlook_boc_odds() -> dict:
+    """Scrape Bank of Canada rate probability"""
+    from bs4 import BeautifulSoup
+    
+    url = "https://www.bankofcanadaodds.com/"
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        text = soup.get_text()
+        
+        # Try to find next meeting date
+        meeting_match = re.search(r'(\w+\s+\d{1,2},?\s*\d{4})', text)
+        next_meeting = meeting_match.group(1) if meeting_match else "N/A"
+        
+        expectation = "HOLD"
+        prob_cut = None
+        prob_hike = None
+        stance = "Neutral"
+        
+        # Check for probabilities in text
+        text_lower = text.lower()
+        if 'cut' in text_lower:
+            prob_match = re.search(r'(\d{1,3}(?:\.\d+)?)\s*%', text)
+            if prob_match:
+                prob_cut = float(prob_match.group(1))
+                if prob_cut > 50:
+                    expectation = "CUT"
+                    stance = "Dovish"
+        
+        return {
+            "next_meeting": next_meeting,
+            "expectation": expectation,
+            "prob_hike": f"{prob_hike:.1f}%" if prob_hike else None,
+            "prob_cut": f"{prob_cut:.1f}%" if prob_cut else None,
+            "stance": stance,
+            "source": "BankOfCanadaOdds",
+            "data_quality": "⭐⭐⭐⭐⭐"
+        }
+    except Exception as e:
+        return {"error": str(e)[:100], "source": "BankOfCanadaOdds"}
+
+
+def fetch_rate_outlook_chf_qualitative() -> dict:
+    """Fetch qualitative rate outlook for CHF (no market-implied tool available)"""
+    
+    # SNB has 4 quarterly meetings: March, June, September, December
+    now = datetime.now()
+    snb_months = [(3, "Mar"), (6, "Jun"), (9, "Sep"), (12, "Dec")]
+    next_meeting = "N/A"
+    
+    for month_num, month_name in snb_months:
+        if now.month < month_num or (now.month == month_num and now.day < 15):
+            next_meeting = f"{month_name} {now.year}"
+            break
+    else:
+        next_meeting = f"Mar {now.year + 1}"
+    
+    return {
+        "next_meeting": next_meeting,
+        "expectation": "HOLD",
+        "prob_hike": None,
+        "prob_cut": None,
+        "stance": "Neutral",
+        "qualitative_note": "No market-implied tool - analyst consensus",
+        "source": "Analyst Consensus",
+        "data_quality": "⭐⭐⭐"
+    }
+
+
+def fetch_all_rate_outlooks(macro_data: dict = None) -> dict:
+    """Fetch rate outlook data for all 7 currencies."""
+    rate_outlooks = {}
+    
+    currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF"]
+    
+    for currency in currencies:
+        # Get current rate from macro_data if available
+        current_rate = None
+        if macro_data and currency in macro_data:
+            current_rate = macro_data[currency].get('interest_rate', 'N/A')
+        
+        if currency in ["USD", "EUR", "GBP", "JPY"]:
+            outlook = fetch_rate_outlook_rateprobability(currency)
+        elif currency == "AUD":
+            outlook = fetch_rate_outlook_asx_rba()
+        elif currency == "CAD":
+            outlook = fetch_rate_outlook_boc_odds()
+        elif currency == "CHF":
+            outlook = fetch_rate_outlook_chf_qualitative()
+        else:
+            outlook = {"error": "No source available"}
+        
+        if outlook and current_rate:
+            outlook["current_rate"] = current_rate
+        
+        rate_outlooks[currency] = outlook
+    
+    return rate_outlooks
+
+
+def display_rate_outlook(rate_outlooks: dict):
+    """Display rate outlook table"""
+    st.markdown("### 🏦 Outlook Tassi di Interesse")
+    
+    if not rate_outlooks:
+        st.warning("⚠️ Nessun dato outlook disponibile")
+        return
+    
+    table_rows = []
+    for currency in ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF"]:
+        data = rate_outlooks.get(currency, {})
+        if isinstance(data, dict) and "error" not in data:
+            # Format stance with emoji
+            stance = data.get("stance", "N/A")
+            if stance == "Hawkish":
+                stance_display = "🦅 Hawkish"
+            elif stance == "Dovish":
+                stance_display = "🕊️ Dovish"
+            else:
+                stance_display = "⚖️ Neutral"
+            
+            # Format expectation with emoji
+            exp = data.get("expectation", "N/A")
+            if exp == "HIKE":
+                exp_display = "📈 HIKE"
+            elif exp == "CUT":
+                exp_display = "📉 CUT"
+            else:
+                exp_display = "➡️ HOLD"
+            
+            row = {
+                "Valuta": currency,
+                "Tasso": data.get("current_rate", "N/A"),
+                "Meeting": data.get("next_meeting", "N/A"),
+                "Aspettativa": exp_display,
+                "P(Hike)": data.get("prob_hike") or "-",
+                "P(Cut)": data.get("prob_cut") or "-",
+                "Stance": stance_display,
+                "Fonte": data.get("source", "N/A")
+            }
+            table_rows.append(row)
+        else:
+            error_msg = data.get("error", "Error")[:30] if isinstance(data, dict) else "Error"
+            table_rows.append({
+                "Valuta": currency,
+                "Tasso": "N/A",
+                "Meeting": "N/A",
+                "Aspettativa": f"❌ {error_msg}",
+                "P(Hike)": "-",
+                "P(Cut)": "-",
+                "Stance": "N/A",
+                "Fonte": data.get("source", "N/A") if isinstance(data, dict) else "N/A"
+            })
+    
+    df = pd.DataFrame(table_rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    st.caption("💡 USD/EUR/GBP/JPY: Market-implied (OIS) | AUD: ASX Futures | CAD: OIS | CHF: Analyst consensus")
+
+
+# ============================================================================
 # SYSTEM PROMPT PER ANALISI GLOBALE
 # ============================================================================
 
@@ -2095,7 +2415,9 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # ============================================================================
 
 def display_forex_prices(forex_prices: dict):
-    """Mostra la tabella dei prezzi forex recuperati in un expander"""
+    """Mostra la tabella dei prezzi forex recuperati"""
+    
+    st.markdown("### 💱 Prezzi Forex")
     
     if not forex_prices:
         st.warning("⚠️ Nessun dato prezzi disponibile")
@@ -2117,53 +2439,52 @@ def display_forex_prices(forex_prices: dict):
                     st.text(f"• {err}")
         return
     
-    # Header con fonte (sempre visibile)
+    # Header con fonte
     if "Yahoo" in source or "yfinance" in source:
-        st.success(f"✅ Prezzi Forex: **{source}** ({found}/{total})")
+        st.success(f"✅ Fonte: **{source}** ({found}/{total})")
     else:
-        st.warning(f"⚠️ Prezzi Forex: **{source}** ({found}/{total})")
+        st.warning(f"⚠️ Fonte: **{source}** ({found}/{total})")
     
-    # Warning se non real-time (sempre visibile)
+    # Warning se non real-time
     if warning:
         st.warning(warning)
     
-    # Tabella dentro expander (chiuso di default)
-    with st.expander("💱 Mostra/Nascondi Tabella Prezzi", expanded=False):
-        pairs_order = [
-            "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
-            "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
-            "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
-        ]
+    # Tabella prezzi (sempre visibile)
+    pairs_order = [
+        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
+    ]
+    
+    # Dividi in 3 colonne
+    col1, col2, col3 = st.columns(3)
+    
+    for idx, pair in enumerate(pairs_order):
+        price = prices.get(pair)
         
-        # Dividi in 3 colonne
-        col1, col2, col3 = st.columns(3)
-        
-        for idx, pair in enumerate(pairs_order):
-            price = prices.get(pair)
-            
-            if price is not None:
-                if "JPY" in pair:
-                    price_str = f"{price:.3f}"
-                else:
-                    price_str = f"{price:.5f}"
-                display_text = f"**{pair}**: {price_str} ✅"
+        if price is not None:
+            if "JPY" in pair:
+                price_str = f"{price:.3f}"
             else:
-                display_text = f"**{pair}**: N/A ❌"
-            
-            # Distribuisci nelle colonne
-            if idx < 7:
-                col1.markdown(display_text)
-            elif idx < 13:
-                col2.markdown(display_text)
-            else:
-                col3.markdown(display_text)
+                price_str = f"{price:.5f}"
+            display_text = f"**{pair}**: {price_str} ✅"
+        else:
+            display_text = f"**{pair}**: N/A ❌"
         
-        # Mostra errori se presenti
-        if forex_prices.get("errors"):
-            st.divider()
-            st.caption("⚠️ Alcuni errori durante il recupero:")
-            for err in forex_prices.get("errors", [])[:5]:
-                st.text(f"• {err}")
+        # Distribuisci nelle colonne
+        if idx < 7:
+            col1.markdown(display_text)
+        elif idx < 13:
+            col2.markdown(display_text)
+        else:
+            col3.markdown(display_text)
+    
+    # Mostra errori se presenti
+    if forex_prices.get("errors"):
+        st.divider()
+        st.caption("⚠️ Alcuni errori durante il recupero:")
+        for err in forex_prices.get("errors", [])[:5]:
+            st.text(f"• {err}")
 
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
@@ -3105,6 +3426,12 @@ def main():
             help="Recupera tassi, inflazione, PIL, disoccupazione (GRATIS)"
         )
         
+        opt_rates = st.checkbox(
+            "🏦 Aggiorna Outlook Tassi",
+            value=True,
+            help="Recupera probabilità e aspettative tassi BC (GRATIS)"
+        )
+        
         opt_pmi = st.checkbox(
             "📈 Aggiorna Dati PMI",
             value=True,
@@ -3113,7 +3440,7 @@ def main():
         
         opt_prices = st.checkbox(
             "💱 Recupera Prezzi Forex",
-            value=True,
+            value=False,
             help="Recupera prezzi attuali delle 19 coppie forex da Yahoo Finance (GRATIS)"
         )
         
@@ -3156,13 +3483,13 @@ def main():
             st.warning("⚠️ L'analisi Claude consuma token API")
         
         # Validazione: almeno un'opzione dati se Claude attivo
-        if opt_claude and not (opt_macro or opt_pmi or opt_news or opt_links):
+        if opt_claude and not (opt_macro or opt_rates or opt_pmi or opt_news or opt_links):
             st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
         
         st.markdown("---")
         
         # ===== BOTTONE ANALISI =====
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_prices or opt_news or opt_links)
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_rates or opt_pmi or opt_prices or opt_news or opt_links)
         
         analyze_btn = st.button(
             "🚀 AVVIA ANALISI",
@@ -3269,9 +3596,11 @@ def main():
         additional_text = ""
         links_structured = []
         claude_analysis = None
+        rate_outlooks = None
         
         options_selected = {
             "macro": opt_macro,
+            "rates": opt_rates,
             "pmi": opt_pmi,
             "prices": opt_prices,
             "news": opt_news,
@@ -3280,7 +3609,7 @@ def main():
         }
         
         step = 0
-        total_steps = sum([opt_macro, opt_pmi, opt_prices, opt_news, opt_links, opt_claude])
+        total_steps = sum([opt_macro, opt_rates, opt_pmi, opt_prices, opt_news, opt_links, opt_claude])
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
@@ -3312,7 +3641,18 @@ def main():
                     # Se fallisce il caricamento, continua senza dati macro
                     pass
         
-        # FASE 2: Dati PMI
+        # FASE 2: Outlook Tassi
+        if opt_rates:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="🏦 Recupero outlook tassi...")
+            rate_outlooks = fetch_all_rate_outlooks(macro_data)
+            st.session_state['last_rate_outlooks'] = rate_outlooks
+        else:
+            # Usa rate outlooks dalla sessione
+            if 'last_rate_outlooks' in st.session_state and st.session_state['last_rate_outlooks']:
+                rate_outlooks = st.session_state['last_rate_outlooks']
+        
+        # FASE 3: Dati PMI
         if opt_pmi:
             step += 1
             progress.progress(int(step/total_steps*80), text="📈 Recupero dati PMI...")
@@ -3323,7 +3663,7 @@ def main():
             if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
                 pmi_data = st.session_state['last_pmi_data']
         
-        # FASE 2.5: Prezzi Forex
+        # FASE 4: Prezzi Forex
         forex_prices = {}
         if opt_prices:
             step += 1
@@ -3335,7 +3675,7 @@ def main():
             if 'last_forex_prices' in st.session_state:
                 forex_prices = st.session_state['last_forex_prices']
         
-        # FASE 3: Notizie Web
+        # FASE 5: Notizie Web
         if opt_news:
             step += 1
             progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
@@ -3400,6 +3740,7 @@ def main():
         
         analysis_result = {
             "macro_data": macro_data,
+            "rate_outlooks": rate_outlooks,
             "pmi_data": pmi_data,
             "forex_prices": forex_prices,
             "news_structured": news_structured,
@@ -3447,6 +3788,7 @@ def main():
         
         # Inizializza variabili
         macro_data = None
+        rate_outlooks = None
         pmi_data = None
         news_structured = {}
         links_structured = []
@@ -3456,6 +3798,7 @@ def main():
         if 'claude_analysis' in data_container:
             # Formato v3 nuovo
             macro_data = data_container.get('macro_data')
+            rate_outlooks = data_container.get('rate_outlooks')
             pmi_data = data_container.get('pmi_data')
             news_structured = data_container.get('news_structured', {})
             links_structured = data_container.get('links_structured', [])
@@ -3466,16 +3809,19 @@ def main():
         elif 'macro_data' in data_container:
             # Formato v3 senza Claude
             macro_data = data_container.get('macro_data')
+            rate_outlooks = data_container.get('rate_outlooks')
             pmi_data = data_container.get('pmi_data')
             news_structured = data_container.get('news_structured', {})
             links_structured = data_container.get('links_structured', [])
         
-        # Salva in session_state per visualizzazione tabella PMI
+        # Salva in session_state per visualizzazione
         if pmi_data:
             st.session_state['last_pmi_data'] = pmi_data
+        if rate_outlooks:
+            st.session_state['last_rate_outlooks'] = rate_outlooks
         
         # Verifica se c'è qualcosa da mostrare
-        has_content = macro_data or pmi_data or news_structured or links_structured or claude_analysis
+        has_content = macro_data or rate_outlooks or pmi_data or news_structured or links_structured or claude_analysis
         
         if not has_content:
             st.warning("⚠️ Questa analisi non contiene dati visualizzabili")
@@ -3484,19 +3830,26 @@ def main():
         
         # === ORDINE VISUALIZZAZIONE ===
         # 1. Dati Macro
-        # 2. Dati PMI
-        # 3. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
-        # 4. Notizie Web (alla fine)
+        # 2. Outlook Tassi
+        # 3. Dati PMI
+        # 4. Prezzi Forex
+        # 5. Notizie Web
+        # 6. Analisi Claude
         
         if macro_data:
             display_macro_data(macro_data)
+            st.markdown("---")
+        
+        # Outlook Tassi (dopo Macro)
+        if rate_outlooks:
+            display_rate_outlook(rate_outlooks)
             st.markdown("---")
         
         if pmi_data:
             display_pmi_table(pmi_data)
             st.markdown("---")
         
-        # 1️⃣ Mostra tabella prezzi forex se disponibili
+        # Prezzi forex se disponibili
         forex_prices = analysis.get("forex_prices", {})
         if not forex_prices and 'last_forex_prices' in st.session_state:
             forex_prices = st.session_state['last_forex_prices']
@@ -3505,12 +3858,12 @@ def main():
             display_forex_prices(forex_prices)
             st.markdown("---")
         
-        # 2️⃣ Notizie e Calendario (subito dopo prezzi)
+        # Notizie
         if news_structured or links_structured:
             display_news_summary(news_structured, links_structured)
             st.markdown("---")
         
-        # 3️⃣ Analisi Claude (alla fine, dopo tutti i dati)
+        # Analisi Claude (alla fine)
         if claude_analysis:
             display_analysis_matrix(claude_analysis)
     
@@ -3523,6 +3876,7 @@ def main():
         
         **Opzioni disponibili:**
         - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
+        - 🏦 **Outlook Tassi** - Probabilità tassi banche centrali (gratis)
         - 📈 **Dati PMI** - Manufacturing & Services PMI (gratis)
         - 💱 **Prezzi Forex** - Prezzi attuali delle 19 coppie (gratis)
         - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
