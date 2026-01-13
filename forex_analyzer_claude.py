@@ -36,8 +36,10 @@ from macro_data_fetcher import MacroDataFetcher
 
 def fetch_forex_prices() -> dict:
     """
-    Recupera i prezzi forex in tempo reale da Investing.com (scraping).
-    Fallback a Frankfurter.app se lo scraping fallisce.
+    Recupera i prezzi forex in tempo reale.
+    Ordine tentativi:
+    1. Yahoo Finance API (JSON, più affidabile)
+    2. Frankfurter.app (ECB - fallback)
     
     Returns:
         dict con prezzi per ogni coppia forex
@@ -46,121 +48,127 @@ def fetch_forex_prices() -> dict:
     prices = {}
     errors = []
     
-    # Mappa completa di tutte le 19 coppie con URL Investing.com
-    investing_pairs = {
-        "EUR/USD": "eur-usd",
-        "GBP/USD": "gbp-usd",
-        "USD/JPY": "usd-jpy",
-        "USD/CHF": "usd-chf",
-        "AUD/USD": "aud-usd",
-        "USD/CAD": "usd-cad",
-        "EUR/GBP": "eur-gbp",
-        "EUR/JPY": "eur-jpy",
-        "GBP/JPY": "gbp-jpy",
-        "AUD/JPY": "aud-jpy",
-        "EUR/CHF": "eur-chf",
-        "GBP/CHF": "gbp-chf",
-        "AUD/CHF": "aud-chf",
-        "CAD/JPY": "cad-jpy",
-        "AUD/CAD": "aud-cad",
-        "EUR/CAD": "eur-cad",
-        "EUR/AUD": "eur-aud",
-        "GBP/AUD": "gbp-aud",
-        "GBP/CAD": "gbp-cad"
+    # Mappa coppie forex -> simboli Yahoo Finance
+    # Yahoo usa formato: EURUSD=X (senza slash)
+    yahoo_pairs = {
+        "EUR/USD": "EURUSD=X",
+        "GBP/USD": "GBPUSD=X",
+        "USD/JPY": "JPY=X",  # Yahoo usa JPY=X per USD/JPY
+        "USD/CHF": "CHF=X",
+        "AUD/USD": "AUDUSD=X",
+        "USD/CAD": "CAD=X",
+        "EUR/GBP": "EURGBP=X",
+        "EUR/JPY": "EURJPY=X",
+        "GBP/JPY": "GBPJPY=X",
+        "AUD/JPY": "AUDJPY=X",
+        "EUR/CHF": "EURCHF=X",
+        "GBP/CHF": "GBPCHF=X",
+        "AUD/CHF": "AUDCHF=X",
+        "CAD/JPY": "CADJPY=X",
+        "AUD/CAD": "AUDCAD=X",
+        "EUR/CAD": "EURCAD=X",
+        "EUR/AUD": "EURAUD=X",
+        "GBP/AUD": "GBPAUD=X",
+        "GBP/CAD": "GBPCAD=X"
     }
     
-    # ===== TENTATIVO 1: Scraping Investing.com (PRIORITÀ) =====
+    # ===== TENTATIVO 1: Yahoo Finance API (PRIORITÀ) =====
     try:
-        import cloudscraper
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
-        )
-        
-        # Headers per sembrare un browser reale
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        for pair, url_slug in investing_pairs.items():
+        for pair, symbol in yahoo_pairs.items():
             try:
-                url = f"https://www.investing.com/currencies/{url_slug}"
-                resp = scraper.get(url, headers=headers, timeout=15)
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1m&range=1d"
+                resp = requests.get(url, headers=headers, timeout=10)
                 
                 if resp.status_code == 200:
-                    html = resp.text
+                    data = resp.json()
                     
-                    # Pattern multipli per estrarre il prezzo (in ordine di affidabilità)
-                    patterns = [
-                        # Pattern 1: data-test attribute (più affidabile)
-                        r'data-test="instrument-price-last"[^>]*>([0-9]+\.?[0-9]*)<',
-                        # Pattern 2: JSON nel HTML
-                        r'"last_numeric":\s*([0-9]+\.?[0-9]*)',
-                        r'"last":\s*"?([0-9]+\.?[0-9]*)"?',
-                        # Pattern 3: Testo "current rate is X.XXXX"
-                        r'current\s+(?:exchange\s+)?rate\s+is\s+([0-9]+\.?[0-9]*)',
-                        # Pattern 4: Bid price
-                        r'bid\s+price\s+is\s+([0-9]+\.?[0-9]*)',
-                        # Pattern 5: Pattern generico per prezzi forex
-                        r'<span[^>]*class="[^"]*price[^"]*"[^>]*>([0-9]+\.?[0-9]*)</span>',
-                        # Pattern 6: Today's range
-                        r"Today's\s+\S+\s+range\s+is\s+from\s+[0-9.]+\s+to\s+([0-9]+\.?[0-9]*)",
-                    ]
-                    
-                    price_found = False
-                    for pattern in patterns:
-                        matches = re.findall(pattern, html, re.IGNORECASE)
-                        if matches:
-                            # Prendi il primo match valido
-                            for match in matches:
-                                try:
-                                    price = float(match)
-                                    # Validazione: il prezzo deve essere ragionevole
-                                    if pair.endswith("JPY"):
-                                        if 50 < price < 300:  # Range ragionevole per coppie JPY
-                                            prices[pair] = round(price, 3)
-                                            price_found = True
-                                            break
-                                    else:
-                                        if 0.1 < price < 10:  # Range ragionevole per altre coppie
-                                            prices[pair] = round(price, 5)
-                                            price_found = True
-                                            break
-                                except:
-                                    continue
-                        if price_found:
-                            break
-                    
-                    if not price_found:
-                        errors.append(f"{pair}: prezzo non trovato")
+                    # Estrai prezzo dal JSON
+                    try:
+                        # Il prezzo è in result[0].meta.regularMarketPrice
+                        result = data.get("chart", {}).get("result", [])
+                        if result:
+                            meta = result[0].get("meta", {})
+                            price = meta.get("regularMarketPrice")
+                            
+                            if price:
+                                # Per coppie dove Yahoo inverte (USD/XXX -> XXX=X)
+                                if symbol in ["JPY=X", "CHF=X", "CAD=X"]:
+                                    # Yahoo restituisce XXX per 1 USD, noi vogliamo USD/XXX
+                                    pass  # Il valore è già corretto
+                                
+                                if "JPY" in pair:
+                                    prices[pair] = round(float(price), 3)
+                                else:
+                                    prices[pair] = round(float(price), 5)
+                            else:
+                                errors.append(f"{pair}: prezzo non trovato in JSON")
+                        else:
+                            errors.append(f"{pair}: nessun risultato")
+                    except Exception as e:
+                        errors.append(f"{pair}: parse error - {str(e)[:30]}")
                 else:
                     errors.append(f"{pair}: HTTP {resp.status_code}")
-                    
-                # Delay tra richieste per evitare ban
-                time.sleep(0.3)
+                
+                # Piccolo delay per evitare rate limit
+                time.sleep(0.1)
                 
             except Exception as e:
                 errors.append(f"{pair}: {str(e)[:50]}")
                 continue
         
-        # Se abbiamo almeno 10 prezzi, consideriamo un successo
-        if len(prices) >= 10:
+        # Se abbiamo almeno 15 prezzi, consideriamo un successo
+        if len(prices) >= 15:
             return {
                 "prices": prices, 
-                "source": "Investing.com (Real-time)", 
+                "source": "Yahoo Finance (Real-time)", 
                 "success": True,
                 "found": len(prices),
-                "total": len(investing_pairs),
+                "total": len(yahoo_pairs),
                 "errors": errors if errors else None
             }
     except Exception as e:
-        errors.append(f"Investing.com error: {str(e)[:100]}")
+        errors.append(f"Yahoo Finance API error: {str(e)[:100]}")
     
-    # ===== TENTATIVO 2: Frankfurter.app (ECB data - FALLBACK) =====
+    # ===== TENTATIVO 2: yfinance library =====
+    try:
+        import yfinance as yf
+        prices_yf = {}
+        
+        # Scarica tutti i ticker in un batch (più veloce)
+        symbols = list(yahoo_pairs.values())
+        tickers = yf.Tickers(" ".join(symbols))
+        
+        for pair, symbol in yahoo_pairs.items():
+            try:
+                ticker = tickers.tickers.get(symbol)
+                if ticker:
+                    info = ticker.fast_info
+                    price = info.get('lastPrice') or info.get('regularMarketPrice')
+                    if price:
+                        if "JPY" in pair:
+                            prices_yf[pair] = round(float(price), 3)
+                        else:
+                            prices_yf[pair] = round(float(price), 5)
+            except:
+                pass
+        
+        if len(prices_yf) >= 15:
+            return {
+                "prices": prices_yf, 
+                "source": "yfinance (Real-time)", 
+                "success": True,
+                "found": len(prices_yf),
+                "total": len(yahoo_pairs),
+                "errors": errors if errors else None
+            }
+    except Exception as e:
+        errors.append(f"yfinance error: {str(e)[:100]}")
+    
+    # ===== TENTATIVO 3: Frankfurter.app (ECB data - FALLBACK) =====
     # Nota: questi sono tassi ECB, aggiornati 1x/giorno, non real-time
     try:
         prices_fallback = {}
@@ -196,7 +204,7 @@ def fetch_forex_prices() -> dict:
             rates_aud = resp_aud.json().get("rates", {}) if resp_aud.status_code == 200 else {}
             
             # Calcola i prezzi per ogni coppia
-            for pair in investing_pairs.keys():
+            for pair in yahoo_pairs.keys():
                 base, quote = pair.split("/")
                 try:
                     if base == "USD":
@@ -228,7 +236,7 @@ def fetch_forex_prices() -> dict:
                     "success": True,
                     "warning": "⚠️ Prezzi ECB aggiornati 1x/giorno, non real-time!",
                     "found": len(prices_fallback),
-                    "total": len(investing_pairs)
+                    "total": len(yahoo_pairs)
                 }
     except Exception as e:
         errors.append(f"Frankfurter error: {str(e)[:100]}")
