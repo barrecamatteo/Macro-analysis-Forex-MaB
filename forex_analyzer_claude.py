@@ -2643,35 +2643,7 @@ def display_analysis_matrix(analysis: dict):
     # ===== OUTLOOK TASSI (subito dopo summary) =====
     rate_outlook = analysis.get("rate_outlook", {})
     if rate_outlook:
-        st.markdown("### 🏦 Outlook Tassi di Interesse")
-        
-        rate_rows = []
-        for curr, data in rate_outlook.items():
-            expectation = data.get("expectation", "hold")
-            exp_emoji = "📈" if expectation == "hike" else "📉" if expectation == "cut" else "➡️"
-            
-            stance = data.get("stance", "neutral")
-            stance_emoji = "🦅" if stance == "hawkish" else "🕊️" if stance == "dovish" else "➖"
-            
-            rate_rows.append({
-                "Valuta": curr,
-                "Tasso Attuale": data.get("current_rate", "N/A"),
-                "Prossimo Meeting": data.get("next_meeting", "N/A"),
-                "Aspettativa": f"{exp_emoji} {expectation.upper()}",
-                "Stance": f"{stance_emoji} {stance.capitalize()}",
-                "Probabilità": data.get("probability", "N/A")
-            })
-        
-        df_rates = pd.DataFrame(rate_rows)
-        st.dataframe(df_rates, use_container_width=True, hide_index=True)
-        
-        # Mostra note dettagliate in expander
-        with st.expander("📝 Note dettagliate sulle aspettative tassi"):
-            for curr, data in rate_outlook.items():
-                notes = data.get("notes", "")
-                if notes:
-                    st.markdown(f"**{curr}:** {notes}")
-        
+        display_rate_outlook_from_claude(rate_outlook)
         st.markdown("---")
     
     # ===== TOP BULLISH / TOP BEARISH =====
@@ -3031,25 +3003,6 @@ def display_analysis_matrix(analysis: dict):
             # Nessuna coppia selezionata
             st.markdown("### 🔍 Dettaglio Coppia Selezionata")
             st.info("👆 Seleziona una coppia dalla tabella sopra per vedere l'analisi dettagliata")
-        
-        st.markdown("---")
-        
-        # === CALENDARIO ECONOMICO (sempre visibile) ===
-        st.markdown("### 📅 Calendario Economico")
-        
-        st.info("📊 Consulta i calendari economici per gli eventi della settimana")
-        
-        col_te, col_ff = st.columns(2)
-        
-        with col_te:
-            st.markdown("🔗 [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
-        
-        with col_ff:
-            st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
-        
-        st.caption("💡 Filtra per impatto 2-3 stelle e per le valute che ti interessano")
-        
-        st.markdown("---")
 
 
 def display_analysis_history(analyses: list, user_id: str):
@@ -3622,13 +3575,6 @@ def main():
         
         # 3️⃣ Analisi Claude
         if claude_analysis:
-            # Prima mostra la tabella Rate Outlook (se presente)
-            rate_outlook = claude_analysis.get("rate_outlook", {})
-            if rate_outlook:
-                display_rate_outlook_from_claude(rate_outlook)
-                st.markdown("---")
-            
-            # Poi mostra la matrice delle coppie
             display_analysis_matrix(claude_analysis)
     
     else:
