@@ -2204,6 +2204,24 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     
     st.markdown("### 📰 Notizie Web")
     
+    # Conteggio fonti trovate
+    sources_found = []
+    if news_structured.get("forexfactory_direct"):
+        sources_found.append(f"ForexFactory Live ({len(news_structured['forexfactory_direct'])})")
+    if news_structured.get("forex_factory"):
+        sources_found.append(f"ForexFactory Search ({len(news_structured['forex_factory'])})")
+    if news_structured.get("rate_expectations"):
+        sources_found.append(f"Tassi ({len(news_structured['rate_expectations'])})")
+    if news_structured.get("meeting_calendar"):
+        sources_found.append(f"Calendario ({len(news_structured['meeting_calendar'])})")
+    if news_structured.get("geopolitics"):
+        sources_found.append(f"Geopolitica ({len(news_structured['geopolitics'])})")
+    
+    if sources_found:
+        st.success(f"✅ Fonti trovate: {', '.join(sources_found)}")
+    else:
+        st.warning("⚠️ Nessuna notizia trovata")
+    
     # ForexFactory News DIRETTE (scraping diretto)
     if news_structured.get("forexfactory_direct"):
         with st.expander(f"🔴 FOREX FACTORY NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
@@ -2226,10 +2244,17 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
                     st.markdown(line)
             
             st.caption("🔗 [Vai a ForexFactory News](https://www.forexfactory.com/news)")
+    else:
+        # Fallback: mostra link diretto se scraping fallito
+        with st.expander("🔴 FOREX FACTORY NEWS", expanded=False):
+            st.warning("⚠️ Scraping ForexFactory non riuscito (protezione Cloudflare)")
+            st.markdown("**Consulta manualmente le ultime news:**")
+            st.markdown("🔗 [ForexFactory News](https://www.forexfactory.com/news)")
+            st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
     
     # Forex Factory (da DuckDuckGo search)
     if news_structured.get("forex_factory"):
-        with st.expander(f"🔴 FOREX FACTORY ({len(news_structured['forex_factory'])} news)", expanded=True):
+        with st.expander(f"🔴 FOREX FACTORY SEARCH ({len(news_structured['forex_factory'])} news)", expanded=False):
             for item in news_structured["forex_factory"][:8]:
                 url = item.get('url', '')
                 if url:
@@ -2266,6 +2291,10 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
                     st.markdown(f"• [{item['title'][:70]}]({url})")
                 else:
                     st.markdown(f"• {item['title'][:70]}")
+            st.divider()
+            st.markdown("🔗 **Link utili:**")
+            st.markdown("• [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
+            st.markdown("• [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
     
     # Policy Comparison
     if news_structured.get("policy_comparison"):
@@ -2295,6 +2324,18 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
                 st.markdown(f"{status_icon} **[{item['title'][:50]}]({item['url']})**")
                 if item['status'] == 'success':
                     st.caption(item['content_preview'][:200] + "...")
+    
+    # Sezione Calendario Economico (sempre visibile con link utili)
+    with st.expander("📅 CALENDARIO ECONOMICO - Link Utili", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**ForexFactory:**")
+            st.markdown("🔗 [Calendario Eventi](https://www.forexfactory.com/calendar)")
+            st.markdown("🔗 [News Live](https://www.forexfactory.com/news)")
+        with col2:
+            st.markdown("**Altre Fonti:**")
+            st.markdown("🔗 [TradingEconomics](https://tradingeconomics.com/calendar)")
+            st.markdown("🔗 [Investing.com](https://www.investing.com/economic-calendar/)")
 
 
 def display_macro_data(macro_data: dict):
