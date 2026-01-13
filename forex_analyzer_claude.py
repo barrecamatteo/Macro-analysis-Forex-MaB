@@ -36,25 +36,135 @@ from macro_data_fetcher import MacroDataFetcher
 
 def fetch_forex_prices() -> dict:
     """
-    Recupera i prezzi forex in tempo reale da API gratuite.
-    Prova multiple fonti per massima affidabilità.
+    Recupera i prezzi forex in tempo reale da Investing.com (scraping).
+    Fallback a Frankfurter.app se lo scraping fallisce.
     
     Returns:
         dict con prezzi per ogni coppia forex
     """
+    import time
     prices = {}
+    errors = []
     
-    # Lista coppie da recuperare
-    pairs = [
-        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", 
-        "AUD/USD", "USD/CAD", "EUR/GBP", "EUR/JPY",
-        "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
-        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD",
-        "EUR/AUD", "GBP/AUD", "GBP/CAD"
-    ]
+    # Mappa completa di tutte le 19 coppie con URL Investing.com
+    investing_pairs = {
+        "EUR/USD": "eur-usd",
+        "GBP/USD": "gbp-usd",
+        "USD/JPY": "usd-jpy",
+        "USD/CHF": "usd-chf",
+        "AUD/USD": "aud-usd",
+        "USD/CAD": "usd-cad",
+        "EUR/GBP": "eur-gbp",
+        "EUR/JPY": "eur-jpy",
+        "GBP/JPY": "gbp-jpy",
+        "AUD/JPY": "aud-jpy",
+        "EUR/CHF": "eur-chf",
+        "GBP/CHF": "gbp-chf",
+        "AUD/CHF": "aud-chf",
+        "CAD/JPY": "cad-jpy",
+        "AUD/CAD": "aud-cad",
+        "EUR/CAD": "eur-cad",
+        "EUR/AUD": "eur-aud",
+        "GBP/AUD": "gbp-aud",
+        "GBP/CAD": "gbp-cad"
+    }
     
-    # ===== TENTATIVO 1: Frankfurter.app (ECB data, gratuito) =====
+    # ===== TENTATIVO 1: Scraping Investing.com (PRIORITÀ) =====
     try:
+        import cloudscraper
+        scraper = cloudscraper.create_scraper(
+            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
+        
+        # Headers per sembrare un browser reale
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        for pair, url_slug in investing_pairs.items():
+            try:
+                url = f"https://www.investing.com/currencies/{url_slug}"
+                resp = scraper.get(url, headers=headers, timeout=15)
+                
+                if resp.status_code == 200:
+                    html = resp.text
+                    
+                    # Pattern multipli per estrarre il prezzo (in ordine di affidabilità)
+                    patterns = [
+                        # Pattern 1: data-test attribute (più affidabile)
+                        r'data-test="instrument-price-last"[^>]*>([0-9]+\.?[0-9]*)<',
+                        # Pattern 2: JSON nel HTML
+                        r'"last_numeric":\s*([0-9]+\.?[0-9]*)',
+                        r'"last":\s*"?([0-9]+\.?[0-9]*)"?',
+                        # Pattern 3: Testo "current rate is X.XXXX"
+                        r'current\s+(?:exchange\s+)?rate\s+is\s+([0-9]+\.?[0-9]*)',
+                        # Pattern 4: Bid price
+                        r'bid\s+price\s+is\s+([0-9]+\.?[0-9]*)',
+                        # Pattern 5: Pattern generico per prezzi forex
+                        r'<span[^>]*class="[^"]*price[^"]*"[^>]*>([0-9]+\.?[0-9]*)</span>',
+                        # Pattern 6: Today's range
+                        r"Today's\s+\S+\s+range\s+is\s+from\s+[0-9.]+\s+to\s+([0-9]+\.?[0-9]*)",
+                    ]
+                    
+                    price_found = False
+                    for pattern in patterns:
+                        matches = re.findall(pattern, html, re.IGNORECASE)
+                        if matches:
+                            # Prendi il primo match valido
+                            for match in matches:
+                                try:
+                                    price = float(match)
+                                    # Validazione: il prezzo deve essere ragionevole
+                                    if pair.endswith("JPY"):
+                                        if 50 < price < 300:  # Range ragionevole per coppie JPY
+                                            prices[pair] = round(price, 3)
+                                            price_found = True
+                                            break
+                                    else:
+                                        if 0.1 < price < 10:  # Range ragionevole per altre coppie
+                                            prices[pair] = round(price, 5)
+                                            price_found = True
+                                            break
+                                except:
+                                    continue
+                        if price_found:
+                            break
+                    
+                    if not price_found:
+                        errors.append(f"{pair}: prezzo non trovato")
+                else:
+                    errors.append(f"{pair}: HTTP {resp.status_code}")
+                    
+                # Delay tra richieste per evitare ban
+                time.sleep(0.3)
+                
+            except Exception as e:
+                errors.append(f"{pair}: {str(e)[:50]}")
+                continue
+        
+        # Se abbiamo almeno 10 prezzi, consideriamo un successo
+        if len(prices) >= 10:
+            return {
+                "prices": prices, 
+                "source": "Investing.com (Real-time)", 
+                "success": True,
+                "found": len(prices),
+                "total": len(investing_pairs),
+                "errors": errors if errors else None
+            }
+    except Exception as e:
+        errors.append(f"Investing.com error: {str(e)[:100]}")
+    
+    # ===== TENTATIVO 2: Frankfurter.app (ECB data - FALLBACK) =====
+    # Nota: questi sono tassi ECB, aggiornati 1x/giorno, non real-time
+    try:
+        prices_fallback = {}
+        
         # Ottieni tassi base USD
         resp_usd = requests.get(
             "https://api.frankfurter.app/latest?from=USD",
@@ -67,111 +177,69 @@ def fetch_forex_prices() -> dict:
             timeout=10
         )
         
-        if resp_usd.status_code == 200 and resp_eur.status_code == 200:
-            rates_usd = resp_usd.json().get("rates", {})
-            rates_eur = resp_eur.json().get("rates", {})
-            
-            # Calcola i prezzi per ogni coppia
-            for pair in pairs:
-                base, quote = pair.split("/")
-                try:
-                    if base == "USD":
-                        # USD/XXX = tasso diretto
-                        if quote in rates_usd:
-                            prices[pair] = round(rates_usd[quote], 5 if quote != "JPY" else 3)
-                    elif quote == "USD":
-                        # XXX/USD = 1 / tasso
-                        if base in rates_usd:
-                            prices[pair] = round(1 / rates_usd[base], 5)
-                    elif base == "EUR":
-                        # EUR/XXX = tasso diretto da EUR
-                        if quote in rates_eur:
-                            prices[pair] = round(rates_eur[quote], 5 if quote != "JPY" else 3)
-                    else:
-                        # Cross rate: BASE/QUOTE = (USD/QUOTE) / (USD/BASE)
-                        if base in rates_usd and quote in rates_usd:
-                            prices[pair] = round(rates_usd[quote] / rates_usd[base], 5 if quote != "JPY" else 3)
-                except:
-                    pass
-            
-            if prices:
-                return {"prices": prices, "source": "Frankfurter.app (ECB)", "success": True}
-    except Exception as e:
-        pass
-    
-    # ===== TENTATIVO 2: ExchangeRate.host =====
-    try:
-        resp = requests.get(
-            "https://api.exchangerate.host/latest?base=USD",
+        # Ottieni tassi base GBP
+        resp_gbp = requests.get(
+            "https://api.frankfurter.app/latest?from=GBP",
             timeout=10
         )
         
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get("success"):
-                rates = data.get("rates", {})
-                
-                for pair in pairs:
-                    base, quote = pair.split("/")
-                    try:
-                        if base == "USD" and quote in rates:
-                            prices[pair] = round(rates[quote], 5 if quote != "JPY" else 3)
-                        elif quote == "USD" and base in rates:
-                            prices[pair] = round(1 / rates[base], 5)
-                        elif base in rates and quote in rates:
-                            prices[pair] = round(rates[quote] / rates[base], 5 if quote != "JPY" else 3)
-                    except:
-                        pass
-                
-                if prices:
-                    return {"prices": prices, "source": "ExchangeRate.host", "success": True}
-    except:
-        pass
-    
-    # ===== TENTATIVO 3: Scraping Investing.com =====
-    try:
-        import cloudscraper
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        # Ottieni tassi base AUD
+        resp_aud = requests.get(
+            "https://api.frankfurter.app/latest?from=AUD",
+            timeout=10
         )
         
-        # Mappa URL per le coppie principali
-        investing_urls = {
-            "EUR/USD": "https://www.investing.com/currencies/eur-usd",
-            "GBP/USD": "https://www.investing.com/currencies/gbp-usd",
-            "USD/JPY": "https://www.investing.com/currencies/usd-jpy",
-            "USD/CHF": "https://www.investing.com/currencies/usd-chf",
-            "AUD/USD": "https://www.investing.com/currencies/aud-usd",
-            "USD/CAD": "https://www.investing.com/currencies/usd-cad",
-        }
-        
-        for pair, url in investing_urls.items():
-            try:
-                resp = scraper.get(url, timeout=15)
-                if resp.status_code == 200:
-                    html = resp.text
-                    # Pattern per prezzo
-                    patterns = [
-                        r'data-test="instrument-price-last"[^>]*>([0-9]+\.[0-9]+)<',
-                        r'"last_numeric":\s*([0-9]+\.[0-9]+)',
-                        r'"last":\s*"?([0-9]+\.[0-9]+)"?',
-                    ]
-                    for pattern in patterns:
-                        match = re.search(pattern, html)
-                        if match:
-                            prices[pair] = float(match.group(1))
-                            break
-                import time
-                time.sleep(0.5)  # Delay tra richieste
-            except:
-                pass
-        
-        if prices:
-            return {"prices": prices, "source": "Investing.com", "success": True}
-    except:
-        pass
+        if resp_usd.status_code == 200 and resp_eur.status_code == 200:
+            rates_usd = resp_usd.json().get("rates", {})
+            rates_eur = resp_eur.json().get("rates", {})
+            rates_gbp = resp_gbp.json().get("rates", {}) if resp_gbp.status_code == 200 else {}
+            rates_aud = resp_aud.json().get("rates", {}) if resp_aud.status_code == 200 else {}
+            
+            # Calcola i prezzi per ogni coppia
+            for pair in investing_pairs.keys():
+                base, quote = pair.split("/")
+                try:
+                    if base == "USD":
+                        if quote in rates_usd:
+                            prices_fallback[pair] = round(rates_usd[quote], 5 if quote != "JPY" else 3)
+                    elif quote == "USD":
+                        if base in rates_usd:
+                            prices_fallback[pair] = round(1 / rates_usd[base], 5)
+                    elif base == "EUR":
+                        if quote in rates_eur:
+                            prices_fallback[pair] = round(rates_eur[quote], 5 if quote != "JPY" else 3)
+                    elif base == "GBP":
+                        if quote in rates_gbp:
+                            prices_fallback[pair] = round(rates_gbp[quote], 5 if quote != "JPY" else 3)
+                    elif base == "AUD":
+                        if quote in rates_aud:
+                            prices_fallback[pair] = round(rates_aud[quote], 5 if quote != "JPY" else 3)
+                    else:
+                        # Cross rate generico
+                        if base in rates_usd and quote in rates_usd:
+                            prices_fallback[pair] = round(rates_usd[quote] / rates_usd[base], 5 if quote != "JPY" else 3)
+                except:
+                    pass
+            
+            if prices_fallback:
+                return {
+                    "prices": prices_fallback, 
+                    "source": "Frankfurter.app (ECB - NON real-time)", 
+                    "success": True,
+                    "warning": "⚠️ Prezzi ECB aggiornati 1x/giorno, non real-time!",
+                    "found": len(prices_fallback),
+                    "total": len(investing_pairs)
+                }
+    except Exception as e:
+        errors.append(f"Frankfurter error: {str(e)[:100]}")
     
-    return {"prices": {}, "source": None, "success": False, "error": "Nessuna fonte disponibile"}
+    return {
+        "prices": prices if prices else {}, 
+        "source": None, 
+        "success": False, 
+        "error": "Nessuna fonte disponibile",
+        "details": errors
+    }
 
 
 # ============================================================================
@@ -2064,61 +2132,67 @@ def display_forex_prices(forex_prices: dict):
     source = forex_prices.get("source", "N/A")
     prices = forex_prices.get("prices", {})
     error = forex_prices.get("error", "")
+    warning = forex_prices.get("warning", "")
+    found = forex_prices.get("found", 0)
+    total = forex_prices.get("total", 19)
     
     if not success or not prices:
         st.error(f"❌ Recupero prezzi fallito: {error}")
+        if forex_prices.get("details"):
+            with st.expander("📋 Dettagli errori"):
+                for err in forex_prices.get("details", []):
+                    st.text(f"• {err}")
         return
     
-    st.success(f"✅ Prezzi recuperati da: **{source}**")
+    # Mostra fonte
+    if "Investing.com" in source:
+        st.success(f"✅ Prezzi recuperati da: **{source}** ({found}/{total})")
+    else:
+        st.warning(f"⚠️ Prezzi da: **{source}** ({found}/{total})")
     
-    # Crea DataFrame per la tabella
-    data_rows = []
+    # Warning se non real-time
+    if warning:
+        st.warning(warning)
     
-    # Lista coppie nell'ordine desiderato
+    # Crea DataFrame per la tabella - diviso in 3 colonne per visualizzazione compatta
     pairs_order = [
         "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
         "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
         "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
     ]
     
-    for pair in pairs_order:
+    # Dividi in 3 colonne
+    col1, col2, col3 = st.columns(3)
+    
+    for idx, pair in enumerate(pairs_order):
         price = prices.get(pair)
+        
         if price is not None:
-            # Determina il formato in base alla coppia
             if "JPY" in pair:
                 price_str = f"{price:.3f}"
             else:
                 price_str = f"{price:.5f}"
-            
-            data_rows.append({
-                "Coppia": pair,
-                "Prezzo": price_str,
-                "Status": "✅"
-            })
+            display_text = f"**{pair}**: {price_str} ✅"
         else:
-            data_rows.append({
-                "Coppia": pair,
-                "Prezzo": "N/A",
-                "Status": "❌"
-            })
-    
-    df = pd.DataFrame(data_rows)
-    
-    # Mostra tabella con colori
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Coppia": st.column_config.TextColumn("Coppia", width="small"),
-            "Prezzo": st.column_config.TextColumn("Prezzo", width="medium"),
-            "Status": st.column_config.TextColumn("", width="small")
-        }
-    )
+            display_text = f"**{pair}**: N/A ❌"
+        
+        # Distribuisci nelle colonne
+        if idx < 7:
+            col1.markdown(display_text)
+        elif idx < 13:
+            col2.markdown(display_text)
+        else:
+            col3.markdown(display_text)
     
     # Statistiche
     prices_found = len([p for p in prices.values() if p is not None])
     st.caption(f"📊 {prices_found}/{len(pairs_order)} prezzi recuperati")
+    
+    # Mostra errori se presenti
+    if forex_prices.get("errors"):
+        with st.expander("⚠️ Errori durante il recupero"):
+            for err in forex_prices.get("errors", []):
+                st.text(f"• {err}")
 
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
