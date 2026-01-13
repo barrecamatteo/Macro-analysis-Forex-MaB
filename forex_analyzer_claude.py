@@ -2218,7 +2218,7 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     
     # ForexFactory News (via DuckDuckGo News Search)
     if news_structured.get("forexfactory_direct"):
-        with st.expander(f"🔴 FOREX NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
+        with st.expander(f"🔴 FOREX NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=False):
             for item in news_structured["forexfactory_direct"][:12]:
                 title = item.get('title', '')
                 url = item.get('url', '')
@@ -2305,7 +2305,7 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     
     # Link aggiuntivi processati
     if links_structured:
-        with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=True):
+        with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=False):
             for item in links_structured:
                 status_icon = "✅" if item['status'] == 'success' else "❌"
                 st.markdown(f"{status_icon} **[{item['title'][:50]}]({item['url']})**")
