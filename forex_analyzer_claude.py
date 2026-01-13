@@ -1965,14 +1965,16 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
 """
     
     try:
-        message = client.messages.create(
+        # Usa streaming per evitare timeout su richieste lunghe
+        response_text = ""
+        with client.messages.stream(
             model="claude-sonnet-4-20250514",
             max_tokens=20000,
             messages=[{"role": "user", "content": user_prompt}],
             system=SYSTEM_PROMPT_GLOBAL
-        )
-        
-        response_text = message.content[0].text
+        ) as stream:
+            for text in stream.text_stream:
+                response_text += text
         
         # Pulisci JSON da markdown
         if "```json" in response_text:
@@ -2063,14 +2065,18 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
                         if attempt > 0:
                             time.sleep(20)  # Aspetta 20 secondi tra tentativi
                         
-                        fix_message = client.messages.create(
+                        # Usa streaming anche per il fix
+                        fixed_text = ""
+                        with client.messages.stream(
                             model="claude-sonnet-4-20250514",
                             max_tokens=25000,
                             messages=[{"role": "user", "content": fix_prompt}],
                             system="Sei un correttore di JSON. Restituisci SOLO il JSON corretto, nient'altro."
-                        )
+                        ) as stream:
+                            for text in stream.text_stream:
+                                fixed_text += text
                         
-                        fixed_text = fix_message.content[0].text.strip()
+                        fixed_text = fixed_text.strip()
                         
                         # Pulisci
                         if "```json" in fixed_text:
