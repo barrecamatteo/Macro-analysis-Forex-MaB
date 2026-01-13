@@ -256,114 +256,81 @@ def fetch_forex_prices() -> dict:
 
 def fetch_forexfactory_news() -> dict:
     """
-    Scrape le news più recenti da ForexFactory.com/news
+    Recupera le news più recenti da ForexFactory tramite DuckDuckGo Search.
+    (Lo scraping diretto è bloccato da Cloudflare/firewall)
     
     Returns:
         dict con lista di news e metadati
     """
-    url = "https://www.forexfactory.com/news"
-    
     try:
-        import cloudscraper
+        from duckduckgo_search import DDGS
         import time
         
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
-        )
-        
-        headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.forexfactory.com/',
-        }
-        
-        response = scraper.get(url, headers=headers, timeout=25)
-        
-        if response.status_code != 200:
-            return {"news": [], "error": f"HTTP {response.status_code}", "success": False}
-        
-        html = response.text
         news_items = []
         
-        # ===== Pattern per estrarre le news =====
-        # ForexFactory ha una struttura con titoli e dettagli
-        
-        # Pattern 1: Cerca titoli delle news
-        title_patterns = [
-            r'<a[^>]*class="[^"]*flexposts__title[^"]*"[^>]*>([^<]+)</a>',
-            r'<span[^>]*class="[^"]*flexposts__title[^"]*"[^>]*>([^<]+)</span>',
-            r'class="[^"]*news[^"]*title[^"]*"[^>]*>([^<]+)<',
-            r'<a[^>]*href="/news/[^"]*"[^>]*>([^<]{20,})</a>',
+        # Cerca news recenti su ForexFactory via DuckDuckGo
+        queries = [
+            "site:forexfactory.com/news",
+            "forexfactory forex news today",
         ]
         
-        # Pattern 2: Cerca blocchi news completi
-        news_block_pattern = r'<div[^>]*class="[^"]*flexposts__item[^"]*"[^>]*>(.*?)</div>\s*</div>'
-        
-        # Prova a estrarre blocchi
-        blocks = re.findall(news_block_pattern, html, re.DOTALL | re.IGNORECASE)
-        
-        if blocks:
-            for block in blocks[:20]:  # Max 20 news
-                # Estrai titolo
-                title_match = re.search(r'>([^<]{20,200})</a>', block)
-                if title_match:
-                    title = title_match.group(1).strip()
+        with DDGS() as ddgs:
+            for query in queries:
+                try:
+                    # Usa news search per risultati più recenti
+                    results = list(ddgs.news(query, max_results=8))
                     
-                    # Estrai link
-                    link_match = re.search(r'href="(/news/[^"]+)"', block)
-                    link = f"https://www.forexfactory.com{link_match.group(1)}" if link_match else ""
+                    for item in results:
+                        title = item.get('title', '')
+                        url = item.get('url', '')
+                        date = item.get('date', '')
+                        
+                        # Evita duplicati
+                        if title and title not in [n["title"] for n in news_items]:
+                            news_items.append({
+                                "title": title,
+                                "url": url,
+                                "time": date[:16] if date else "",
+                                "currency": "",
+                                "source": item.get('source', '')
+                            })
                     
-                    # Estrai tempo
-                    time_match = re.search(r'(\d+\s*(min|hour|hr|day)s?\s*ago)', block, re.IGNORECASE)
-                    time_ago = time_match.group(1) if time_match else ""
-                    
-                    # Estrai valuta/impatto se presente
-                    currency_match = re.search(r'class="[^"]*currency[^"]*"[^>]*>([A-Z]{3})</span>', block)
-                    currency = currency_match.group(1) if currency_match else ""
-                    
-                    news_items.append({
-                        "title": title,
-                        "url": link,
-                        "time": time_ago,
-                        "currency": currency
-                    })
+                    time.sleep(0.3)
+                except:
+                    continue
+                
+                if len(news_items) >= 10:
+                    break
         
-        # Fallback: estrai solo titoli
-        if not news_items:
-            for pattern in title_patterns:
-                matches = re.findall(pattern, html, re.IGNORECASE)
-                for title in matches[:15]:
-                    title = title.strip()
-                    if len(title) > 20 and title not in [n["title"] for n in news_items]:
-                        news_items.append({
-                            "title": title,
-                            "url": "",
-                            "time": "",
-                            "currency": ""
-                        })
-        
-        # Ultimo fallback: cerca qualsiasi link a /news/
-        if not news_items:
-            links = re.findall(r'href="(/news/\d+[^"]*)"[^>]*>([^<]+)</a>', html)
-            for link, title in links[:15]:
-                title = title.strip()
-                if len(title) > 15:
-                    news_items.append({
-                        "title": title,
-                        "url": f"https://www.forexfactory.com{link}",
-                        "time": "",
-                        "currency": ""
-                    })
+        # Se non trova notizie via news search, prova text search
+        if len(news_items) < 5:
+            with DDGS() as ddgs:
+                try:
+                    results = list(ddgs.text("forex market news today central bank", max_results=10))
+                    for item in results:
+                        title = item.get('title', '')
+                        url = item.get('href', '')
+                        
+                        if title and title not in [n["title"] for n in news_items]:
+                            news_items.append({
+                                "title": title,
+                                "url": url,
+                                "time": "",
+                                "currency": "",
+                                "source": ""
+                            })
+                except:
+                    pass
         
         return {
-            "news": news_items,
+            "news": news_items[:15],
             "count": len(news_items),
-            "source": "ForexFactory.com",
+            "source": "DuckDuckGo News Search",
             "success": len(news_items) > 0
         }
         
     except ImportError:
-        return {"news": [], "error": "cloudscraper non installato", "success": False}
+        return {"news": [], "error": "duckduckgo-search non installato", "success": False}
     except Exception as e:
         return {"news": [], "error": str(e), "success": False}
 
@@ -2207,7 +2174,7 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     # Conteggio fonti trovate
     sources_found = []
     if news_structured.get("forexfactory_direct"):
-        sources_found.append(f"ForexFactory Live ({len(news_structured['forexfactory_direct'])})")
+        sources_found.append(f"Forex News ({len(news_structured['forexfactory_direct'])})")
     if news_structured.get("forex_factory"):
         sources_found.append(f"ForexFactory Search ({len(news_structured['forex_factory'])})")
     if news_structured.get("rate_expectations"):
@@ -2222,37 +2189,30 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     else:
         st.warning("⚠️ Nessuna notizia trovata")
     
-    # ForexFactory News DIRETTE (scraping diretto)
+    # ForexFactory News (via DuckDuckGo News Search)
     if news_structured.get("forexfactory_direct"):
-        with st.expander(f"🔴 FOREX FACTORY NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
+        with st.expander(f"🔴 FOREX NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
             for item in news_structured["forexfactory_direct"][:12]:
                 title = item.get('title', '')
                 url = item.get('url', '')
-                time_ago = item.get('time', '')
-                currency = item.get('currency', '')
+                time_info = item.get('time', '')
+                source = item.get('source', '')
                 
                 # Formatta la riga
                 line = f"• **{title[:80]}**"
-                if currency:
-                    line += f" `{currency}`"
-                if time_ago:
-                    line += f" - _{time_ago}_"
+                if source:
+                    line += f" _({source})_"
+                if time_info:
+                    line += f" - {time_info}"
                 
                 if url:
                     st.markdown(f"[{line}]({url})")
                 else:
                     st.markdown(line)
             
-            st.caption("🔗 [Vai a ForexFactory News](https://www.forexfactory.com/news)")
-    else:
-        # Fallback: mostra link diretto se scraping fallito
-        with st.expander("🔴 FOREX FACTORY NEWS", expanded=False):
-            st.warning("⚠️ Scraping ForexFactory non riuscito (protezione Cloudflare)")
-            st.markdown("**Consulta manualmente le ultime news:**")
-            st.markdown("🔗 [ForexFactory News](https://www.forexfactory.com/news)")
-            st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
+            st.caption("🔗 [ForexFactory News](https://www.forexfactory.com/news) | [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
     
-    # Forex Factory (da DuckDuckGo search)
+    # Forex Factory (da DuckDuckGo text search - fallback)
     if news_structured.get("forex_factory"):
         with st.expander(f"🔴 FOREX FACTORY SEARCH ({len(news_structured['forex_factory'])} news)", expanded=False):
             for item in news_structured["forex_factory"][:8]:
