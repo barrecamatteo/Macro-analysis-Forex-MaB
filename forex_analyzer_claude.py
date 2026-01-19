@@ -2986,33 +2986,87 @@ def display_pmi_table(pmi_data: dict):
 def display_central_bank_history():
     """
     Mostra la tabella storico decisioni delle banche centrali.
+    Con colori: verde = hike, rosso = cut, nero = hold
     """
     st.markdown("### 📜 Storico Decisioni Banche Centrali")
     st.caption("Ultime 2 decisioni per ogni banca centrale")
     
     history = get_central_bank_history_summary()
     
-    table_rows = []
+    # Mappa valuta -> banca
+    currency_to_bank = {
+        "USD": "Fed", "EUR": "ECB", "GBP": "BOE", "JPY": "BOJ",
+        "CHF": "SNB", "AUD": "RBA", "CAD": "BOC"
+    }
+    
+    def colorize_decision(decision_text: str) -> str:
+        """Colora la decisione: verde hike, rosso cut, nero hold"""
+        if not decision_text or decision_text == "N/A":
+            return decision_text
+        
+        # Estrai il valore bp
+        if "+25bp" in decision_text or "+50bp" in decision_text or "+75bp" in decision_text:
+            # Hike = verde
+            return f'<span style="color: #28a745; font-weight: bold;">{decision_text}</span>'
+        elif "-25bp" in decision_text or "-50bp" in decision_text or "-75bp" in decision_text:
+            # Cut = rosso
+            return f'<span style="color: #dc3545; font-weight: bold;">{decision_text}</span>'
+        else:
+            # Hold (0bp) = nero/grigio
+            return f'<span style="color: #666;">{decision_text}</span>'
+    
     currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
     
+    # Costruisci tabella HTML
+    html_rows = []
     for currency in currency_order:
         data = history.get(currency, {})
         if data:
-            row = {
-                "Banca": f"{data.get('bank_short', currency)}",
-                "Tasso Attuale": data.get("current_rate", "N/A"),
-                "Meeting -1": data.get("meeting_1", "N/A"),
-                "Meeting -2": data.get("meeting_2", "N/A"),
-                "Trend": f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
-            }
-            table_rows.append(row)
+            bank = data.get('bank_short', currency_to_bank.get(currency, currency))
+            rate = data.get("current_rate", "N/A")
+            meeting_2 = colorize_decision(data.get("meeting_2", "N/A"))  # Prima (più vecchio)
+            meeting_1 = colorize_decision(data.get("meeting_1", "N/A"))  # Dopo (più recente)
+            trend = f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
+            
+            html_rows.append(f"""
+            <tr>
+                <td style="font-weight: bold;">{currency}</td>
+                <td>{bank}</td>
+                <td>{rate}</td>
+                <td>{meeting_2}</td>
+                <td>{meeting_1}</td>
+                <td>{trend}</td>
+            </tr>
+            """)
     
-    if table_rows:
-        df = pd.DataFrame(table_rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+    if html_rows:
+        html_table = f"""
+        <style>
+            .cb-table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
+            .cb-table th {{ background-color: #f0f2f6; padding: 10px; text-align: left; border-bottom: 2px solid #ddd; }}
+            .cb-table td {{ padding: 10px; border-bottom: 1px solid #eee; }}
+            .cb-table tr:hover {{ background-color: #f8f9fa; }}
+        </style>
+        <table class="cb-table">
+            <thead>
+                <tr>
+                    <th>Valuta</th>
+                    <th>Banca</th>
+                    <th>Tasso Attuale</th>
+                    <th>Meeting -2</th>
+                    <th>Meeting -1</th>
+                    <th>Trend</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(html_rows)}
+            </tbody>
+        </table>
+        """
+        st.markdown(html_table, unsafe_allow_html=True)
         
         # Legenda
-        st.caption("🦅 = dissent hawkish (volevano alzare) | 🕊️ = dissent dovish (volevano tagliare)")
+        st.caption("🟢 Hike (+bp) | 🔴 Cut (-bp) | ⚫ Hold (0bp) — 🦅 = dissent hawkish | 🕊️ = dissent dovish")
 
 
 def generate_summary_with_bias(summary: str, differential: int) -> str:
