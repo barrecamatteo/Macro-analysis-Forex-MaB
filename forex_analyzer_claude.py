@@ -765,8 +765,257 @@ FOREX_PAIRS = [
 
 
 # ============================================================================
-# CONFIGURAZIONE PMI - INVESTING.COM IDs
+# CONFIGURAZIONE BANCHE CENTRALI - Per scraping automatico storico decisioni
 # ============================================================================
+
+CENTRAL_BANK_CONFIG = {
+    "USD": {
+        "bank_name": "Federal Reserve",
+        "bank_short": "Fed",
+        "event_id": 168,  # interest-rate-decision-168
+        "rate_type": "range",  # "range" per Fed (4.25-4.50%), "single" per altri
+    },
+    "EUR": {
+        "bank_name": "European Central Bank",
+        "bank_short": "ECB",
+        "event_id": 164,  # ecb-interest-rate-decision-164
+        "rate_type": "single",
+    },
+    "GBP": {
+        "bank_name": "Bank of England",
+        "bank_short": "BOE",
+        "event_id": 170,  # boe-interest-rate-decision-170
+        "rate_type": "single",
+    },
+    "JPY": {
+        "bank_name": "Bank of Japan",
+        "bank_short": "BOJ",
+        "event_id": 165,  # boj-interest-rate-decision-165
+        "rate_type": "single",
+    },
+    "CHF": {
+        "bank_name": "Swiss National Bank",
+        "bank_short": "SNB",
+        "event_id": 169,  # snb-interest-rate-decision-169
+        "rate_type": "single",
+    },
+    "AUD": {
+        "bank_name": "Reserve Bank of Australia",
+        "bank_short": "RBA",
+        "event_id": 167,  # rba-interest-rate-decision-167
+        "rate_type": "single",
+    },
+    "CAD": {
+        "bank_name": "Bank of Canada",
+        "bank_short": "BOC",
+        "event_id": 166,  # boc-interest-rate-decision-166
+        "rate_type": "single",
+    }
+}
+
+
+def fetch_central_bank_history_from_api(currency: str) -> dict:
+    """
+    Recupera lo storico decisioni tassi da Investing.com JSON API.
+    
+    Returns:
+        dict con: current_rate, meetings (ultimi 2-3), trend
+    """
+    config = CENTRAL_BANK_CONFIG.get(currency)
+    if not config:
+        return {"error": f"Currency {currency} not configured"}
+    
+    event_id = config["event_id"]
+    url = f"https://sbcharts.investing.com/events_charts/us/{event_id}.json"
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://www.investing.com/'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {"error": f"HTTP {response.status_code}"}
+        
+        data = response.json()
+        attr = data.get("attr", [])
+        
+        if not attr or len(attr) < 2:
+            return {"error": "Insufficient data"}
+        
+        # Prendi gli ultimi 3 meeting (per calcolare trend)
+        recent_meetings = attr[-3:] if len(attr) >= 3 else attr
+        recent_meetings.reverse()  # Più recente prima
+        
+        meetings = []
+        for i, m in enumerate(recent_meetings):
+            timestamp = m.get("timestamp", 0)
+            actual = m.get("actual")
+            actual_formatted = m.get("actual_formatted", "")
+            
+            # Converti timestamp in data
+            from datetime import datetime
+            try:
+                date = datetime.fromtimestamp(timestamp / 1000)
+                date_str = date.strftime("%Y-%m-%d")
+                date_formatted = date.strftime("%b %d, %Y")
+            except:
+                date_str = "N/A"
+                date_formatted = "N/A"
+            
+            # Calcola variazione rispetto al meeting precedente
+            change = None
+            decision = "hold"
+            if i < len(recent_meetings) - 1:
+                prev_actual = recent_meetings[i + 1].get("actual")
+                if actual is not None and prev_actual is not None:
+                    try:
+                        diff = float(actual) - float(prev_actual)
+                        if abs(diff) < 0.001:  # Praticamente uguale
+                            decision = "hold"
+                            change = "0bp"
+                        elif diff > 0:
+                            decision = "hike"
+                            change = f"+{int(diff * 100)}bp"
+                        else:
+                            decision = "cut"
+                            change = f"{int(diff * 100)}bp"
+                    except:
+                        pass
+            
+            meetings.append({
+                "date": date_str,
+                "date_formatted": date_formatted,
+                "rate": actual_formatted if actual_formatted else f"{actual}%",
+                "decision": decision,
+                "change": change if change else "N/A",
+                "vote": "N/A",  # API non fornisce voti
+                "dissent": None
+            })
+        
+        # Tasso attuale (ultimo meeting)
+        current_rate = meetings[0]["rate"] if meetings else "N/A"
+        
+        # Calcola trend basato su ultimi 2 meeting
+        trend_info = calculate_trend_from_meetings(meetings)
+        
+        return {
+            "bank_name": config["bank_name"],
+            "bank_short": config["bank_short"],
+            "current_rate": current_rate,
+            "meetings": meetings[:2],  # Solo ultimi 2
+            "trend": trend_info["trend"],
+            "trend_label": trend_info["trend_label"],
+            "trend_emoji": trend_info["trend_emoji"],
+            "stance_hint": trend_info["stance_hint"]
+        }
+        
+    except Exception as e:
+        return {"error": str(e)[:100]}
+
+
+def calculate_trend_from_meetings(meetings: list) -> dict:
+    """
+    Calcola il trend basato sulle decisioni degli ultimi meeting.
+    """
+    if len(meetings) < 2:
+        return {"trend": "unknown", "trend_label": "Sconosciuto", "trend_emoji": "❓", "stance_hint": None}
+    
+    d1 = meetings[0].get("decision", "hold")  # Più recente
+    d2 = meetings[1].get("decision", "hold")  # Precedente
+    
+    # Logica trend
+    if d1 == "hike" and d2 == "hike":
+        return {"trend": "hiking", "trend_label": "Hiking", "trend_emoji": "📈", "stance_hint": "hawkish"}
+    elif d1 == "cut" and d2 == "cut":
+        return {"trend": "cutting", "trend_label": "Cutting", "trend_emoji": "📉", "stance_hint": "dovish"}
+    elif d1 == "hold" and d2 == "hold":
+        return {"trend": "holding", "trend_label": "Holding", "trend_emoji": "➡️", "stance_hint": "neutral"}
+    elif d1 == "hike" and d2 == "hold":
+        return {"trend": "tightening", "trend_label": "Tightening", "trend_emoji": "↗️", "stance_hint": "hawkish"}
+    elif d1 == "hold" and d2 == "hike":
+        return {"trend": "pause_after_hike", "trend_label": "Pausa (post-rialzo)", "trend_emoji": "⏸️", "stance_hint": "hawkish"}
+    elif d1 == "cut" and d2 == "hold":
+        return {"trend": "easing", "trend_label": "Easing", "trend_emoji": "↘️", "stance_hint": "dovish"}
+    elif d1 == "hold" and d2 == "cut":
+        return {"trend": "pause_after_cut", "trend_label": "Pausa (post-taglio)", "trend_emoji": "⏸️", "stance_hint": "dovish"}
+    else:
+        return {"trend": "mixed", "trend_label": "Misto", "trend_emoji": "🔀", "stance_hint": None}
+
+
+def fetch_all_central_bank_history() -> dict:
+    """
+    Recupera lo storico di tutte le banche centrali.
+    """
+    import time
+    
+    all_history = {}
+    
+    for currency in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+        result = fetch_central_bank_history_from_api(currency)
+        all_history[currency] = result
+        time.sleep(0.5)  # Rate limiting
+    
+    return all_history
+
+
+def get_central_bank_history_summary() -> dict:
+    """
+    Restituisce un riassunto dello storico formattato per visualizzazione e prompt.
+    """
+    all_history = fetch_all_central_bank_history()
+    
+    summary = {}
+    
+    for currency, data in all_history.items():
+        if "error" in data:
+            summary[currency] = {
+                "bank_name": CENTRAL_BANK_CONFIG.get(currency, {}).get("bank_name", currency),
+                "bank_short": CENTRAL_BANK_CONFIG.get(currency, {}).get("bank_short", currency),
+                "current_rate": "N/A",
+                "meeting_1": "N/A",
+                "meeting_2": "N/A",
+                "trend": "unknown",
+                "trend_label": "Errore",
+                "trend_emoji": "⚠️",
+                "stance_hint": None,
+                "next_meeting": "N/A"
+            }
+            continue
+        
+        meetings = data.get("meetings", [])
+        
+        # Formatta meeting 1 e 2
+        meeting_1 = "N/A"
+        meeting_2 = "N/A"
+        
+        if len(meetings) >= 1:
+            m1 = meetings[0]
+            vote_str = f" ({m1['vote']})" if m1.get('vote') and m1['vote'] != 'N/A' else ""
+            meeting_1 = f"{m1.get('change', 'N/A')} ({m1.get('date_formatted', 'N/A')}){vote_str}"
+        
+        if len(meetings) >= 2:
+            m2 = meetings[1]
+            vote_str = f" ({m2['vote']})" if m2.get('vote') and m2['vote'] != 'N/A' else ""
+            meeting_2 = f"{m2.get('change', 'N/A')} ({m2.get('date_formatted', 'N/A')}){vote_str}"
+        
+        summary[currency] = {
+            "bank_name": data.get("bank_name"),
+            "bank_short": data.get("bank_short"),
+            "current_rate": data.get("current_rate", "N/A"),
+            "meeting_1": meeting_1,
+            "meeting_2": meeting_2,
+            "trend": data.get("trend", "unknown"),
+            "trend_label": data.get("trend_label", "N/A"),
+            "trend_emoji": data.get("trend_emoji", "❓"),
+            "stance_hint": data.get("stance_hint"),
+            "next_meeting": "N/A"  # Da implementare separatamente
+        }
+    
+    return summary
 
 PMI_CONFIG = {
     "USD": {
@@ -1662,6 +1911,18 @@ Per determinare le probabilità e stance delle banche centrali, considera:
 - **Dichiarazioni ufficiali** dei governatori
 - **Verbali** delle ultime riunioni
 - **Notizie recenti** da Reuters, Bloomberg, ForexFactory
+- **STORICO DECISIONI** (se fornito): ultimi 2 meeting e trend
+
+## ⚠️ REGOLE COERENZA STANCE:
+La stance deve essere COERENTE con lo storico delle decisioni:
+- **Trend HIKING** (2 rialzi) → Stance NON PUÒ essere "Dovish" (usa Hawkish o Neutral)
+- **Trend CUTTING** (2 tagli) → Stance NON PUÒ essere "Hawkish" (usa Dovish o Neutral)
+- **Trend HOLDING** → Stance può essere Neutral, o influenzata dal dissent
+- **Dissent 🕊️** (volevano tagliare) → Tilt dovish sulla stance
+- **Dissent 🦅** (volevano alzare) → Tilt hawkish sulla stance
+
+## ⚠️ FORMATO next_meeting:
+Il campo "next_meeting" deve essere in formato "Mese GG, AAAA" (es: "Jan 29, 2025")
 
 Le probabilità (prob_cut, prob_hold, prob_hike) devono sommare a 100.
 
@@ -2131,6 +2392,34 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
+    # Sezione Storico Banche Centrali
+    cb_history_section = ""
+    cb_history = get_central_bank_history_summary()
+    if cb_history:
+        cb_lines = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+            data = cb_history.get(curr, {})
+            if data:
+                line = f"**{data.get('bank_short', curr)}** ({curr}): {data.get('meeting_1', 'N/A')}, {data.get('meeting_2', 'N/A')} → Trend: {data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
+                stance_hint = data.get('stance_hint')
+                if stance_hint:
+                    line += f" [Stance hint: {stance_hint}]"
+                cb_lines.append(line)
+        
+        cb_history_section = f"""
+## 📜 STORICO DECISIONI BANCHE CENTRALI (ultimi 2 meeting):
+{chr(10).join(cb_lines)}
+
+⚠️ **REGOLE IMPORTANTI PER LA STANCE:**
+- Se trend = "Hiking" (2 rialzi consecutivi) → La stance NON PUÒ essere "Dovish"
+- Se trend = "Cutting" (2 tagli consecutivi) → La stance NON PUÒ essere "Hawkish"
+- Considera anche il "dissent" (🕊️ = membri volevano tagliare, 🦅 = membri volevano alzare)
+- Il trend storico deve essere COERENTE con la stance finale
+- Le aspettative OIS sono importanti ma non possono contraddire il trend storico recente
+
+---
+"""
+    
     today = get_italy_now()
     
     user_prompt = f"""
@@ -2145,6 +2434,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 
 {macro_section}
 {pmi_section}
+{cb_history_section}
 {prices_section}
 {news_section}
 {additional_section}
@@ -2729,12 +3019,49 @@ def display_pmi_table(pmi_data: dict):
         st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
+def display_central_bank_history():
+    """
+    Mostra la tabella storico decisioni delle banche centrali.
+    """
+    st.markdown("### 📜 Storico Decisioni Banche Centrali")
+    st.caption("Ultime 2 decisioni per ogni banca centrale")
+    
+    history = get_central_bank_history_summary()
+    
+    table_rows = []
+    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+    
+    for currency in currency_order:
+        data = history.get(currency, {})
+        if data:
+            row = {
+                "Banca": f"{data.get('bank_short', currency)}",
+                "Tasso Attuale": data.get("current_rate", "N/A"),
+                "Meeting -1": data.get("meeting_1", "N/A"),
+                "Meeting -2": data.get("meeting_2", "N/A"),
+                "Trend": f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}",
+                "Prossimo": data.get("next_meeting", "N/A")
+            }
+            table_rows.append(row)
+    
+    if table_rows:
+        df = pd.DataFrame(table_rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
+        # Legenda
+        st.caption("🦅 = dissent hawkish (volevano alzare) | 🕊️ = dissent dovish (volevano tagliare)")
+
+
 def display_rate_outlook_from_claude(rate_outlook: dict):
     """
     Mostra la tabella outlook tassi generata da Claude.
     Colonne: Valuta, Tasso, Prossimo Meeting, % Cut, % Hold, % Hike, Stance
     Con toggle per mostrare le note esplicative.
     """
+    # Prima mostra lo storico decisioni
+    display_central_bank_history()
+    st.markdown("---")
+    
     st.markdown("### 🏦 Outlook Tassi di Interesse")
     
     if not rate_outlook:
