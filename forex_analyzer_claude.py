@@ -770,34 +770,123 @@ FOREX_PAIRS = [
 
 PMI_CONFIG = {
     "USD": {
-        "manufacturing": {"id": 173, "name": "ism-manufacturing-pmi", "label": "ISM Manufacturing"},
-        "services": {"id": 176, "name": "ism-non-manufacturing-pmi", "label": "ISM Services"}
+        "manufacturing": {"id": 173, "name": "ism-manufacturing-pmi", "label": "ISM Manufacturing", "country": "us"},
+        "services": {"id": 176, "name": "ism-non-manufacturing-pmi", "label": "ISM Services", "country": "us"}
     },
     "EUR": {
-        "manufacturing": {"id": 201, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
-        "services": {"id": 272, "name": "services-pmi", "label": "Services PMI"}
+        "manufacturing": {"id": 201, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "eu"},
+        "services": {"id": 272, "name": "services-pmi", "label": "Services PMI", "country": "eu"}
     },
     "GBP": {
-        "manufacturing": {"id": 204, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
-        "services": {"id": 274, "name": "services-pmi", "label": "Services PMI"}
+        "manufacturing": {"id": 204, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "uk"},
+        "services": {"id": 274, "name": "services-pmi", "label": "Services PMI", "country": "uk"}
     },
     "JPY": {
-        "manufacturing": {"id": 202, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
-        "services": {"id": 1912, "name": "services-pmi", "label": "Services PMI"}
+        "manufacturing": {"id": 202, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "jp"},
+        "services": {"id": 1912, "name": "services-pmi", "label": "Services PMI", "country": "jp"}
     },
     "CHF": {
-        "manufacturing": {"id": 278, "name": "procure.ch-pmi", "label": "procure.ch PMI"},
+        "manufacturing": {"id": 278, "name": "procure.ch-pmi", "label": "procure.ch PMI", "country": "ch"},
         "services": None  # CHF Services PMI non disponibile su Investing.com
     },
     "AUD": {
-        "manufacturing": {"id": 1838, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
-        "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI"}
+        "manufacturing": {"id": 1838, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "au"},
+        "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI", "country": "au"}
     },
     "CAD": {
-        "manufacturing": {"id": 1029, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
-        "services": {"id": 2265, "name": "services-pmi", "label": "Services PMI"}
+        "manufacturing": {"id": 1029, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "us"},
+        "services": {"id": 2265, "name": "services-pmi", "label": "Services PMI", "country": "us"}
     }
 }
+
+
+def fetch_pmi_from_investing_json(currency: str, pmi_type: str) -> dict:
+    """
+    Scarica i dati PMI dall'API JSON di Investing.com (più affidabile).
+    
+    Args:
+        currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
+        pmi_type: "manufacturing" o "services"
+    
+    Returns:
+        dict con: current, previous, delta, date, source
+    """
+    config = PMI_CONFIG.get(currency, {}).get(pmi_type)
+    
+    if config is None:
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": "N/A"}
+    
+    # API JSON endpoint con country code corretto
+    country = config.get("country", "us")
+    json_url = f"https://sbcharts.investing.com/events_charts/{country}/{config['id']}.json"
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://www.investing.com/',
+        }
+        
+        response = requests.get(json_url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {"current": None, "previous": None, "delta": None, "source": json_url, "error": f"HTTP {response.status_code}"}
+        
+        data = response.json()
+        
+        # Estrai dati dall'array "attr" (contiene i valori formattati)
+        attr = data.get("attr", [])
+        
+        if len(attr) >= 2:
+            # L'ultimo elemento è il più recente
+            current_data = attr[-1]
+            previous_data = attr[-2]
+            
+            current_value = current_data.get("actual")
+            previous_value = previous_data.get("actual")
+            
+            # Verifica che siano numeri validi per PMI (30-70)
+            if current_value and 30 <= float(current_value) <= 70:
+                current_value = float(current_value)
+            else:
+                current_value = None
+                
+            if previous_value and 30 <= float(previous_value) <= 70:
+                previous_value = float(previous_value)
+            else:
+                previous_value = None
+            
+            delta = None
+            if current_value is not None and previous_value is not None:
+                delta = round(current_value - previous_value, 1)
+            
+            return {
+                "current": current_value,
+                "previous": previous_value,
+                "delta": delta,
+                "date": None,
+                "source": "Investing.com API",
+                "label": config['label']
+            }
+        
+        elif len(attr) == 1:
+            current_data = attr[0]
+            current_value = current_data.get("actual")
+            
+            if current_value and 30 <= float(current_value) <= 70:
+                return {
+                    "current": float(current_value),
+                    "previous": None,
+                    "delta": None,
+                    "date": None,
+                    "source": "Investing.com API",
+                    "label": config['label']
+                }
+        
+        return {"current": None, "previous": None, "delta": None, "source": json_url, "error": "No data in response"}
+        
+    except Exception as e:
+        return {"current": None, "previous": None, "delta": None, "source": json_url, "error": str(e)[:50]}
 
 
 def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5) -> dict:
@@ -866,7 +955,9 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5)
                 r'Actual\s+([0-9]+\.?[0-9]*)',
                 r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
                 r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-                r'Actual.*?([0-9]{2}\.[0-9])',
+                r'Actual.*?([0-9]{2}\.[0-9]{1,2})',  # Fixed: 1-2 decimali
+                r'PMI[+\s]+([0-9]{2}\.[0-9]{1,2})',  # Pattern per Twitter share: PMI+46.50
+                r'event_last_actual["\s:]+([0-9]{2}\.[0-9]{1,2})',  # JSON data
             ]
             
             for pattern in actual_patterns:
@@ -886,7 +977,8 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5)
                 r'Previous\s+([0-9]+\.?[0-9]*)',
                 r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
                 r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-                r'Previous.*?([0-9]{2}\.[0-9])',
+                r'Previous.*?([0-9]{2}\.[0-9]{1,2})',  # Fixed: 1-2 decimali
+                r'event_last_previous["\s:]+([0-9]{2}\.[0-9]{1,2})',  # JSON data
             ]
             
             for pattern in previous_patterns:
@@ -1107,9 +1199,88 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
     return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": "Max retries exceeded"}
 
 
+def fetch_pmi_via_duckduckgo(currency: str, pmi_type: str) -> dict:
+    """
+    Fallback: cerca i dati PMI più recenti via DuckDuckGo.
+    
+    Args:
+        currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
+        pmi_type: "manufacturing" o "services"
+    
+    Returns:
+        dict con: current, previous, delta, date, source
+    """
+    currency_names = {
+        "USD": "US ISM" if pmi_type == "manufacturing" else "US ISM Non-Manufacturing",
+        "EUR": "Eurozone",
+        "GBP": "UK",
+        "JPY": "Japan Jibun Bank",
+        "CHF": "Switzerland procure.ch" if pmi_type == "manufacturing" else "Switzerland Services",
+        "AUD": "Australia",
+        "CAD": "Canada Ivey" if pmi_type == "manufacturing" else "Canada Services"
+    }
+    
+    search_term = f"{currency_names.get(currency, currency)} {pmi_type} PMI January 2026"
+    
+    try:
+        results = DDGS().text(search_term, max_results=5)
+        
+        current_value = None
+        previous_value = None
+        
+        for r in results:
+            text = r.get('body', '') + ' ' + r.get('title', '')
+            
+            # Cerca pattern come "PMI 47.9" o "came in at 52.3"
+            pmi_patterns = [
+                r'PMI[:\s]+(\d{2}\.\d)',
+                r'(?:came in|fell to|rose to|at|to)\s+(\d{2}\.\d)',
+                r'(\d{2}\.\d)\s*(?:in|for|from)',
+                r'(?:actual|reading)[:\s]+(\d{2}\.\d)',
+            ]
+            
+            for pattern in pmi_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    try:
+                        val = float(match.group(1))
+                        if 30 <= val <= 70:  # Range valido per PMI
+                            if current_value is None:
+                                current_value = val
+                            elif previous_value is None and val != current_value:
+                                previous_value = val
+                            break
+                    except:
+                        pass
+            
+            if current_value and previous_value:
+                break
+        
+        # Calcola delta
+        delta = None
+        if current_value is not None and previous_value is not None:
+            delta = round(current_value - previous_value, 1)
+        
+        if current_value is not None:
+            return {
+                "current": current_value,
+                "previous": previous_value,
+                "delta": delta,
+                "date": None,
+                "source": "DuckDuckGo Search",
+                "label": f"{pmi_type.capitalize()} PMI"
+            }
+        
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": "DuckDuckGo Search", "error": "No PMI found"}
+        
+    except Exception as e:
+        return {"current": None, "previous": None, "delta": None, "date": None, "source": "DuckDuckGo Search", "error": str(e)}
+
+
 def fetch_all_pmi_data() -> dict:
     """
     Recupera tutti i dati PMI per le 7 valute.
+    Priorità: 1) API JSON Investing.com, 2) HTML scraping, 3) DuckDuckGo
     
     Returns:
         dict con struttura:
@@ -1129,20 +1300,50 @@ def fetch_all_pmi_data() -> dict:
         pmi_data[currency] = {}
         
         # Manufacturing PMI
-        pmi_data[currency]["manufacturing"] = fetch_pmi_from_investing(currency, "manufacturing")
+        # 1) Prova API JSON (più affidabile)
+        result = fetch_pmi_from_investing_json(currency, "manufacturing")
         
-        # Delay per evitare rate limiting (1.5 secondi tra richieste)
+        # 2) Se fallisce, prova HTML scraping
+        if result.get("current") is None:
+            time.sleep(1.0)
+            result = fetch_pmi_from_investing(currency, "manufacturing")
+        
+        # 3) Se ancora fallisce, prova DuckDuckGo
+        if result.get("current") is None:
+            time.sleep(0.5)
+            fallback_result = fetch_pmi_via_duckduckgo(currency, "manufacturing")
+            if fallback_result.get("current") is not None:
+                result = fallback_result
+        
+        pmi_data[currency]["manufacturing"] = result
+        
+        # Delay tra richieste
         time.sleep(1.5)
         
         # Services PMI
         if currency == "CHF":
-            # CHF Services da TradingEconomics
-            pmi_data[currency]["services"] = fetch_chf_services_pmi_tradingeconomics()
+            # CHF Services da TradingEconomics (non disponibile su Investing.com)
+            result = fetch_chf_services_pmi_tradingeconomics()
         else:
-            pmi_data[currency]["services"] = fetch_pmi_from_investing(currency, "services")
+            # 1) Prova API JSON
+            result = fetch_pmi_from_investing_json(currency, "services")
+            
+            # 2) Se fallisce, prova HTML scraping
+            if result.get("current") is None:
+                time.sleep(1.0)
+                result = fetch_pmi_from_investing(currency, "services")
         
-        # Delay tra valute
-        time.sleep(1.0)
+        # 3) Se ancora fallisce, prova DuckDuckGo
+        if result.get("current") is None:
+            time.sleep(0.5)
+            fallback_result = fetch_pmi_via_duckduckgo(currency, "services")
+            if fallback_result.get("current") is not None:
+                result = fallback_result
+        
+        pmi_data[currency]["services"] = result
+        
+        # Delay tra valute (2 secondi)
+        time.sleep(2.0)
     
     return pmi_data
 
