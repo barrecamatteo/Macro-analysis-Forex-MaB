@@ -1831,7 +1831,7 @@ ESEMPIO SBAGLIATO:
         "EUR/USD": {
             "bias": "bullish/bearish/neutral",
             "strength": 1-5,
-            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO con riferimenti numerici",
+            "summary": "Inizia con 'Bullish/Bearish moderato:' o 'Strong bullish/bearish:' SOLO SE il differenziale è >= 7 o <= -7. Poi spiega il PERCHÉ con dati numerici.",
             "key_drivers": ["driver1", "driver2"],
             "score_base": 3,
             "score_quote": -3,
@@ -1880,101 +1880,15 @@ ESEMPIO SBAGLIATO:
             }
         }
     },
-    "rate_outlook": {
-        "USD": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla Fed."
-        },
-        "EUR": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla ECB."
-        },
-        "GBP": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla BoE."
-        },
-        "JPY": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla BoJ."
-        },
-        "CHF": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla SNB."
-        },
-        "AUD": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla RBA."
-        },
-        "CAD": {
-            "current_rate": "X.XX%",
-            "next_meeting": "Mese GG, AAAA",
-            "prob_cut": XX,
-            "prob_hold": XX,
-            "prob_hike": XX,
-            "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione 2-3 frasi sulla BoC."
-        }
-    },
-    "risk_sentiment": "risk-on/risk-off/neutral",
-    "events_calendar": []
+    "risk_sentiment": "risk-on/risk-off/neutral"
 }
 
-⚠️ **IMPORTANTE: rate_outlook DEVE contenere TUTTE E 7 LE VALUTE (USD, EUR, GBP, JPY, CHF, AUD, CAD). NON OMETTERE NESSUNA VALUTA!**
-
-## ⚠️ FONTI SUGGERITE PER RATE OUTLOOK:
-Per determinare le probabilità e stance delle banche centrali, considera:
-- **CME FedWatch** per Fed (USD)
-- **Refinitiv/LSEG** per ECB (EUR), BoE (GBP)
-- **Nikkei/Bloomberg** per BoJ (JPY)
-- **ASX RBA Rate Tracker** per RBA (AUD)
-- **OIS markets** per BoC (CAD) e SNB (CHF)
-- **Dichiarazioni ufficiali** dei governatori
-- **Verbali** delle ultime riunioni
-- **Notizie recenti** da Reuters, Bloomberg, ForexFactory
-- **STORICO DECISIONI** (se fornito): ultimi 2 meeting e trend
-
-## ⚠️ REGOLE COERENZA STANCE:
-La stance deve essere COERENTE con lo storico delle decisioni:
-- **Trend HIKING** (2 rialzi) → Stance NON PUÒ essere "Dovish" (usa Hawkish o Neutral)
-- **Trend CUTTING** (2 tagli) → Stance NON PUÒ essere "Hawkish" (usa Dovish o Neutral)
-- **Trend HOLDING** → Stance può essere Neutral, o influenzata dal dissent
-- **Dissent 🕊️** (volevano tagliare) → Tilt dovish sulla stance
-- **Dissent 🦅** (volevano alzare) → Tilt hawkish sulla stance
-
-## ⚠️ FORMATO next_meeting:
-Il campo "next_meeting" deve essere in formato "Mese GG, AAAA" (es: "Jan 29, 2025")
-
-Le probabilità (prob_cut, prob_hold, prob_hike) devono sommare a 100.
+## ⚠️ REGOLE COERENZA ASPETTATIVE TASSI:
+Il punteggio "aspettative_tassi" deve essere COERENTE con lo storico delle decisioni (se fornito):
+- **Trend HIKING** (2 rialzi) → La valuta NON PUÒ avere score -2 (molto dovish)
+- **Trend CUTTING** (2 tagli) → La valuta NON PUÒ avere score +2 (molto hawkish)
+- **Trend HOLDING** → Score può essere -1, 0, o +1 in base alle aspettative future
+- Usa le NOTIZIE WEB per determinare le aspettative future
 
 ## REGOLE CRITICHE FINALI:
 - ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web)
@@ -1985,6 +1899,17 @@ Le probabilità (prob_cut, prob_hold, prob_hike) devono sommare a 100.
 - score_base = SOMMA dei 7 punteggi "base"
 - score_quote = SOMMA dei 7 punteggi "quote"
 - differenziale = score_base - score_quote
+
+## ⚠️ REGOLE PER IL SUMMARY - STRONG VS MODERATE:
+Il "summary" deve iniziare con la forza CORRETTA del bias:
+- **"Strong bullish bias:"** → SOLO SE differenziale >= +7
+- **"Strong bearish bias:"** → SOLO SE differenziale <= -7
+- **"Bullish moderato:"** → SE differenziale tra +1 e +6
+- **"Bearish moderato:"** → SE differenziale tra -1 e -6
+- **"Bias neutrale:"** → SE differenziale = 0
+
+NON SCRIVERE MAI "Strong" se il differenziale è tra -6 e +6!
+Calcola PRIMA il differenziale sommando i punteggi, POI scrivi il summary appropriato.
 """
 
 
@@ -2496,11 +2421,9 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 3. **PMI sono LEADING indicators**: anticipano la crescita futura
 4. **PIL è LAGGING indicator**: conferma la crescita passata
 5. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
-6. **events_calendar** = []
-7. Ogni **summary** deve spiegare PERCHÉ quel bias
-8. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
-9. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
-10. **⚠️ OBBLIGATORIO: rate_outlook DEVE contenere TUTTE E 7 le valute: USD, EUR, GBP, JPY, CHF, AUD, CAD - NON OMETTERE NESSUNA!**
+6. Ogni **summary** deve spiegare PERCHÉ quel bias
+7. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
+8. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -3102,91 +3025,55 @@ def display_central_bank_history():
         st.caption("🦅 = dissent hawkish (volevano alzare) | 🕊️ = dissent dovish (volevano tagliare)")
 
 
-def display_rate_outlook_from_claude(rate_outlook: dict):
+def correct_summary_strength(summary: str, differential: int) -> str:
     """
-    Mostra la tabella outlook tassi generata da Claude.
-    Colonne: Valuta, Tasso, Prossimo Meeting, % Cut, % Hold, % Hike, Stance
-    Con toggle per mostrare le note esplicative.
+    Corregge automaticamente il summary se la forza (Strong/Moderate) non corrisponde al differenziale.
+    
+    Regole:
+    - Strong bullish/bearish: SOLO SE |differential| >= 7
+    - Moderato: SE |differential| tra 1 e 6
+    - Neutrale: SE differential = 0
     """
-    # Prima mostra lo storico decisioni
-    display_central_bank_history()
-    st.markdown("---")
+    if not summary:
+        return summary
     
-    st.markdown("### 🏦 Outlook Tassi di Interesse")
+    summary_lower = summary.lower()
     
-    if not rate_outlook:
-        st.warning("⚠️ Nessun outlook tassi disponibile")
-        return
-    
-    # Costruisci la tabella
-    table_rows = []
-    notes_data = {}
-    
-    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
-    
-    for currency in currency_order:
-        data = rate_outlook.get(currency, {})
-        if data:
-            # Formatta stance con emoji
-            stance = data.get("stance", "N/A")
-            if stance.lower() == "hawkish":
-                stance_display = "🦅 Hawkish"
-            elif stance.lower() == "dovish":
-                stance_display = "🕊️ Dovish"
-            else:
-                stance_display = "⚖️ Neutral"
-            
-            # Probabilità
-            prob_cut = data.get("prob_cut", 0)
-            prob_hold = data.get("prob_hold", 0)
-            prob_hike = data.get("prob_hike", 0)
-            
-            # Formatta percentuali
-            prob_cut_str = f"{prob_cut}%" if prob_cut else "-"
-            prob_hold_str = f"{prob_hold}%" if prob_hold else "-"
-            prob_hike_str = f"{prob_hike}%" if prob_hike else "-"
-            
-            row = {
-                "Valuta": currency,
-                "Tasso": data.get("current_rate", "N/A"),
-                "Prossimo Meeting": data.get("next_meeting", "N/A"),
-                "% Cut": prob_cut_str,
-                "% Hold": prob_hold_str,
-                "% Hike": prob_hike_str,
-                "Stance": stance_display
-            }
-            table_rows.append(row)
-            
-            # Salva note per il toggle
-            notes = data.get("notes", "")
-            if notes:
-                notes_data[currency] = notes
-    
-    if table_rows:
-        df = pd.DataFrame(table_rows)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Toggle per mostrare le note
-        if notes_data:
-            with st.expander("📝 Mostra/Nascondi Dettagli Previsioni", expanded=False):
-                for currency in currency_order:
-                    if currency in notes_data:
-                        cb_map = {
-                            "USD": "🇺🇸 Federal Reserve (Fed)",
-                            "EUR": "🇪🇺 European Central Bank (ECB)",
-                            "GBP": "🇬🇧 Bank of England (BoE)",
-                            "JPY": "🇯🇵 Bank of Japan (BoJ)",
-                            "CHF": "🇨🇭 Swiss National Bank (SNB)",
-                            "AUD": "🇦🇺 Reserve Bank of Australia (RBA)",
-                            "CAD": "🇨🇦 Bank of Canada (BoC)"
-                        }
-                        st.markdown(f"**{cb_map.get(currency, currency)}**")
-                        st.markdown(f"> {notes_data[currency]}")
-                        st.markdown("")
-        
-        st.caption("💡 Probabilità e stance basate su OIS markets, dichiarazioni BC e notizie recenti")
+    if differential >= 7:
+        # Deve essere "Strong bullish"
+        if "strong bearish" in summary_lower or "bearish moderato" in summary_lower:
+            return summary.replace("Strong bearish", "Strong bullish").replace("Bearish moderato", "Strong bullish bias")
+        elif "bullish moderato" in summary_lower:
+            return summary.replace("Bullish moderato", "Strong bullish bias")
+    elif differential <= -7:
+        # Deve essere "Strong bearish"
+        if "strong bullish" in summary_lower or "bullish moderato" in summary_lower:
+            return summary.replace("Strong bullish", "Strong bearish").replace("Bullish moderato", "Strong bearish bias")
+        elif "bearish moderato" in summary_lower:
+            return summary.replace("Bearish moderato", "Strong bearish bias")
+    elif differential > 0:
+        # Deve essere "Bullish moderato" (non Strong)
+        if "strong bullish" in summary_lower:
+            return summary.replace("Strong bullish", "Bullish moderato")
+        elif "strong bearish" in summary_lower:
+            # Correzione completa del bias
+            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
+            return f"Bullish moderato: {rest}"
+    elif differential < 0:
+        # Deve essere "Bearish moderato" (non Strong)
+        if "strong bearish" in summary_lower:
+            return summary.replace("Strong bearish", "Bearish moderato")
+        elif "strong bullish" in summary_lower:
+            # Correzione completa del bias
+            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
+            return f"Bearish moderato: {rest}"
     else:
-        st.warning("⚠️ Nessun dato outlook disponibile")
+        # Differenziale = 0, deve essere neutral
+        if "strong" in summary_lower[:30] or "bullish" in summary_lower[:20] or "bearish" in summary_lower[:20]:
+            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
+            return f"Bias neutrale: {rest}"
+    
+    return summary
 
 
 def display_analysis_matrix(analysis: dict):
@@ -3217,12 +3104,6 @@ def display_analysis_matrix(analysis: dict):
         st.info(f"📋 **Contesto:** {analysis['summary']}")
     
     st.markdown("---")
-    
-    # ===== OUTLOOK TASSI (subito dopo summary) =====
-    rate_outlook = analysis.get("rate_outlook", {})
-    if rate_outlook:
-        display_rate_outlook_from_claude(rate_outlook)
-        st.markdown("---")
     
     # ===== TOP BULLISH / TOP BEARISH =====
     pair_analysis = analysis.get("pair_analysis", {})
@@ -3290,6 +3171,9 @@ def display_analysis_matrix(analysis: dict):
                     score_quote += param_scores.get("quote", 0)
             differential = score_base - score_quote
             
+            # Correggi automaticamente il summary se non corrisponde al differenziale
+            summary_corrected = correct_summary_strength(summary, differential)
+            
             # Pallini colorati basati sul DIFFERENZIALE (>=7 o <=-7 = forte)
             if bias == "bullish" or differential > 0:
                 bias_combined = "🟢🟢 BULLISH" if differential >= 7 else "🟢 BULLISH"
@@ -3303,7 +3187,7 @@ def display_analysis_matrix(analysis: dict):
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                "Sintesi": summary  # Testo completo - il dettaglio sotto mostra tutto
+                "Sintesi": summary_corrected  # Testo corretto automaticamente
             })
         
         # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
@@ -3432,7 +3316,8 @@ def display_analysis_matrix(analysis: dict):
             
             # === SINTESI ===
             st.markdown("")
-            st.markdown(f"**Sintesi:** {summary}")
+            summary_corrected = correct_summary_strength(summary, differential)
+            st.markdown(f"**Sintesi:** {summary_corrected}")
             
             st.markdown("---")
             
@@ -4157,6 +4042,10 @@ def main():
         if pmi_data:
             display_pmi_table(pmi_data)
             st.markdown("---")
+        
+        # Storico Decisioni Banche Centrali (dati da Investing.com API, non Claude)
+        display_central_bank_history()
+        st.markdown("---")
         
         # 1️⃣ Mostra tabella prezzi forex se disponibili
         forex_prices = analysis.get("forex_prices", {})
