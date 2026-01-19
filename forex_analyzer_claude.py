@@ -1883,23 +1883,73 @@ ESEMPIO SBAGLIATO:
     "rate_outlook": {
         "USD": {
             "current_rate": "X.XX%",
-            "next_meeting": "YYYY-MM-DD o Mese Anno",
+            "next_meeting": "Mese GG, AAAA",
             "prob_cut": XX,
             "prob_hold": XX,
             "prob_hike": XX,
             "stance": "Hawkish/Dovish/Neutral",
-            "notes": "Spiegazione dettagliata sulla posizione della Fed, basata su dichiarazioni recenti, dot plot, aspettative di mercato. 2-3 frasi."
+            "notes": "Spiegazione 2-3 frasi sulla Fed."
         },
-        "EUR": { "... stessa struttura per ECB ..." },
-        "GBP": { "... stessa struttura per BoE ..." },
-        "JPY": { "... stessa struttura per BoJ ..." },
-        "CHF": { "... stessa struttura per SNB ..." },
-        "AUD": { "... stessa struttura per RBA ..." },
-        "CAD": { "... stessa struttura per BoC ..." }
+        "EUR": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla ECB."
+        },
+        "GBP": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla BoE."
+        },
+        "JPY": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla BoJ."
+        },
+        "CHF": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla SNB."
+        },
+        "AUD": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla RBA."
+        },
+        "CAD": {
+            "current_rate": "X.XX%",
+            "next_meeting": "Mese GG, AAAA",
+            "prob_cut": XX,
+            "prob_hold": XX,
+            "prob_hike": XX,
+            "stance": "Hawkish/Dovish/Neutral",
+            "notes": "Spiegazione 2-3 frasi sulla BoC."
+        }
     },
     "risk_sentiment": "risk-on/risk-off/neutral",
     "events_calendar": []
 }
+
+⚠️ **IMPORTANTE: rate_outlook DEVE contenere TUTTE E 7 LE VALUTE (USD, EUR, GBP, JPY, CHF, AUD, CAD). NON OMETTERE NESSUNA VALUTA!**
 
 ## ⚠️ FONTI SUGGERITE PER RATE OUTLOOK:
 Per determinare le probabilità e stance delle banche centrali, considera:
@@ -2450,6 +2500,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 7. Ogni **summary** deve spiegare PERCHÉ quel bias
 8. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
 9. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
+10. **⚠️ OBBLIGATORIO: rate_outlook DEVE contenere TUTTE E 7 le valute: USD, EUR, GBP, JPY, CHF, AUD, CAD - NON OMETTERE NESSUNA!**
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
