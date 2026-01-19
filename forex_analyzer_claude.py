@@ -1829,12 +1829,8 @@ ESEMPIO SBAGLIATO:
     "summary": "Breve riassunto del contesto macro globale in italiano",
     "pair_analysis": {
         "EUR/USD": {
-            "bias": "bullish/bearish/neutral",
-            "strength": 1-5,
-            "summary": "Inizia con 'Bullish/Bearish moderato:' o 'Strong bullish/bearish:' SOLO SE il differenziale è >= 7 o <= -7. Poi spiega il PERCHÉ con dati numerici.",
+            "summary": "Descrivi i fattori chiave del confronto con dati numerici. NON scrivere 'bullish' o 'bearish' - il bias sarà determinato automaticamente dai punteggi.",
             "key_drivers": ["driver1", "driver2"],
-            "score_base": 3,
-            "score_quote": -3,
             "current_price": "1.0850",
             "price_scenarios": {
                 "base_range": "1.0750 - 1.0950",
@@ -1900,16 +1896,10 @@ Il punteggio "aspettative_tassi" deve essere COERENTE con lo storico delle decis
 - score_quote = SOMMA dei 7 punteggi "quote"
 - differenziale = score_base - score_quote
 
-## ⚠️ REGOLE PER IL SUMMARY - STRONG VS MODERATE:
-Il "summary" deve iniziare con la forza CORRETTA del bias:
-- **"Strong bullish bias:"** → SOLO SE differenziale >= +7
-- **"Strong bearish bias:"** → SOLO SE differenziale <= -7
-- **"Bullish moderato:"** → SE differenziale tra +1 e +6
-- **"Bearish moderato:"** → SE differenziale tra -1 e -6
-- **"Bias neutrale:"** → SE differenziale = 0
-
-NON SCRIVERE MAI "Strong" se il differenziale è tra -6 e +6!
-Calcola PRIMA il differenziale sommando i punteggi, POI scrivi il summary appropriato.
+## ⚠️ NOTA SUL SUMMARY:
+Il campo "summary" deve descrivere i fattori chiave del confronto con dati numerici.
+NON scrivere "bullish", "bearish", "Strong" nel summary - il bias verrà determinato automaticamente dal sistema in base al differenziale calcolato.
+Concentrati sui FATTI: tassi, aspettative, inflazione, PMI, ecc.
 """
 
 
@@ -3025,55 +3015,49 @@ def display_central_bank_history():
         st.caption("🦅 = dissent hawkish (volevano alzare) | 🕊️ = dissent dovish (volevano tagliare)")
 
 
-def correct_summary_strength(summary: str, differential: int) -> str:
+def generate_summary_with_bias(summary: str, differential: int) -> str:
     """
-    Corregge automaticamente il summary se la forza (Strong/Moderate) non corrisponde al differenziale.
+    Genera il summary con il prefisso bias corretto basato SOLO sul differenziale.
     
     Regole:
-    - Strong bullish/bearish: SOLO SE |differential| >= 7
-    - Moderato: SE |differential| tra 1 e 6
-    - Neutrale: SE differential = 0
+    - diff >= 7  → "Strong bullish: ..."
+    - diff 1-6   → "Bullish moderato: ..."
+    - diff = 0   → "Bias neutrale: ..."
+    - diff -1/-6 → "Bearish moderato: ..."
+    - diff <= -7 → "Strong bearish: ..."
+    
+    Claude ora genera summary senza prefisso bias, quindi lo aggiungiamo noi.
     """
     if not summary:
         return summary
     
-    summary_lower = summary.lower()
+    # Rimuovi eventuali prefissi bias già presenti (per sicurezza)
+    summary_clean = summary
+    prefixes_to_remove = [
+        "Strong bullish bias:", "Strong bullish:", 
+        "Strong bearish bias:", "Strong bearish:",
+        "Bullish moderato:", "Bearish moderato:",
+        "Bias neutrale:", "Neutral:",
+        "Bullish:", "Bearish:"
+    ]
+    for prefix in prefixes_to_remove:
+        if summary_clean.lower().startswith(prefix.lower()):
+            summary_clean = summary_clean[len(prefix):].strip()
+            break
     
+    # Determina il prefisso corretto dal differenziale
     if differential >= 7:
-        # Deve essere "Strong bullish"
-        if "strong bearish" in summary_lower or "bearish moderato" in summary_lower:
-            return summary.replace("Strong bearish", "Strong bullish").replace("Bearish moderato", "Strong bullish bias")
-        elif "bullish moderato" in summary_lower:
-            return summary.replace("Bullish moderato", "Strong bullish bias")
-    elif differential <= -7:
-        # Deve essere "Strong bearish"
-        if "strong bullish" in summary_lower or "bullish moderato" in summary_lower:
-            return summary.replace("Strong bullish", "Strong bearish").replace("Bullish moderato", "Strong bearish bias")
-        elif "bearish moderato" in summary_lower:
-            return summary.replace("Bearish moderato", "Strong bearish bias")
+        prefix = "Strong bullish"
     elif differential > 0:
-        # Deve essere "Bullish moderato" (non Strong)
-        if "strong bullish" in summary_lower:
-            return summary.replace("Strong bullish", "Bullish moderato")
-        elif "strong bearish" in summary_lower:
-            # Correzione completa del bias
-            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
-            return f"Bullish moderato: {rest}"
+        prefix = "Bullish moderato"
+    elif differential <= -7:
+        prefix = "Strong bearish"
     elif differential < 0:
-        # Deve essere "Bearish moderato" (non Strong)
-        if "strong bearish" in summary_lower:
-            return summary.replace("Strong bearish", "Bearish moderato")
-        elif "strong bullish" in summary_lower:
-            # Correzione completa del bias
-            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
-            return f"Bearish moderato: {rest}"
+        prefix = "Bearish moderato"
     else:
-        # Differenziale = 0, deve essere neutral
-        if "strong" in summary_lower[:30] or "bullish" in summary_lower[:20] or "bearish" in summary_lower[:20]:
-            rest = summary[summary.find(":")+1:].strip() if ":" in summary else summary
-            return f"Bias neutrale: {rest}"
+        prefix = "Bias neutrale"
     
-    return summary
+    return f"{prefix}: {summary_clean}"
 
 
 def display_analysis_matrix(analysis: dict):
@@ -3158,7 +3142,6 @@ def display_analysis_matrix(analysis: dict):
         # Crea lista con dati e ordina per differenziale (dal più bullish al più bearish)
         rows_data = []
         for pair, data in pair_analysis.items():
-            bias = data.get("bias", "neutral")
             summary = data.get("summary", "")
             
             # CALCOLA I TOTALI dalla somma dei singoli punteggi
@@ -3171,14 +3154,18 @@ def display_analysis_matrix(analysis: dict):
                     score_quote += param_scores.get("quote", 0)
             differential = score_base - score_quote
             
-            # Correggi automaticamente il summary se non corrisponde al differenziale
-            summary_corrected = correct_summary_strength(summary, differential)
+            # Genera il summary con prefisso bias corretto basato sul differenziale
+            summary_with_bias = generate_summary_with_bias(summary, differential)
             
-            # Pallini colorati basati sul DIFFERENZIALE (>=7 o <=-7 = forte)
-            if bias == "bullish" or differential > 0:
-                bias_combined = "🟢🟢 BULLISH" if differential >= 7 else "🟢 BULLISH"
-            elif bias == "bearish" or differential < 0:
-                bias_combined = "🔴🔴 BEARISH" if differential <= -7 else "🔴 BEARISH"
+            # Pallini colorati basati SOLO sul DIFFERENZIALE (ignoriamo bias di Claude)
+            if differential >= 7:
+                bias_combined = "🟢🟢 BULLISH"
+            elif differential > 0:
+                bias_combined = "🟢 BULLISH"
+            elif differential <= -7:
+                bias_combined = "🔴🔴 BEARISH"
+            elif differential < 0:
+                bias_combined = "🔴 BEARISH"
             else:
                 bias_combined = "🟡 NEUTRAL"
             
@@ -3187,7 +3174,7 @@ def display_analysis_matrix(analysis: dict):
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                "Sintesi": summary_corrected  # Testo corretto automaticamente
+                "Sintesi": summary_with_bias  # Bias determinato dal differenziale
             })
         
         # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
@@ -3239,12 +3226,10 @@ def display_analysis_matrix(analysis: dict):
             
             pair_data = pair_analysis[selected_pair]
             
-            bias = pair_data.get("bias", "neutral")
             summary = pair_data.get("summary", "")
             scores = pair_data.get("scores", {})
             
             # CALCOLA I TOTALI LOCALMENTE sommando i singoli punteggi
-            # invece di usare score_base/score_quote di Claude (che possono essere sbagliati)
             score_base = 0
             score_quote = 0
             for param_key, param_scores in scores.items():
@@ -3257,19 +3242,31 @@ def display_analysis_matrix(analysis: dict):
             # Estrai valute dalla coppia
             base_curr, quote_curr = selected_pair.split("/")
             
-            # Determina tipo bias basato su DIFFERENZIALE
-            if bias == "bullish" or differential > 0:
+            # Determina tipo bias basato SOLO sul DIFFERENZIALE (ignoriamo bias di Claude)
+            if differential >= 7:
                 bias_type = "RIALZISTA" 
-                bias_strength = "(STRONG)" if differential >= 7 else "(MODERATE)"
+                bias_strength = "(STRONG)"
                 header_color = "#d4edda"
                 header_border = "#28a745"
-                header_emoji = "🟢🟢" if differential >= 7 else "🟢"
-            elif bias == "bearish" or differential < 0:
+                header_emoji = "🟢🟢"
+            elif differential > 0:
+                bias_type = "RIALZISTA" 
+                bias_strength = "(MODERATE)"
+                header_color = "#d4edda"
+                header_border = "#28a745"
+                header_emoji = "🟢"
+            elif differential <= -7:
                 bias_type = "RIBASSISTA"
-                bias_strength = "(STRONG)" if differential <= -7 else "(MODERATE)"
+                bias_strength = "(STRONG)"
                 header_color = "#f8d7da"
                 header_border = "#dc3545"
-                header_emoji = "🔴🔴" if differential <= -7 else "🔴"
+                header_emoji = "🔴🔴"
+            elif differential < 0:
+                bias_type = "RIBASSISTA"
+                bias_strength = "(MODERATE)"
+                header_color = "#f8d7da"
+                header_border = "#dc3545"
+                header_emoji = "🔴"
             else:
                 bias_type = "NEUTRALE"
                 bias_strength = ""
@@ -3316,8 +3313,8 @@ def display_analysis_matrix(analysis: dict):
             
             # === SINTESI ===
             st.markdown("")
-            summary_corrected = correct_summary_strength(summary, differential)
-            st.markdown(f"**Sintesi:** {summary_corrected}")
+            summary_with_bias = generate_summary_with_bias(summary, differential)
+            st.markdown(f"**Sintesi:** {summary_with_bias}")
             
             st.markdown("---")
             
