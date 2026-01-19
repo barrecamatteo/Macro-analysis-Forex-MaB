@@ -3043,7 +3043,7 @@ def display_central_bank_history():
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
         
         # Legenda
-        st.caption("🟢 Hike (+bp) | 🔴 Cut (-bp) | ⚫ Hold (0bp) — 🦅 = dissent hawkish | 🕊️ = dissent dovish")
+        st.caption("🟢 Hike (+bp) | 🔴 Cut (-bp) | ⚫ Hold (0bp)")
 
 
 def generate_summary_with_bias(summary: str, differential: int) -> str:
