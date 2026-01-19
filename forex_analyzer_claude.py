@@ -929,17 +929,17 @@ def calculate_trend_from_meetings(meetings: list) -> dict:
     
     # Logica trend
     if d1 == "hike" and d2 == "hike":
-        return {"trend": "hiking", "trend_label": "Hiking", "trend_emoji": "📈", "stance_hint": "hawkish"}
+        return {"trend": "hiking", "trend_label": "Hiking", "trend_emoji": "🟢 ▲", "stance_hint": "hawkish"}
     elif d1 == "cut" and d2 == "cut":
-        return {"trend": "cutting", "trend_label": "Cutting", "trend_emoji": "📉", "stance_hint": "dovish"}
+        return {"trend": "cutting", "trend_label": "Cutting", "trend_emoji": "🔴 ▼", "stance_hint": "dovish"}
     elif d1 == "hold" and d2 == "hold":
-        return {"trend": "holding", "trend_label": "Holding", "trend_emoji": "➡️", "stance_hint": "neutral"}
+        return {"trend": "holding", "trend_label": "Holding", "trend_emoji": "➖", "stance_hint": "neutral"}
     elif d1 == "hike" and d2 == "hold":
-        return {"trend": "tightening", "trend_label": "Tightening", "trend_emoji": "↗️", "stance_hint": "hawkish"}
+        return {"trend": "tightening", "trend_label": "Tightening", "trend_emoji": "🟢 ▲", "stance_hint": "hawkish"}
     elif d1 == "hold" and d2 == "hike":
         return {"trend": "pause_after_hike", "trend_label": "Pausa (post-rialzo)", "trend_emoji": "⏸️", "stance_hint": "hawkish"}
     elif d1 == "cut" and d2 == "hold":
-        return {"trend": "easing", "trend_label": "Easing", "trend_emoji": "↘️", "stance_hint": "dovish"}
+        return {"trend": "easing", "trend_label": "Easing", "trend_emoji": "🔴 ▼", "stance_hint": "dovish"}
     elif d1 == "hold" and d2 == "cut":
         return {"trend": "pause_after_cut", "trend_label": "Pausa (post-taglio)", "trend_emoji": "⏸️", "stance_hint": "dovish"}
     else:
