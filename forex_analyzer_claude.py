@@ -3090,8 +3090,7 @@ def display_central_bank_history():
                 "Tasso Attuale": data.get("current_rate", "N/A"),
                 "Meeting -1": data.get("meeting_1", "N/A"),
                 "Meeting -2": data.get("meeting_2", "N/A"),
-                "Trend": f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}",
-                "Prossimo": data.get("next_meeting", "N/A")
+                "Trend": f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
             }
             table_rows.append(row)
     
