@@ -3231,8 +3231,14 @@ def display_analysis_matrix(analysis: dict):
         # Calcola differenziale per ogni coppia e ordina
         pairs_with_diff = []
         for p, d in pair_analysis.items():
-            score_base = d.get("score_base", 0)
-            score_quote = d.get("score_quote", 0)
+            # CALCOLA I TOTALI dalla somma dei singoli punteggi
+            scores = d.get("scores", {})
+            score_base = 0
+            score_quote = 0
+            for param_key, param_scores in scores.items():
+                if isinstance(param_scores, dict):
+                    score_base += param_scores.get("base", 0)
+                    score_quote += param_scores.get("quote", 0)
             diff = score_base - score_quote
             pairs_with_diff.append((p, d, diff))
         
@@ -3273,8 +3279,15 @@ def display_analysis_matrix(analysis: dict):
         for pair, data in pair_analysis.items():
             bias = data.get("bias", "neutral")
             summary = data.get("summary", "")
-            score_base = data.get("score_base", 0)
-            score_quote = data.get("score_quote", 0)
+            
+            # CALCOLA I TOTALI dalla somma dei singoli punteggi
+            scores = data.get("scores", {})
+            score_base = 0
+            score_quote = 0
+            for param_key, param_scores in scores.items():
+                if isinstance(param_scores, dict):
+                    score_base += param_scores.get("base", 0)
+                    score_quote += param_scores.get("quote", 0)
             differential = score_base - score_quote
             
             # Pallini colorati basati sul DIFFERENZIALE (>=7 o <=-7 = forte)
@@ -3344,10 +3357,18 @@ def display_analysis_matrix(analysis: dict):
             
             bias = pair_data.get("bias", "neutral")
             summary = pair_data.get("summary", "")
-            score_base = pair_data.get("score_base", 0)
-            score_quote = pair_data.get("score_quote", 0)
-            differential = score_base - score_quote
             scores = pair_data.get("scores", {})
+            
+            # CALCOLA I TOTALI LOCALMENTE sommando i singoli punteggi
+            # invece di usare score_base/score_quote di Claude (che possono essere sbagliati)
+            score_base = 0
+            score_quote = 0
+            for param_key, param_scores in scores.items():
+                if isinstance(param_scores, dict):
+                    score_base += param_scores.get("base", 0)
+                    score_quote += param_scores.get("quote", 0)
+            
+            differential = score_base - score_quote
             
             # Estrai valute dalla coppia
             base_curr, quote_curr = selected_pair.split("/")
