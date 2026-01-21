@@ -638,6 +638,50 @@ def load_analysis(datetime_str: str, user_id: str) -> dict | None:
     return None
 
 
+def get_latest_analysis_data(user_id: str) -> dict:
+    """
+    Carica i dati dall'ultima analisi salvata per usarli come fallback.
+    
+    Returns:
+        Dict con i dati disponibili (macro_data, pmi_data, ecc.) o dict vuoto
+    """
+    cached_data = {}
+    
+    try:
+        # Ottieni lista analisi recenti
+        recent = list_analyses(user_id, limit=1)
+        if not recent or len(recent) == 0:
+            return cached_data
+        
+        # Trova il datetime key
+        datetime_key = recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime")
+        if not datetime_key:
+            return cached_data
+        
+        # Carica l'analisi completa
+        last_analysis = load_analysis(datetime_key, user_id)
+        if not last_analysis:
+            return cached_data
+        
+        # I dati sono dentro 'data' per Supabase, direttamente per locale
+        data_container = last_analysis.get('data', last_analysis)
+        
+        # Estrai tutti i dati disponibili
+        for key in ['macro_data', 'pmi_data', 'cb_history_data', 'forex_prices', 
+                    'economic_events', 'news_structured', 'links_structured']:
+            if key in data_container and data_container[key]:
+                cached_data[key] = data_container[key]
+        
+        # Aggiungi anche il datetime per mostrare quanto sono vecchi i dati
+        cached_data['cached_datetime'] = datetime_key
+        
+    except Exception as e:
+        # Se fallisce, ritorna dict vuoto
+        pass
+    
+    return cached_data
+
+
 def delete_analysis(datetime_str: str, user_id: str) -> bool:
     """Cancella un'analisi da Supabase. Gestisce sia analisi con user_id che legacy."""
     try:
@@ -4744,6 +4788,28 @@ def main():
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
+        # ===== CARICA DATI CACHED (se necessario) =====
+        cached_data = {}
+        using_cached = []  # Lista dei dati che useremo dalla cache
+        
+        # Verifica se ci sono opzioni non selezionate che potrebbero usare dati cached
+        needs_cached = (not opt_macro or not opt_pmi or not opt_cb_history or 
+                       not opt_prices or not opt_news)
+        
+        if needs_cached:
+            # Prima controlla la sessione, poi carica dall'ultima analisi
+            if not any(k in st.session_state for k in ['last_macro_data', 'last_pmi_data', 'last_cb_history']):
+                cached_data = get_latest_analysis_data(user_id)
+                if cached_data.get('cached_datetime'):
+                    # Formatta la data in modo leggibile
+                    cached_dt = cached_data['cached_datetime']
+                    try:
+                        # Formato: 2025-01-21_14-30-00
+                        dt_formatted = cached_dt.replace("_", " ").replace("-", "/", 2).replace("-", ":")
+                    except:
+                        dt_formatted = cached_dt
+                    st.info(f"📦 Dati cache disponibili dall'analisi del **{dt_formatted}**")
+        
         # FASE 1: Dati Macro
         if opt_macro:
             step += 1
@@ -4751,26 +4817,14 @@ def main():
             macro_data = fetch_macro_data()
             st.session_state['last_macro_data'] = macro_data
         else:
-            # Usa dati macro dalla sessione o dall'ultima analisi salvata
+            # Usa dati macro dalla sessione o dalla cache
             if 'last_macro_data' in st.session_state and st.session_state['last_macro_data']:
                 macro_data = st.session_state['last_macro_data']
-            else:
-                # Prova a caricare dall'ultima analisi salvata
-                try:
-                    recent = list_analyses(user_id, limit=1)
-                    if recent and len(recent) > 0:
-                        datetime_key = recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime")
-                        if datetime_key:
-                            last_analysis = load_analysis(datetime_key, user_id)
-                            if last_analysis:
-                                # I dati sono dentro 'data' per Supabase
-                                data_container = last_analysis.get('data', last_analysis)
-                                if data_container and 'macro_data' in data_container:
-                                    macro_data = data_container['macro_data']
-                                    st.session_state['last_macro_data'] = macro_data
-                except Exception as e:
-                    # Se fallisce il caricamento, continua senza dati macro
-                    pass
+                using_cached.append("Macro")
+            elif 'macro_data' in cached_data:
+                macro_data = cached_data['macro_data']
+                st.session_state['last_macro_data'] = macro_data
+                using_cached.append("Macro")
         
         # FASE 2: Dati PMI
         if opt_pmi:
@@ -4779,9 +4833,14 @@ def main():
             pmi_data = fetch_all_pmi_data()
             st.session_state['last_pmi_data'] = pmi_data
         else:
-            # Usa dati PMI dalla sessione
+            # Usa dati PMI dalla sessione o dalla cache
             if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
                 pmi_data = st.session_state['last_pmi_data']
+                using_cached.append("PMI")
+            elif 'pmi_data' in cached_data:
+                pmi_data = cached_data['pmi_data']
+                st.session_state['last_pmi_data'] = pmi_data
+                using_cached.append("PMI")
         
         # FASE 2.5: Storico Banche Centrali
         cb_history_data = {}
@@ -4791,9 +4850,14 @@ def main():
             cb_history_data = get_central_bank_history_summary()
             st.session_state['last_cb_history'] = cb_history_data
         else:
-            # Usa storico dalla sessione se disponibile
+            # Usa storico dalla sessione o dalla cache
             if 'last_cb_history' in st.session_state and st.session_state['last_cb_history']:
                 cb_history_data = st.session_state['last_cb_history']
+                using_cached.append("BC History")
+            elif 'cb_history_data' in cached_data:
+                cb_history_data = cached_data['cb_history_data']
+                st.session_state['last_cb_history'] = cb_history_data
+                using_cached.append("BC History")
         
         # FASE 3: Prezzi Forex
         forex_prices = {}
@@ -4803,9 +4867,18 @@ def main():
             forex_prices = fetch_forex_prices()
             st.session_state['last_forex_prices'] = forex_prices
         else:
-            # Usa prezzi dalla sessione se disponibili
-            if 'last_forex_prices' in st.session_state:
+            # Usa prezzi dalla sessione o dalla cache
+            if 'last_forex_prices' in st.session_state and st.session_state['last_forex_prices']:
                 forex_prices = st.session_state['last_forex_prices']
+                using_cached.append("Prezzi")
+            elif 'forex_prices' in cached_data:
+                forex_prices = cached_data['forex_prices']
+                st.session_state['last_forex_prices'] = forex_prices
+                using_cached.append("Prezzi")
+        
+        # Mostra quali dati cached stiamo usando
+        if using_cached:
+            st.caption(f"♻️ Usando dati cached: {', '.join(using_cached)}")
         
         # FASE 3: Notizie Web
         if opt_news:
@@ -4854,16 +4927,33 @@ def main():
                 st.session_state['last_economic_events'] = economic_events
             except Exception as e:
                 st.warning(f"⚠️ Errore recupero dati economici: {str(e)[:50]}")
-                # Usa dati dalla sessione se disponibili
+                # Usa dati dalla sessione o dalla cache se disponibili
                 if 'last_economic_events' in st.session_state:
                     economic_events = st.session_state['last_economic_events']
+                elif 'economic_events' in cached_data:
+                    economic_events = cached_data['economic_events']
+                    st.session_state['last_economic_events'] = economic_events
             
             step += 1
             progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
             
-            # Usa dati dalla sessione se non aggiornati ora
-            if not opt_news and 'last_news_text' in st.session_state:
-                news_text = st.session_state['last_news_text']
+            # Usa dati dalla sessione o dalla cache se non aggiornati ora
+            if not opt_news:
+                if 'last_news_text' in st.session_state:
+                    news_text = st.session_state['last_news_text']
+                    news_structured = st.session_state.get('last_news_structured', {})
+                elif 'news_structured' in cached_data:
+                    news_structured = cached_data['news_structured']
+                    # Ricostruisci news_text dalle news structured (per Claude)
+                    news_text = ""
+                    for source, items in news_structured.items():
+                        if isinstance(items, list):
+                            for item in items[:10]:
+                                if isinstance(item, dict):
+                                    news_text += f"• {item.get('title', '')}\n"
+                    st.session_state['last_news_text'] = news_text
+                    st.session_state['last_news_structured'] = news_structured
+                    
             if not opt_links and 'last_links_text' in st.session_state:
                 additional_text = st.session_state['last_links_text']
             if not opt_pmi and 'last_pmi_data' in st.session_state:
