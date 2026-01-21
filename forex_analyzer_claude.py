@@ -2372,11 +2372,12 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
 **Logica:** Cattura le SORPRESE economiche recenti (actual vs forecast) e gli shock geopolitici NON già prezzati.
 
-⚠️ IMPORTANTE: Questo parametro NON deve duplicare gli altri. Valuta SOLO:
-- Sorprese sui dati economici degli ultimi 5-7 giorni (actual ≠ forecast)
-- Eventi geopolitici improvvisi (trade war, tensioni, dichiarazioni shock)
+⚠️ **ATTENZIONE AL DOPPIO CONTEGGIO CON RISK SENTIMENT!**
+- La componente DATI (70%) è quasi sempre applicabile
+- La componente GEOPOLITICA (30%) si applica SOLO se NON già conteggiata in Risk Sentiment!
+- Se hai dato punteggio in Risk Sentiment per tensioni geopolitiche → Geopolitica qui = 0
 
-**PARTE 1: DATI ECONOMICI (70% del peso)**
+**PARTE 1: DATI ECONOMICI (70% del peso)** ← Questa parte NON ha problemi di doppio conteggio
 
 Usa i dati forniti nella sezione "DATI ECONOMICI RECENTI". Calcola la sorpresa = Actual - Forecast.
 
@@ -2399,14 +2400,18 @@ Usa i dati forniti nella sezione "DATI ECONOMICI RECENTI". Calcola la sorpresa =
 - 5-7 giorni fa: peso 25% (quadruplica le soglie)
 - >7 giorni fa: ignora
 
-**PARTE 2: GEOPOLITICA (30% del peso)**
+**PARTE 2: GEOPOLITICA (30% del peso)** ← ⚠️ SOLO se NON già in Risk Sentiment!
+
+Se Risk Sentiment ≠ 0 a causa di tensioni geopolitiche → questa sezione = 0 per tutte le valute!
+Usa questa tabella SOLO per shock improvvisi (<48h) non ancora riflessi nel regime di mercato.
 
 | Evento | Safe Haven (USD,CHF,JPY) | Risk Currency (AUD,EUR,GBP) |
 |--------|--------------------------|----------------------------|
-| Shock grave (guerra, crisi) | +2 | -2 |
-| Tensione moderata | +1 | -1 |
-| Trade war/dazi su valuta | +1 aggressor, -1 target | -1 target |
-| Risoluzione/distensione | -1 | +1 |
+| Shock grave IMPROVVISO (<48h) | +2 | -2 |
+| Tensione nuova non ancora prezzata | +1 | -1 |
+| Trade war/dazi NUOVI | +1 aggressor, -1 target | -1 target |
+| Risoluzione/distensione NUOVA | -1 | +1 |
+| Tensioni già note/prezzate | 0 | 0 |
 | Nessuna news rilevante | 0 | 0 |
 
 **CORRELAZIONI CROSS-VALUTA:**
@@ -2416,10 +2421,42 @@ Usa i dati forniti nella sezione "DATI ECONOMICI RECENTI". Calcola la sorpresa =
 **FORMULA COMBINAZIONE:**
 News_Catalyst = min(+2, max(-2, round((0.7 × Score_Dati) + (0.3 × Score_Geopolitica))))
 
-**REGOLA ANTI-DOPPIO CONTEGGIO:**
-Se un dato è già pienamente riflesso in altro parametro (es. inflazione già in parametro 3), 
-il News Catalyst deve essere 0 per quella componente, A MENO CHE ci sia stata una SORPRESA 
-SIGNIFICATIVA rispetto alle attese nella settimana corrente.
+## ⛔ REGOLA ANTI-DOPPIO CONTEGGIO - CRITICA! ⛔
+
+**PRINCIPIO FONDAMENTALE:** Ogni fattore economico o geopolitico può influenzare UN SOLO parametro.
+Se è già conteggiato in Risk Sentiment, NON può essere conteggiato anche in News Catalyst!
+
+**CONFLITTO PIÙ COMUNE - Risk Sentiment vs News Catalyst:**
+
+❌ ERRORE GRAVE (doppio conteggio):
+- Risk Sentiment JPY: +1 "safe-haven beneficia da tensioni geopolitiche"
+- News Catalyst JPY: +1 "safe-haven demand da tensioni Trump"
+→ SBAGLIATO! Stessa cosa contata due volte!
+
+✅ CORRETTO:
+- Risk Sentiment JPY: +1 "safe-haven beneficia da tensioni geopolitiche" 
+- News Catalyst JPY: 0 "Nessun dato economico sorpresa. Geopolitica già in Risk Sentiment."
+
+**REGOLA PRATICA per News Catalyst GEOPOLITICA:**
+- Se Risk Sentiment ≠ 0 per una valuta a causa di tensioni geopolitiche → News Catalyst Geopolitica = 0
+- News Catalyst Geopolitica ≠ 0 SOLO per eventi IMPROVVISI avvenuti nelle ultime 48h e NON ancora riflessi nel regime di mercato
+
+**COSA CONTA IN CIASCUN PARAMETRO:**
+
+| Parametro | Cosa conta | Cosa NON conta |
+|-----------|------------|----------------|
+| Risk Sentiment | Regime mercato generale (VIX, equity, tensioni) | Dati economici specifici |
+| News Catalyst DATI | Sorprese economiche (actual vs forecast) | Regime di mercato |
+| News Catalyst GEO | SOLO shock improvvisi <48h | Tensioni già note e prezzate |
+
+**ESEMPIO PRATICO:**
+Scenario: Tensioni commerciali USA-Cina in corso da settimane
+
+- Risk Sentiment: EUR -1, JPY +1 (risk-off per tensioni)
+- News Catalyst EUR: 0 (geopolitica già in Risk Sentiment), ma se CPI sorprende: ±1/2
+- News Catalyst JPY: 0 (geopolitica già in Risk Sentiment), ma se NFP sorprende: ±1/2
+
+**Se non sei sicuro → DAI 0 in News Catalyst Geopolitica!**
 
 ## ═══════════════════════════════════════════════════════════════════
 ## RANGE TOTALI
