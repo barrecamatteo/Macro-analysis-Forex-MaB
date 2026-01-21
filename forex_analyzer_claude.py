@@ -2891,7 +2891,7 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -2903,6 +2903,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         pmi_data: Dati PMI per valuta (opzionale)
         forex_prices: Prezzi forex in tempo reale (opzionale)
         economic_events: Dati eventi economici recenti per News Catalyst (opzionale)
+        cb_history_data: Storico decisioni banche centrali (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -2990,7 +2991,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
     
     # Sezione Storico Banche Centrali
     cb_history_section = ""
-    cb_history = get_central_bank_history_summary()
+    cb_history = cb_history_data if cb_history_data else {}
     if cb_history:
         cb_lines = []
         for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
@@ -3625,15 +3626,24 @@ def display_pmi_table(pmi_data: dict):
         st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
-def display_central_bank_history():
+def display_central_bank_history(history_data: dict = None):
     """
     Mostra la tabella storico decisioni delle banche centrali.
     Con colori: verde = hike, rosso = cut
+    
+    Args:
+        history_data: Dati storico già recuperati (opzionale). Se None, usa sessione o recupera.
     """
     st.markdown("### 📜 Storico Decisioni Banche Centrali")
     st.caption("Ultime 2 decisioni per ogni banca centrale")
     
-    history = get_central_bank_history_summary()
+    # Usa dati passati, dalla sessione, o recupera nuovi
+    if history_data:
+        history = history_data
+    elif 'last_cb_history' in st.session_state and st.session_state['last_cb_history']:
+        history = st.session_state['last_cb_history']
+    else:
+        history = get_central_bank_history_summary()
     
     # Mappa valuta -> banca
     currency_to_bank = {
@@ -4367,6 +4377,12 @@ def main():
             help="Recupera PMI Manufacturing e Services da Investing.com (GRATIS)"
         )
         
+        opt_cb_history = st.checkbox(
+            "🏦 Storico Banche Centrali",
+            value=True,
+            help="Recupera ultime 2 decisioni sui tassi per ogni BC (GRATIS)"
+        )
+        
         opt_prices = st.checkbox(
             "💱 Recupera Prezzi Forex",
             value=True,
@@ -4525,10 +4541,12 @@ def main():
         additional_text = ""
         links_structured = []
         claude_analysis = None
+        economic_events = {}
         
         options_selected = {
             "macro": opt_macro,
             "pmi": opt_pmi,
+            "cb_history": opt_cb_history,
             "prices": opt_prices,
             "news": opt_news,
             "links": opt_links,
@@ -4536,7 +4554,7 @@ def main():
         }
         
         step = 0
-        total_steps = sum([opt_macro, opt_pmi, opt_prices, opt_news, opt_links, opt_claude])
+        total_steps = sum([opt_macro, opt_pmi, opt_cb_history, opt_prices, opt_news, opt_links, opt_claude])
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
@@ -4579,7 +4597,19 @@ def main():
             if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
                 pmi_data = st.session_state['last_pmi_data']
         
-        # FASE 2.5: Prezzi Forex
+        # FASE 2.5: Storico Banche Centrali
+        cb_history_data = {}
+        if opt_cb_history:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="🏦 Recupero storico banche centrali...")
+            cb_history_data = get_central_bank_history_summary()
+            st.session_state['last_cb_history'] = cb_history_data
+        else:
+            # Usa storico dalla sessione se disponibile
+            if 'last_cb_history' in st.session_state and st.session_state['last_cb_history']:
+                cb_history_data = st.session_state['last_cb_history']
+        
+        # FASE 3: Prezzi Forex
         forex_prices = {}
         if opt_prices:
             step += 1
@@ -4652,6 +4682,8 @@ def main():
                 additional_text = st.session_state['last_links_text']
             if not opt_pmi and 'last_pmi_data' in st.session_state:
                 pmi_data = st.session_state['last_pmi_data']
+            if not opt_cb_history and 'last_cb_history' in st.session_state:
+                cb_history_data = st.session_state['last_cb_history']
             
             # Recupera prezzi forex dalla sessione
             forex_prices = st.session_state.get('last_forex_prices', {})
@@ -4663,7 +4695,8 @@ def main():
                 additional_text,
                 pmi_data,
                 forex_prices,
-                economic_events
+                economic_events,
+                cb_history_data
             )
         
         # ===== SALVATAGGIO =====
@@ -4672,6 +4705,7 @@ def main():
         analysis_result = {
             "macro_data": macro_data,
             "pmi_data": pmi_data,
+            "cb_history_data": cb_history_data,
             "forex_prices": forex_prices,
             "economic_events": economic_events,
             "news_structured": news_structured,
@@ -4769,7 +4803,10 @@ def main():
             st.markdown("---")
         
         # Storico Decisioni Banche Centrali (dati da Investing.com API, non Claude)
-        display_central_bank_history()
+        cb_history = analysis.get("cb_history_data", {})
+        if not cb_history and 'last_cb_history' in st.session_state:
+            cb_history = st.session_state['last_cb_history']
+        display_central_bank_history(cb_history)
         st.markdown("---")
         
         # 1️⃣ Mostra tabella prezzi forex se disponibili
