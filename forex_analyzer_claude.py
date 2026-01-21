@@ -2578,6 +2578,13 @@ Il punteggio "aspettative_tassi" deve essere COERENTE con lo storico delle decis
 - score_quote = SOMMA degli 8 punteggi "quote"
 - differenziale = score_base - score_quote
 
+## ⛔ REMINDER FINALE: TUTTE LE 19 COPPIE NEL JSON ⛔
+Il campo "pair_analysis" DEVE contenere ESATTAMENTE 19 chiavi, una per ogni coppia:
+EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, EUR/GBP, EUR/JPY, EUR/CHF, EUR/AUD, EUR/CAD,
+GBP/JPY, GBP/AUD, GBP/CHF, GBP/CAD, AUD/JPY, AUD/CAD, AUD/CHF, CAD/JPY, CAD/CHF
+
+Se ne manca anche solo UNA, l'analisi è INCOMPLETA!
+
 ## ⚠️ NOTA SUL SUMMARY:
 Il campo "summary" deve descrivere i fattori chiave del confronto con dati numerici.
 NON scrivere "bullish", "bearish", "Strong" nel summary - il bias verrà determinato automaticamente dal sistema in base al differenziale calcolato.
@@ -3082,9 +3089,15 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
     today = get_italy_now()
     
     user_prompt = f"""
-Analizza TUTTE queste coppie forex: {pairs_list}
+## ⛔ REQUISITO CRITICO: ANALIZZA TUTTE LE 19 COPPIE! ⛔
+Devi analizzare OGNI SINGOLA coppia nella lista seguente. NON saltare nessuna coppia!
 
-## ⚠️ DATA ODIERNA: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})
+**Lista completa delle 19 coppie (TUTTE obbligatorie):**
+{pairs_list}
+
+⚠️ Se l'output JSON non contiene tutte le 19 coppie, l'analisi sarà INCOMPLETA e inutilizzabile!
+
+## 📅 DATA ODIERNA: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})
 
 **Valute da analizzare:**
 {currencies_info}
@@ -3119,7 +3132,7 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
         response_text = ""
         with client.messages.stream(
             model="claude-sonnet-4-20250514",
-            max_tokens=20000,
+            max_tokens=25000,  # Aumentato per garantire tutte le 19 coppie
             messages=[{"role": "user", "content": user_prompt}],
             system=SYSTEM_PROMPT_GLOBAL
         ) as stream:
@@ -3873,6 +3886,14 @@ def display_analysis_matrix(analysis: dict):
                 st.markdown(f"**{pair}** {dots} → Diff: **{diff}**")
         
         st.markdown("---")
+        
+        # ===== CONTROLLO COPPIE MANCANTI =====
+        analyzed_pairs = set(pair_analysis.keys())
+        expected_pairs = set(FOREX_PAIRS)
+        missing_pairs = expected_pairs - analyzed_pairs
+        
+        if missing_pairs:
+            st.warning(f"⚠️ **Coppie mancanti nell'analisi:** {', '.join(sorted(missing_pairs))} ({len(missing_pairs)} su 19)")
         
         # ===== TABELLA TUTTE LE COPPIE CON SELEZIONE SINGOLA =====
         st.markdown("### 📋 Tutte le Coppie")
