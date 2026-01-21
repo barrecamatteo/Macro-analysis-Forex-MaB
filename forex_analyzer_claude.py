@@ -1048,6 +1048,553 @@ PMI_CONFIG = {
     }
 }
 
+# =============================================================================
+# CONFIGURAZIONE EVENTI ECONOMICI PER NEWS CATALYST
+# =============================================================================
+ECONOMIC_EVENTS_CONFIG = {
+    "USD": {
+        "nfp": {
+            "id": 227, 
+            "name": "nonfarm-payrolls", 
+            "label": "Nonfarm Payrolls",
+            "country": "us",
+            "unit": "k",
+            "thresholds": {"strong_pos": 100, "pos": 30, "neg": -30, "strong_neg": -100},
+            "impact": "high"
+        },
+        "cpi": {
+            "id": 733, 
+            "name": "cpi", 
+            "label": "CPI YoY",
+            "country": "us",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"  # Inflazione alta = hawkish = positivo per valuta
+        },
+        "gdp": {
+            "id": 375, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "us",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 300, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "us",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "high",
+            "interpretation": "inverse"  # Disoccupazione bassa = positivo
+        },
+        "retail_sales": {
+            "id": 256, 
+            "name": "retail-sales", 
+            "label": "Retail Sales MoM",
+            "country": "us",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        },
+        "jobless_claims": {
+            "id": 294, 
+            "name": "initial-jobless-claims", 
+            "label": "Initial Jobless Claims",
+            "country": "us",
+            "unit": "k",
+            "thresholds": {"strong_pos": -30, "pos": -15, "neg": 15, "strong_neg": 30},
+            "impact": "medium",
+            "interpretation": "inverse"  # Meno claims = positivo
+        }
+    },
+    "EUR": {
+        "cpi": {
+            "id": 68, 
+            "name": "cpi", 
+            "label": "CPI YoY",
+            "country": "eu",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 121, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "eu",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 304, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "eu",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "medium",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 212, 
+            "name": "retail-sales", 
+            "label": "Retail Sales MoM",
+            "country": "eu",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    "GBP": {
+        "cpi": {
+            "id": 67, 
+            "name": "cpi", 
+            "label": "CPI YoY",
+            "country": "uk",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 122, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "uk",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 305, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "uk",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "medium",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 256, 
+            "name": "retail-sales", 
+            "label": "Retail Sales MoM",
+            "country": "uk",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    "JPY": {
+        "cpi": {
+            "id": 722, 
+            "name": "national-cpi", 
+            "label": "CPI YoY",
+            "country": "jp",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 119, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "jp",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 495, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "jp",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "medium",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 492, 
+            "name": "retail-sales", 
+            "label": "Retail Sales YoY",
+            "country": "jp",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    "CHF": {
+        "cpi": {
+            "id": 328, 
+            "name": "cpi", 
+            "label": "CPI YoY",
+            "country": "ch",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 336, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "ch",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 327, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "ch",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "medium",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 335, 
+            "name": "retail-sales", 
+            "label": "Retail Sales YoY",
+            "country": "ch",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    "AUD": {
+        "cpi": {
+            "id": 329, 
+            "name": "cpi", 
+            "label": "CPI QoQ",
+            "country": "au",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 330, 
+            "name": "gdp", 
+            "label": "GDP QoQ",
+            "country": "au",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 323, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "au",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "high",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 331, 
+            "name": "retail-sales", 
+            "label": "Retail Sales MoM",
+            "country": "au",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    "CAD": {
+        "cpi": {
+            "id": 741, 
+            "name": "cpi", 
+            "label": "CPI YoY",
+            "country": "ca",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high",
+            "interpretation": "hawkish"
+        },
+        "gdp": {
+            "id": 234, 
+            "name": "gdp", 
+            "label": "GDP MoM",
+            "country": "ca",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
+            "impact": "high"
+        },
+        "unemployment": {
+            "id": 298, 
+            "name": "unemployment-rate", 
+            "label": "Unemployment Rate",
+            "country": "ca",
+            "unit": "%",
+            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
+            "impact": "high",
+            "interpretation": "inverse"
+        },
+        "retail_sales": {
+            "id": 235, 
+            "name": "retail-sales", 
+            "label": "Retail Sales MoM",
+            "country": "ca",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "medium"
+        }
+    },
+    # Dati cinesi per correlazione AUD
+    "CNY": {
+        "gdp": {
+            "id": 461, 
+            "name": "chinese-gdp", 
+            "label": "GDP YoY",
+            "country": "cn",
+            "unit": "%",
+            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
+            "impact": "high",
+            "affects": ["AUD"]  # Correlazione con AUD
+        },
+        "trade_balance": {
+            "id": 464, 
+            "name": "trade-balance", 
+            "label": "Trade Balance",
+            "country": "cn",
+            "unit": "B",
+            "thresholds": {"strong_pos": 20, "pos": 10, "neg": -10, "strong_neg": -20},
+            "impact": "medium",
+            "affects": ["AUD"]
+        }
+    }
+}
+
+
+def fetch_economic_event_data(currency: str, event_key: str) -> dict:
+    """
+    Recupera i dati di un evento economico da Investing.com API JSON.
+    Restituisce actual, forecast (se disponibile), previous e calcola la sorpresa.
+    
+    Args:
+        currency: Codice valuta (USD, EUR, etc.)
+        event_key: Chiave evento (nfp, cpi, gdp, etc.)
+    
+    Returns:
+        dict con actual, forecast, previous, surprise, date, impact_score
+    """
+    config = ECONOMIC_EVENTS_CONFIG.get(currency, {}).get(event_key)
+    
+    if not config:
+        return {"error": f"Event {event_key} not configured for {currency}"}
+    
+    country = config.get("country", "us")
+    event_id = config["id"]
+    json_url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
+    
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Referer': 'https://www.investing.com/',
+        }
+        
+        response = requests.get(json_url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {"error": f"HTTP {response.status_code}", "source": json_url}
+        
+        data = response.json()
+        attr = data.get("attr", [])
+        
+        if len(attr) < 1:
+            return {"error": "No data", "source": json_url}
+        
+        # Ultimo dato (più recente)
+        latest = attr[-1]
+        previous_data = attr[-2] if len(attr) >= 2 else None
+        
+        actual = latest.get("actual")
+        forecast = latest.get("forecast")  # Potrebbe non esserci
+        revised = latest.get("revised")
+        timestamp = latest.get("timestamp", 0)
+        
+        # Converti timestamp in data
+        event_date = None
+        days_ago = None
+        if timestamp:
+            try:
+                from datetime import datetime, timedelta
+                event_date = datetime.fromtimestamp(timestamp / 1000)
+                days_ago = (datetime.now() - event_date).days
+            except:
+                pass
+        
+        # Valore precedente
+        previous = previous_data.get("actual") if previous_data else None
+        
+        # Calcola sorpresa (actual - forecast)
+        surprise = None
+        surprise_pct = None
+        if actual is not None and forecast is not None:
+            try:
+                surprise = float(actual) - float(forecast)
+                if float(forecast) != 0:
+                    surprise_pct = (surprise / abs(float(forecast))) * 100
+            except:
+                pass
+        
+        # Calcola impact score basato su soglie
+        impact_score = 0
+        thresholds = config.get("thresholds", {})
+        interpretation = config.get("interpretation", "normal")
+        
+        if surprise is not None:
+            if interpretation == "inverse":
+                # Per unemployment/jobless claims: sorpresa negativa è positiva
+                surprise = -surprise
+            
+            if surprise >= thresholds.get("strong_pos", 999):
+                impact_score = 2
+            elif surprise >= thresholds.get("pos", 999):
+                impact_score = 1
+            elif surprise <= thresholds.get("strong_neg", -999):
+                impact_score = -2
+            elif surprise <= thresholds.get("neg", -999):
+                impact_score = -1
+        
+        # Applica decadimento temporale
+        if days_ago is not None:
+            if days_ago > 7:
+                impact_score = 0  # Troppo vecchio
+            elif days_ago >= 5:
+                impact_score = int(impact_score * 0.25)
+            elif days_ago >= 3:
+                impact_score = int(impact_score * 0.5)
+            # 0-2 giorni: peso pieno
+        
+        return {
+            "event": config["label"],
+            "currency": currency,
+            "actual": actual,
+            "forecast": forecast,
+            "previous": previous,
+            "surprise": round(surprise, 2) if surprise is not None else None,
+            "surprise_pct": round(surprise_pct, 1) if surprise_pct is not None else None,
+            "impact_score": impact_score,
+            "date": event_date.strftime("%Y-%m-%d") if event_date else None,
+            "days_ago": days_ago,
+            "unit": config.get("unit", ""),
+            "impact_level": config.get("impact", "medium"),
+            "source": "Investing.com API"
+        }
+        
+    except Exception as e:
+        return {"error": str(e)[:100], "source": json_url}
+
+
+def fetch_all_economic_events(currencies: list = None) -> dict:
+    """
+    Recupera tutti gli eventi economici per le valute specificate.
+    
+    Returns:
+        dict con eventi per valuta e sommario
+    """
+    if currencies is None:
+        currencies = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+    
+    all_events = {}
+    
+    for currency in currencies:
+        currency_events = {}
+        config = ECONOMIC_EVENTS_CONFIG.get(currency, {})
+        
+        for event_key in config.keys():
+            event_data = fetch_economic_event_data(currency, event_key)
+            if "error" not in event_data:
+                currency_events[event_key] = event_data
+        
+        if currency_events:
+            all_events[currency] = currency_events
+    
+    # Aggiungi dati CNY per correlazione AUD
+    if "AUD" in currencies:
+        cny_config = ECONOMIC_EVENTS_CONFIG.get("CNY", {})
+        cny_events = {}
+        for event_key in cny_config.keys():
+            event_data = fetch_economic_event_data("CNY", event_key)
+            if "error" not in event_data:
+                cny_events[event_key] = event_data
+        if cny_events:
+            all_events["CNY"] = cny_events
+    
+    return all_events
+
+
+def format_economic_events_for_claude(economic_events: dict) -> str:
+    """
+    Formatta gli eventi economici in testo per il prompt di Claude.
+    """
+    lines = []
+    lines.append("=" * 60)
+    lines.append("📊 DATI ECONOMICI RECENTI (per calcolo News Catalyst)")
+    lines.append("=" * 60)
+    lines.append("")
+    
+    for currency, events in economic_events.items():
+        if not events:
+            continue
+            
+        lines.append(f"### {currency}:")
+        for event_key, data in events.items():
+            if "error" in data:
+                continue
+            
+            actual = data.get("actual", "N/A")
+            forecast = data.get("forecast", "N/A")
+            surprise = data.get("surprise")
+            days_ago = data.get("days_ago", "?")
+            unit = data.get("unit", "")
+            event_name = data.get("event", event_key)
+            impact = data.get("impact_level", "medium")
+            
+            surprise_str = f"{surprise:+.2f}" if surprise is not None else "N/A"
+            impact_emoji = "⭐⭐⭐" if impact == "high" else "⭐⭐" if impact == "medium" else "⭐"
+            
+            # Indica se sorpresa è significativa
+            impact_score = data.get("impact_score", 0)
+            if impact_score >= 2:
+                signal = "🟢🟢 MOLTO POSITIVO"
+            elif impact_score == 1:
+                signal = "🟢 Positivo"
+            elif impact_score <= -2:
+                signal = "🔴🔴 MOLTO NEGATIVO"
+            elif impact_score == -1:
+                signal = "🔴 Negativo"
+            else:
+                signal = "⚪ Neutro"
+            
+            lines.append(f"  - {event_name} {impact_emoji}")
+            lines.append(f"    Actual: {actual}{unit} | Forecast: {forecast}{unit} | Sorpresa: {surprise_str}{unit}")
+            lines.append(f"    {days_ago} giorni fa | Impatto: {signal}")
+            lines.append("")
+    
+    # Aggiungi nota su correlazioni
+    lines.append("")
+    lines.append("📌 CORRELAZIONI IMPORTANTI:")
+    lines.append("  - AUD: considera anche dati CNY (Cina = primo partner commerciale)")
+    lines.append("  - CAD: considera anche prezzo petrolio")
+    lines.append("  - CHF/JPY: beneficiano da risk-off")
+    lines.append("")
+    
+    return "\n".join(lines)
+
 
 def fetch_pmi_from_investing_json(currency: str, pmi_type: str) -> dict:
     """
@@ -1661,7 +2208,7 @@ Per ogni coppia (es: EUR/USD) devi:
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ## ═══════════════════════════════════════════════════════════════════
-## SISTEMA DI SCORING - 7 PARAMETRI CON CRITERI OGGETTIVI
+## SISTEMA DI SCORING - 8 PARAMETRI CON CRITERI OGGETTIVI
 ## ═══════════════════════════════════════════════════════════════════
 
 ### 1️⃣ TASSI ATTUALI [-1 a +1]
@@ -1797,15 +2344,70 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 **Regola pratica:** Se non ci sono notizie su crisi fiscali/debito, assegnare 0 a entrambe le valute.
 
+---
+
+### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
+**Logica:** Cattura le SORPRESE economiche recenti (actual vs forecast) e gli shock geopolitici NON già prezzati.
+
+⚠️ IMPORTANTE: Questo parametro NON deve duplicare gli altri. Valuta SOLO:
+- Sorprese sui dati economici degli ultimi 5-7 giorni (actual ≠ forecast)
+- Eventi geopolitici improvvisi (trade war, tensioni, dichiarazioni shock)
+
+**PARTE 1: DATI ECONOMICI (70% del peso)**
+
+Usa i dati forniti nella sezione "DATI ECONOMICI RECENTI". Calcola la sorpresa = Actual - Forecast.
+
+| Indicatore | Soglie per +2 | Soglie per +1 | Soglie per -1 | Soglie per -2 |
+|------------|---------------|---------------|---------------|---------------|
+| NFP (USD) | ≥+100k | +30k a +99k | -30k a -99k | ≤-100k |
+| CPI YoY | ≥+0.3pp | +0.2pp | -0.2pp | ≤-0.3pp |
+| GDP QoQ | ≥+0.5pp | +0.3pp | -0.3pp | ≤-0.5pp |
+| Retail Sales | ≥+0.5% | +0.3% | -0.3% | ≤-0.5% |
+| Unemployment | ≤-0.3pp | -0.2pp | +0.2pp | ≥+0.3pp |
+| Jobless Claims | ≤-30k | -15k | +15k | ≥+30k |
+
+⚠️ INTERPRETAZIONE SPECIALE:
+- CPI: sorpresa POSITIVA = inflazione sopra attese = HAWKISH = POSITIVO per valuta
+- Unemployment/Jobless: sorpresa NEGATIVA = meno disoccupazione = POSITIVO per valuta
+
+**DECADIMENTO TEMPORALE:**
+- 0-2 giorni fa: peso 100%
+- 3-4 giorni fa: peso 50% (raddoppia le soglie)
+- 5-7 giorni fa: peso 25% (quadruplica le soglie)
+- >7 giorni fa: ignora
+
+**PARTE 2: GEOPOLITICA (30% del peso)**
+
+| Evento | Safe Haven (USD,CHF,JPY) | Risk Currency (AUD,EUR,GBP) |
+|--------|--------------------------|----------------------------|
+| Shock grave (guerra, crisi) | +2 | -2 |
+| Tensione moderata | +1 | -1 |
+| Trade war/dazi su valuta | +1 aggressor, -1 target | -1 target |
+| Risoluzione/distensione | -1 | +1 |
+| Nessuna news rilevante | 0 | 0 |
+
+**CORRELAZIONI CROSS-VALUTA:**
+- AUD: considera anche dati CNY (Cina = primo partner) con peso 50%
+- CAD: considera prezzo petrolio (WTI ±5% = ±1)
+
+**FORMULA COMBINAZIONE:**
+News_Catalyst = min(+2, max(-2, round((0.7 × Score_Dati) + (0.3 × Score_Geopolitica))))
+
+**REGOLA ANTI-DOPPIO CONTEGGIO:**
+Se un dato è già pienamente riflesso in altro parametro (es. inflazione già in parametro 3), 
+il News Catalyst deve essere 0 per quella componente, A MENO CHE ci sia stata una SORPRESA 
+SIGNIFICATIVA rispetto alle attese nella settimana corrente.
+
 ## ═══════════════════════════════════════════════════════════════════
 ## RANGE TOTALI
 ## ═══════════════════════════════════════════════════════════════════
 
 - **Aspettative Tassi**: da -2 a +2 (peso doppio)
+- **News Catalyst**: da -2 a +2 (peso doppio)
 - **Altri 6 parametri**: da -1 a +1
-- **score_base**: da -8 a +8
-- **score_quote**: da -8 a +8
-- **differenziale**: da -16 a +16
+- **score_base**: da -10 a +10
+- **score_quote**: da -10 a +10
+- **differenziale**: da -20 a +20
 
 ## ═══════════════════════════════════════════════════════════════════
 ## MOTIVAZIONI DETTAGLIATE (OBBLIGATORIO!)
@@ -1872,10 +2474,28 @@ ESEMPIO SBAGLIATO:
                     "base": 0, "quote": 0,
                     "motivation_base": "Nessuna notizia rilevante su crisi fiscale Eurozona. Situazione stabile.",
                     "motivation_quote": "Deficit USA elevato ma nessun impatto immediato su mercati. Situazione gestibile."
+                },
+                "news_catalyst": {
+                    "base": -1, "quote": 2,
+                    "motivation_base": "EUR: CPI 1.9% vs 2.0% atteso (sorpresa -0.1pp) = neutro. Tensioni dazi Trump su EU = -1. Totale: -1",
+                    "motivation_quote": "USD: NFP 300k vs 180k atteso (sorpresa +120k) = +2. Risk-off favorisce USD. Totale: +2 (cap)",
+                    "evidence": {
+                        "base_data": [
+                            {"event": "CPI YoY", "actual": "1.9%", "forecast": "2.0%", "surprise": "-0.1pp", "score": 0, "days_ago": 2},
+                            {"event": "Geopolitics", "description": "Trump tariff threats on EU", "score": -1}
+                        ],
+                        "quote_data": [
+                            {"event": "NFP", "actual": "300k", "forecast": "180k", "surprise": "+120k", "score": 2, "days_ago": 5},
+                            {"event": "Risk Sentiment", "description": "Risk-off environment", "score": 1}
+                        ],
+                        "calculation_base": "(0.7 × 0) + (0.3 × -1) = -0.3 → -1",
+                        "calculation_quote": "(0.7 × 2) + (0.3 × 1) = 1.7 → +2 (cap)"
+                    }
                 }
             }
         }
     },
+    "weekly_events_warning": "⚠️ Eventi ad alto impatto in arrivo: Gio 23 ECB Rate Decision, Ven 24 Flash PMI EUR/USD/GBP",
     "risk_sentiment": "risk-on/risk-off/neutral"
 }
 
@@ -1887,13 +2507,15 @@ Il punteggio "aspettative_tassi" deve essere COERENTE con lo storico delle decis
 - Usa le NOTIZIE WEB per determinare le aspettative future
 
 ## REGOLE CRITICHE FINALI:
-- ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web)
+- ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web, dati economici recenti)
 - ⚠️ CONFRONTO DIRETTO tra le due valute su ogni parametro
 - ⚠️ PMI: applica i PESI SETTORIALI corretti per ogni valuta
 - ⚠️ PIL: contestualizza con inflazione (no punti per crescita non sostenibile)
 - ⚠️ RISK SENTIMENT: dipende dal TIPO di coppia (safe-haven vs cicliche)
-- score_base = SOMMA dei 7 punteggi "base"
-- score_quote = SOMMA dei 7 punteggi "quote"
+- ⚠️ NEWS CATALYST: usa SOLO sorprese recenti (actual vs forecast) e geopolitica non prezzata
+- ⚠️ NEWS CATALYST: OBBLIGATORIO includere "evidence" con i dati usati per il calcolo
+- score_base = SOMMA degli 8 punteggi "base"
+- score_quote = SOMMA degli 8 punteggi "quote"
 - differenziale = score_base - score_quote
 
 ## ⚠️ NOTA SUL SUMMARY:
@@ -2261,7 +2883,7 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -2272,6 +2894,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         additional_text: Testo delle risorse aggiuntive (opzionale)
         pmi_data: Dati PMI per valuta (opzionale)
         forex_prices: Prezzi forex in tempo reale (opzionale)
+        economic_events: Dati eventi economici recenti per News Catalyst (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -2385,6 +3008,16 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
+    # Sezione Dati Economici Recenti per News Catalyst
+    economic_events_section = ""
+    if economic_events:
+        economic_events_section = format_economic_events_for_claude(economic_events)
+        economic_events_section = f"""
+{economic_events_section}
+
+---
+"""
+    
     today = get_italy_now()
     
     user_prompt = f"""
@@ -2400,6 +3033,7 @@ Analizza TUTTE queste coppie forex: {pairs_list}
 {macro_section}
 {pmi_section}
 {cb_history_section}
+{economic_events_section}
 {prices_section}
 {news_section}
 {additional_section}
@@ -3118,6 +3752,10 @@ def display_analysis_matrix(analysis: dict):
     if "summary" in analysis:
         st.info(f"📋 **Contesto:** {analysis['summary']}")
     
+    # Weekly Events Warning
+    if "weekly_events_warning" in analysis:
+        st.warning(f"📅 {analysis['weekly_events_warning']}")
+    
     st.markdown("---")
     
     # ===== TOP BULLISH / TOP BEARISH =====
@@ -3368,7 +4006,8 @@ def display_analysis_matrix(analysis: dict):
                 "crescita_pil": "Crescita/PIL [-1/+1]",
                 "pmi": "PMI [-1/+1]",
                 "risk_sentiment": "Risk Sentiment [-1/+1]",
-                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]"
+                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]",
+                "news_catalyst": "⚡ News Catalyst [-2/+2]"
             }
             
             with col_base:
@@ -3458,6 +4097,40 @@ def display_analysis_matrix(analysis: dict):
                 total_color = "#28a745" if score_quote > 0 else "#dc3545" if score_quote < 0 else "#6c757d"
                 total_emoji = "🟢" if score_quote > 0 else "🔴" if score_quote < 0 else "⚪"
                 st.markdown(f"### {total_emoji} TOTALE: {'+' if score_quote > 0 else ''}{score_quote}")
+            
+            # === EVIDENCE NEWS CATALYST ===
+            if "news_catalyst" in scores and "evidence" in scores.get("news_catalyst", {}):
+                evidence = scores["news_catalyst"]["evidence"]
+                with st.expander("📊 Dettagli calcolo News Catalyst (verifica dati)", expanded=False):
+                    col_ev_base, col_ev_quote = st.columns(2)
+                    
+                    with col_ev_base:
+                        st.markdown(f"**{base_curr} - Dati usati:**")
+                        base_data = evidence.get("base_data", [])
+                        if base_data:
+                            for item in base_data:
+                                event = item.get("event", "N/A")
+                                if item.get("actual"):
+                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
+                                else:
+                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
+                        calc_base = evidence.get("calculation_base", "")
+                        if calc_base:
+                            st.markdown(f"**Calcolo:** {calc_base}")
+                    
+                    with col_ev_quote:
+                        st.markdown(f"**{quote_curr} - Dati usati:**")
+                        quote_data = evidence.get("quote_data", [])
+                        if quote_data:
+                            for item in quote_data:
+                                event = item.get("event", "N/A")
+                                if item.get("actual"):
+                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
+                                else:
+                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
+                        calc_quote = evidence.get("calculation_quote", "")
+                        if calc_quote:
+                            st.markdown(f"**Calcolo:** {calc_quote}")
             
             st.markdown("---")
             
@@ -3948,6 +4621,20 @@ def main():
         # FASE 5: Analisi Claude
         if opt_claude:
             step += 1
+            progress.progress(int(step/total_steps*80), text="📊 Recupero dati economici per News Catalyst...")
+            
+            # Recupera dati economici recenti per News Catalyst
+            economic_events = {}
+            try:
+                economic_events = fetch_all_economic_events()
+                st.session_state['last_economic_events'] = economic_events
+            except Exception as e:
+                st.warning(f"⚠️ Errore recupero dati economici: {str(e)[:50]}")
+                # Usa dati dalla sessione se disponibili
+                if 'last_economic_events' in st.session_state:
+                    economic_events = st.session_state['last_economic_events']
+            
+            step += 1
             progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
             
             # Usa dati dalla sessione se non aggiornati ora
@@ -3967,7 +4654,8 @@ def main():
                 news_text,
                 additional_text,
                 pmi_data,
-                forex_prices
+                forex_prices,
+                economic_events
             )
         
         # ===== SALVATAGGIO =====
@@ -3977,6 +4665,7 @@ def main():
             "macro_data": macro_data,
             "pmi_data": pmi_data,
             "forex_prices": forex_prices,
+            "economic_events": economic_events,
             "news_structured": news_structured,
             "links_structured": links_structured,
             "claude_analysis": claude_analysis,
