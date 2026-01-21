@@ -733,6 +733,7 @@ def get_analysis_type_label(analysis_type: str) -> str:
         "macro_only": "📊 Solo Macro",
         "news_only": "📰 Solo Notizie",
         "links_only": "📎 Solo Link",
+        "cb_history_only": "🏦 Solo Storico BC",
         "macro_news": "📊📰 Macro + Notizie",
         "macro_links": "📊📎 Macro + Link",
         "news_links": "📰📎 Notizie + Link",
@@ -4442,13 +4443,13 @@ def main():
             st.warning("⚠️ L'analisi Claude consuma token API")
         
         # Validazione: almeno un'opzione dati se Claude attivo
-        if opt_claude and not (opt_macro or opt_pmi or opt_news or opt_links):
+        if opt_claude and not (opt_macro or opt_pmi or opt_cb_history or opt_news or opt_links):
             st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
         
         st.markdown("---")
         
         # ===== BOTTONE ANALISI =====
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_prices or opt_news or opt_links)
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news or opt_links)
         
         analyze_btn = st.button(
             "🚀 AVVIA ANALISI",
@@ -4459,7 +4460,7 @@ def main():
         
         # Calcola tipo analisi
         analysis_type = "custom"
-        if opt_macro and opt_pmi and opt_news and opt_claude and not opt_links:
+        if opt_macro and opt_pmi and opt_cb_history and opt_news and opt_claude and not opt_links:
             analysis_type = "full"
         elif opt_macro and not opt_news and not opt_links:
             analysis_type = "macro_only"
@@ -4467,6 +4468,8 @@ def main():
             analysis_type = "news_only"
         elif opt_links and not opt_macro and not opt_news:
             analysis_type = "links_only"
+        elif opt_cb_history and not opt_macro and not opt_pmi and not opt_news and not opt_links:
+            analysis_type = "cb_history_only"
         
         st.caption(f"📋 Tipo: {get_analysis_type_label(analysis_type)}")
         
