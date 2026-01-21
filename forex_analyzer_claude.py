@@ -808,7 +808,7 @@ CENTRAL_BANK_CONFIG = {
     "AUD": {
         "bank_name": "Reserve Bank of Australia",
         "bank_short": "RBA",
-        "event_id": 167,  # rba-interest-rate-decision-167
+        "event_id": 171,  # interest-rate-decision-171 (RBA)
         "country_codes": ["au", "us"],
         "rate_type": "single",
     },
