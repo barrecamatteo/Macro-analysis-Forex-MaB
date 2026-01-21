@@ -773,49 +773,49 @@ CENTRAL_BANK_CONFIG = {
         "bank_name": "Federal Reserve",
         "bank_short": "Fed",
         "event_id": 168,  # interest-rate-decision-168
-        "country": "us",
-        "rate_type": "range",  # "range" per Fed (4.25-4.50%), "single" per altri
+        "country_codes": ["us"],  # Lista di country codes da provare
+        "rate_type": "range",
     },
     "EUR": {
         "bank_name": "European Central Bank",
         "bank_short": "ECB",
         "event_id": 164,  # ecb-interest-rate-decision-164
-        "country": "eu",
+        "country_codes": ["eu", "us"],
         "rate_type": "single",
     },
     "GBP": {
         "bank_name": "Bank of England",
         "bank_short": "BOE",
         "event_id": 170,  # boe-interest-rate-decision-170
-        "country": "uk",
+        "country_codes": ["uk", "us"],
         "rate_type": "single",
     },
     "JPY": {
         "bank_name": "Bank of Japan",
         "bank_short": "BOJ",
         "event_id": 165,  # boj-interest-rate-decision-165
-        "country": "jp",
+        "country_codes": ["jp", "us"],
         "rate_type": "single",
     },
     "CHF": {
         "bank_name": "Swiss National Bank",
         "bank_short": "SNB",
         "event_id": 169,  # snb-interest-rate-decision-169
-        "country": "ch",
+        "country_codes": ["ch", "us"],
         "rate_type": "single",
     },
     "AUD": {
         "bank_name": "Reserve Bank of Australia",
         "bank_short": "RBA",
         "event_id": 167,  # rba-interest-rate-decision-167
-        "country": "au",
+        "country_codes": ["au", "us"],
         "rate_type": "single",
     },
     "CAD": {
         "bank_name": "Bank of Canada",
         "bank_short": "BOC",
         "event_id": 166,  # boc-interest-rate-decision-166
-        "country": "ca",
+        "country_codes": ["ca", "us"],
         "rate_type": "single",
     }
 }
@@ -824,6 +824,7 @@ CENTRAL_BANK_CONFIG = {
 def fetch_central_bank_history_from_api(currency: str) -> dict:
     """
     Recupera lo storico decisioni tassi da Investing.com JSON API.
+    Prova diversi country codes come fallback.
     
     Returns:
         dict con: current_rate, meetings (ultimi 2-3), trend
@@ -833,96 +834,109 @@ def fetch_central_bank_history_from_api(currency: str) -> dict:
         return {"error": f"Currency {currency} not configured"}
     
     event_id = config["event_id"]
-    country = config.get("country", "us")  # Usa country dalla config
-    url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
+    country_codes = config.get("country_codes", ["us"])
     
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Referer': 'https://www.investing.com/'
-        }
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://www.investing.com/'
+    }
+    
+    last_error = None
+    
+    # Prova ogni country code finché uno funziona
+    for country in country_codes:
+        url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
         
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code != 200:
-            return {"error": f"HTTP {response.status_code}"}
-        
-        data = response.json()
-        attr = data.get("attr", [])
-        
-        if not attr or len(attr) < 2:
-            return {"error": "Insufficient data"}
-        
-        # Prendi gli ultimi 3 meeting (per calcolare trend)
-        recent_meetings = attr[-3:] if len(attr) >= 3 else attr
-        recent_meetings.reverse()  # Più recente prima
-        
-        meetings = []
-        for i, m in enumerate(recent_meetings):
-            timestamp = m.get("timestamp", 0)
-            actual = m.get("actual")
-            actual_formatted = m.get("actual_formatted", "")
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
             
-            # Converti timestamp in data
-            from datetime import datetime
-            try:
-                date = datetime.fromtimestamp(timestamp / 1000)
-                date_str = date.strftime("%Y-%m-%d")
-                date_formatted = date.strftime("%b %d, %Y")
-            except:
-                date_str = "N/A"
-                date_formatted = "N/A"
+            if response.status_code != 200:
+                last_error = f"HTTP {response.status_code} for {country}"
+                continue
             
-            # Calcola variazione rispetto al meeting precedente
-            change = None
-            decision = "hold"
-            if i < len(recent_meetings) - 1:
-                prev_actual = recent_meetings[i + 1].get("actual")
-                if actual is not None and prev_actual is not None:
-                    try:
-                        diff = float(actual) - float(prev_actual)
-                        if abs(diff) < 0.001:  # Praticamente uguale
-                            decision = "hold"
-                            change = "0bp"
-                        elif diff > 0:
-                            decision = "hike"
-                            change = f"+{int(diff * 100)}bp"
-                        else:
-                            decision = "cut"
-                            change = f"{int(diff * 100)}bp"
-                    except:
-                        pass
+            data = response.json()
+            attr = data.get("attr", [])
             
-            meetings.append({
-                "date": date_str,
-                "date_formatted": date_formatted,
-                "rate": actual_formatted if actual_formatted else f"{actual}%",
-                "decision": decision,
-                "change": change if change else "N/A",
-                "vote": "N/A",  # API non fornisce voti
-                "dissent": None
-            })
-        
-        # Tasso attuale (ultimo meeting)
-        current_rate = meetings[0]["rate"] if meetings else "N/A"
-        
-        # Calcola trend basato su ultimi 2 meeting
-        trend_info = calculate_trend_from_meetings(meetings)
-        
-        return {
-            "bank_name": config["bank_name"],
-            "bank_short": config["bank_short"],
-            "current_rate": current_rate,
-            "meetings": meetings[:2],  # Solo ultimi 2
-            "trend": trend_info["trend"],
-            "trend_label": trend_info["trend_label"],
-            "trend_emoji": trend_info["trend_emoji"],
-            "stance_hint": trend_info["stance_hint"]
-        }
-        
-    except Exception as e:
-        return {"error": str(e)[:100]}
+            if not attr or len(attr) < 2:
+                last_error = f"Insufficient data for {country}"
+                continue
+            
+            # Dati trovati! Processa
+            # Prendi gli ultimi 3 meeting (per calcolare trend)
+            recent_meetings = attr[-3:] if len(attr) >= 3 else attr
+            recent_meetings.reverse()  # Più recente prima
+            
+            meetings = []
+            for i, m in enumerate(recent_meetings):
+                timestamp = m.get("timestamp", 0)
+                actual = m.get("actual")
+                actual_formatted = m.get("actual_formatted", "")
+                
+                # Converti timestamp in data
+                from datetime import datetime
+                try:
+                    date = datetime.fromtimestamp(timestamp / 1000)
+                    date_str = date.strftime("%Y-%m-%d")
+                    date_formatted = date.strftime("%b %d, %Y")
+                except:
+                    date_str = "N/A"
+                    date_formatted = "N/A"
+                
+                # Calcola variazione rispetto al meeting precedente
+                change = None
+                decision = "hold"
+                if i < len(recent_meetings) - 1:
+                    prev_actual = recent_meetings[i + 1].get("actual")
+                    if actual is not None and prev_actual is not None:
+                        try:
+                            diff = float(actual) - float(prev_actual)
+                            if abs(diff) < 0.001:  # Praticamente uguale
+                                decision = "hold"
+                                change = "0bp"
+                            elif diff > 0:
+                                decision = "hike"
+                                change = f"+{int(diff * 100)}bp"
+                            else:
+                                decision = "cut"
+                                change = f"{int(diff * 100)}bp"
+                        except:
+                            pass
+                
+                meetings.append({
+                    "date": date_str,
+                    "date_formatted": date_formatted,
+                    "rate": actual_formatted if actual_formatted else f"{actual}%",
+                    "decision": decision,
+                    "change": change if change else "N/A",
+                    "vote": "N/A",
+                    "dissent": None
+                })
+            
+            # Tasso attuale (ultimo meeting)
+            current_rate = meetings[0]["rate"] if meetings else "N/A"
+            
+            # Calcola trend basato su ultimi 2 meeting
+            trend_info = calculate_trend_from_meetings(meetings)
+            
+            return {
+                "bank_name": config["bank_name"],
+                "bank_short": config["bank_short"],
+                "current_rate": current_rate,
+                "meetings": meetings[:2],
+                "trend": trend_info["trend"],
+                "trend_label": trend_info["trend_label"],
+                "trend_emoji": trend_info["trend_emoji"],
+                "stance_hint": trend_info["stance_hint"],
+                "source_country": country  # Debug: quale country ha funzionato
+            }
+            
+        except Exception as e:
+            last_error = f"{country}: {str(e)[:50]}"
+            continue
+    
+    # Nessun country code ha funzionato
+    return {"error": last_error or "All country codes failed"}
 
 
 def calculate_trend_from_meetings(meetings: list) -> dict:
