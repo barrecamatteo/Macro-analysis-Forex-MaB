@@ -773,42 +773,49 @@ CENTRAL_BANK_CONFIG = {
         "bank_name": "Federal Reserve",
         "bank_short": "Fed",
         "event_id": 168,  # interest-rate-decision-168
+        "country": "us",
         "rate_type": "range",  # "range" per Fed (4.25-4.50%), "single" per altri
     },
     "EUR": {
         "bank_name": "European Central Bank",
         "bank_short": "ECB",
         "event_id": 164,  # ecb-interest-rate-decision-164
+        "country": "eu",
         "rate_type": "single",
     },
     "GBP": {
         "bank_name": "Bank of England",
         "bank_short": "BOE",
         "event_id": 170,  # boe-interest-rate-decision-170
+        "country": "uk",
         "rate_type": "single",
     },
     "JPY": {
         "bank_name": "Bank of Japan",
         "bank_short": "BOJ",
         "event_id": 165,  # boj-interest-rate-decision-165
+        "country": "jp",
         "rate_type": "single",
     },
     "CHF": {
         "bank_name": "Swiss National Bank",
         "bank_short": "SNB",
         "event_id": 169,  # snb-interest-rate-decision-169
+        "country": "ch",
         "rate_type": "single",
     },
     "AUD": {
         "bank_name": "Reserve Bank of Australia",
         "bank_short": "RBA",
         "event_id": 167,  # rba-interest-rate-decision-167
+        "country": "au",
         "rate_type": "single",
     },
     "CAD": {
         "bank_name": "Bank of Canada",
         "bank_short": "BOC",
         "event_id": 166,  # boc-interest-rate-decision-166
+        "country": "ca",
         "rate_type": "single",
     }
 }
@@ -826,7 +833,8 @@ def fetch_central_bank_history_from_api(currency: str) -> dict:
         return {"error": f"Currency {currency} not configured"}
     
     event_id = config["event_id"]
-    url = f"https://sbcharts.investing.com/events_charts/us/{event_id}.json"
+    country = config.get("country", "us")  # Usa country dalla config
+    url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
     
     try:
         headers = {
