@@ -2343,27 +2343,68 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ---
 
 ### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
-**Logica:** Sorprese economiche recenti (actual vs forecast) e shock geopolitici.
 
-**PARTE 1: DATI ECONOMICI (70%)**
-Usa i dati forniti in "DATI ECONOMICI RECENTI". Calcola sorpresa = Actual - Forecast.
+**Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast).
+
+## ⛔ REGOLE RIGIDE - LEGGERE ATTENTAMENTE! ⛔
+
+**PRIMA di assegnare qualsiasi punteggio, verifica:**
+1. ✅ Ho un DATO CONCRETO con Actual vs Forecast? → Se NO → **Score = 0**
+2. ✅ Questo fattore è GIÀ conteggiato in un altro parametro? → Se SÌ → **Score = 0**
+3. ✅ La "sorpresa" è avvenuta negli ultimi 7 giorni? → Se NO → **Score = 0**
+
+**CHECKLIST ANTI-DOPPIO CONTEGGIO:**
+| Se hai già dato punti per... | NON puoi dare punti in News Catalyst per... |
+|------------------------------|---------------------------------------------|
+| Aspettative Tassi (BC hawkish/dovish) | "BC hawkish/dovish stance" |
+| Tassi Attuali (differenziale tassi) | "Tassi alti/bassi", "carry trade" |
+| Inflazione | "Inflazione alta/bassa" (senza sorpresa) |
+| Risk Sentiment (tensioni geopolitiche) | "Tensioni geopolitiche", "safe-haven demand" |
+
+**PARTE 1: DATI ECONOMICI (peso 70%)**
+
+⚠️ OBBLIGATORIO: Devi citare Actual vs Forecast nella motivazione!
 
 | Indicatore | +2 | +1 | -1 | -2 |
 |------------|----|----|----|----|
-| NFP (USD) | ≥+100k | +30k a +99k | -30k a -99k | ≤-100k |
-| CPI YoY | ≥+0.3pp | +0.2pp | -0.2pp | ≤-0.3pp |
-| GDP QoQ | ≥+0.5pp | +0.3pp | -0.3pp | ≤-0.5pp |
+| NFP (USD) | Sorpresa ≥+100k | +30k a +99k | -30k a -99k | ≤-100k |
+| CPI YoY | Sorpresa ≥+0.3pp | +0.2pp | -0.2pp | ≤-0.3pp |
+| GDP QoQ | Sorpresa ≥+0.5pp | +0.3pp | -0.3pp | ≤-0.5pp |
+| Retail Sales | Sorpresa ≥+0.5% | +0.3% | -0.3% | ≤-0.5% |
+| PMI Flash | Sorpresa ≥+3pt | +1.5pt | -1.5pt | ≤-3pt |
 
-**PARTE 2: GEOPOLITICA (30%)**
-⚠️ NON duplicare con Risk Sentiment! Se Risk Sentiment ≠ 0 per tensioni → qui = 0
+**Se NON ci sono dati con sorprese significative → Score Dati = 0**
+**"Mancanza di dati positivi" NON è un motivo per dare -1 o -2!**
+
+**PARTE 2: GEOPOLITICA (peso 30%)**
+
+⚠️ SOLO per eventi NUOVI (<48h) NON ancora riflessi in Risk Sentiment!
+Se Risk Sentiment ≠ 0 → Score Geopolitica = 0 (già conteggiato!)
 
 | Evento | Safe-Haven | Cicliche |
 |--------|------------|----------|
-| Shock grave improvviso (<48h) | +2 | -2 |
-| Tensione nuova | +1 | -1 |
-| Nessuna news / già prezzato | 0 | 0 |
+| Shock grave improvviso (<48h) e NON in Risk Sentiment | +2 | -2 |
+| Tensione nuova (<48h) e NON in Risk Sentiment | +1 | -1 |
+| Qualsiasi altra situazione | **0** | **0** |
 
 **Formula:** News_Catalyst = round((0.7 × Score_Dati) + (0.3 × Score_Geo))
+
+## ESEMPI DI MOTIVAZIONI
+
+❌ **SBAGLIATE (score dovrebbe essere 0):**
+- "BOJ hawkish stance unica nel G7" → già in Aspettative Tassi!
+- "Mancanza di dati recenti positivi" → non è una sorpresa negativa!
+- "Differenziale monetario favorevole" → già in Tassi Attuali!
+- "Safe-haven demand per tensioni" → già in Risk Sentiment!
+- "BOE dovish pesa negativamente" → già in Aspettative Tassi!
+
+✅ **CORRETTE:**
+- "NFP 256k vs 180k atteso, sorpresa +76k → +1" (dato concreto con sorpresa)
+- "CPI 2.9% vs 2.6% atteso, sorpresa +0.3pp → +1" (dato concreto con sorpresa)
+- "Nessuna sorpresa significativa nei dati recenti → 0" (corretto!)
+- "Dati in linea con attese, geopolitica già in Risk Sentiment → 0" (corretto!)
+
+**NEL DUBBIO → DAI 0!**
 
 ---
 
@@ -2477,7 +2518,18 @@ Usa i dati forniti in "DATI ECONOMICI RECENTI". Calcola sorpresa = Actual - Fore
 3. **USA SOLO I DATI FORNITI** - non inventare
 4. **MOTIVAZIONI CON NUMERI**: cita sempre i valori specifici (tassi %, inflazione %, PMI)
 5. **COERENZA**: se dai +1 a USD per tassi alti, non dare +1 anche a EUR che ha tassi più bassi
-6. **NO DOPPIO CONTEGGIO**: se Risk Sentiment ≠ 0 per geopolitica, News Catalyst geopolitica = 0
+
+## ⛔ REGOLA CRITICA NEWS CATALYST ⛔
+
+**News Catalyst richiede SORPRESE CONCRETE (Actual vs Forecast)!**
+
+- ❌ "BC hawkish/dovish" → GIÀ IN ASPETTATIVE TASSI → News Catalyst = 0
+- ❌ "Tassi alti/bassi" → GIÀ IN TASSI ATTUALI → News Catalyst = 0  
+- ❌ "Safe-haven/tensioni" → GIÀ IN RISK SENTIMENT → News Catalyst = 0
+- ❌ "Mancanza di dati positivi" → NON È UNA SORPRESA → News Catalyst = 0
+- ✅ "CPI 2.9% vs 2.6% atteso (+0.3pp sorpresa)" → CORRETTO, è una sorpresa concreta
+
+**Se non hai un dato Actual vs Forecast da citare → News Catalyst = 0**
 """
 
 
