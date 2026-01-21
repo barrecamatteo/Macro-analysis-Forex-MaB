@@ -2205,7 +2205,7 @@ def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
 # SYSTEM PROMPT PER ANALISI GLOBALE
 # ============================================================================
 
-SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 19 coppie forex separatamente.
+SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 7 VALUTE singolarmente.
 
 ## ⚠️ REGOLA CRITICA: USA I DATI FORNITI, NON CONOSCENZE OBSOLETE!
 
@@ -2213,17 +2213,17 @@ Le tue conoscenze potrebbero essere OBSOLETE. Devi:
 1. **LEGGERE ATTENTAMENTE** tutti i dati macro, PMI e notizie web forniti
 2. **BASARTI SOLO** sulle informazioni fornite nel prompt
 3. **NON ASSUMERE** che le banche centrali mantengano politiche passate
-4. **VERIFICARE** sempre nelle notizie web prima di scrivere
 
-## REGOLA FONDAMENTALE: CONFRONTO DIRETTO TRA VALUTE
+## APPROCCIO: ANALISI PER VALUTA
 
-Devi fare **19 ANALISI INDIPENDENTI**, una per ogni coppia forex.
-Per ogni coppia (es: EUR/USD) devi:
-1. **CONFRONTARE DIRETTAMENTE** le due valute su ogni parametro
-2. Assegnare punteggi basati su **CHI HA IL VANTAGGIO RELATIVO**
-3. I punteggi sono RELATIVI al confronto, NON assoluti
+Devi analizzare **7 VALUTE SEPARATAMENTE**: EUR, USD, GBP, JPY, CHF, AUD, CAD
 
-⚠️ LA STESSA VALUTA PUÒ AVERE PUNTEGGI DIVERSI IN COPPIE DIVERSE!
+Per ogni valuta assegna un punteggio **ASSOLUTO** su 8 parametri.
+Il sistema calcolerà automaticamente i differenziali per le 19 coppie forex.
+
+**Vantaggi di questo approccio:**
+- Coerenza garantita: se EUR > GBP > CAD, allora EUR/CAD sarà coerente
+- Analisi più precisa e meno soggetta a errori
 
 ## LINGUA: TUTTO IN ITALIANO
 
@@ -2235,360 +2235,249 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ## ═══════════════════════════════════════════════════════════════════
 
 ### 1️⃣ TASSI ATTUALI [-1 a +1]
-**Logica:** Il differenziale di tasso (carry) attrae flussi di capitale verso la valuta con rendimento maggiore.
+**Logica:** Tassi più alti attirano capitali (carry trade).
 
-| Spread (Base - Quote) | Score Base | Score Quote |
-|-----------------------|------------|-------------|
-| ≥ +150 bp             | +1         | -1          |
-| +50 bp a +149 bp      | +1         | 0           |
-| -49 bp a +49 bp       | 0          | 0           |
-| -50 bp a -149 bp      | 0          | +1          |
-| ≤ -150 bp             | -1         | +1          |
-
-**Esempio:** EUR (2.15%) vs USD (3.75%) → Spread = -160bp → EUR: -1, USD: +1
+| Tasso BC | Score | Motivo |
+|----------|-------|--------|
+| ≥ 3.5% | +1 | Rendimento attraente, flussi in entrata |
+| 1.5% - 3.49% | 0 | Rendimento medio |
+| < 1.5% | -1 | Rendimento basso, flussi in uscita |
 
 ---
 
 ### 2️⃣ ASPETTATIVE TASSI [-2 a +2] ⭐ PESO DOPPIO
-**Logica:** Il mercato guarda avanti. Le aspettative sui tassi futuri sono più importanti dei tassi attuali.
+**Logica:** Il mercato guarda avanti. Le aspettative future contano più del presente.
 
-**Criteri per singola valuta:**
 | Scenario | Score |
 |----------|-------|
-| BC hawkish con rialzi attesi O prob. taglio <20% nei prossimi 3 mesi | +2 |
-| BC neutrale/leggermente hawkish O prob. taglio 20-40% | +1 |
-| BC neutrale O incertezza elevata | 0 |
-| BC leggermente dovish O prob. taglio 60-80% | -1 |
-| BC molto dovish con tagli attesi O prob. taglio >80% | -2 |
+| BC hawkish, rialzi attesi, inflazione problematica | +2 |
+| BC neutrale con bias hawkish, hold prolungato atteso | +1 |
+| BC neutrale, incertezza elevata | 0 |
+| BC leggermente dovish, tagli probabili entro 3-6 mesi | -1 |
+| BC molto dovish, in ciclo di tagli attivo | -2 |
 
-**Confronto:** Assegna score a ciascuna valuta, poi il vantaggio relativo determina i punti.
-
-⚠️ USA SOLO LE NOTIZIE WEB FORNITE per determinare stance e probabilità!
+⚠️ USA SOLO LE NOTIZIE WEB E LO STORICO BC FORNITI per determinare stance!
 
 ---
 
 ### 3️⃣ INFLAZIONE [-1 a +1]
-**Logica FOREX:** L'inflazione influenza la POLITICA MONETARIA. Per la VALUTA:
-- Inflazione ALTA → BC non può tagliare i tassi → tassi restano ALTI → VALUTA FORTE
-- Inflazione BASSA → BC può tagliare i tassi → tassi scendono → VALUTA DEBOLE
+**Logica FOREX:** Inflazione alta → BC non può tagliare → tassi alti → valuta forte
 
-⚠️ ATTENZIONE: Questo è l'opposto della logica economica tradizionale!
-
-| Scenario | Score | Motivo |
-|----------|-------|--------|
-| Inflazione > 3% | +1 | Pressione HAWKISH - BC non può tagliare, valuta forte |
-| Inflazione 2% - 3% | 0 | Al TARGET - BC ha flessibilità, neutro |
-| Inflazione < 2% | -1 | Pressione DOVISH - BC può/deve tagliare, valuta debole |
-
-**Confronto DIRETTO:** 
-- Chi ha inflazione PIÙ ALTA ha vantaggio (pressione per tassi alti)
-- Differenziale >1% = vantaggio significativo
-- Considerare anche le aspettative future dalle news
+| Inflazione | Score | Motivo |
+|------------|-------|--------|
+| > 3% | +1 | Pressione hawkish, BC non può tagliare |
+| 2% - 3% | 0 | Al target, BC ha flessibilità |
+| < 2% | -1 | Sotto target, BC può/deve tagliare |
 
 ---
 
-### 4️⃣ CRESCITA/PIL [-1 a +1] - LAGGING INDICATOR
-**Logica:** Il PIL da solo non basta. Va contestualizzato con inflazione e sostenibilità.
+### 4️⃣ CRESCITA/PIL [-1 a +1]
+**Logica:** Crescita sana attira investimenti e rafforza la valuta.
 
-| Scenario | Score |
-|----------|-------|
-| PIL >2% + inflazione controllata + trend stabile | +1 (crescita sana) |
-| PIL 1%-2% + situazione bilanciata | 0 (crescita moderata) |
-| PIL <1% O trend in forte decelerazione | -1 (rischio recessione) |
-| PIL alto MA inflazione fuori controllo | 0 (NON +1! crescita non sostenibile) |
-| STAGFLAZIONE (PIL basso + inflazione alta) | -1 (scenario peggiore) |
+| PIL YoY | Score | Condizione |
+|---------|-------|------------|
+| > 2% | +1 | Solo se inflazione < 4% (crescita sostenibile) |
+| 1% - 2% | 0 | Crescita moderata |
+| < 1% | -1 | Stagnazione o recessione |
 
-**Confronto DIRETTO:**
-- Differenziale PIL > 1.5pp → vantaggio netto per chi ha PIL maggiore
-- Differenziale PIL 0.5-1.5pp → vantaggio leggero
-- Differenziale PIL < 0.5pp → situazione simile, considera altri fattori
+⚠️ PIL alto con inflazione alta = 0 (crescita non sostenibile)
 
 ---
 
-### 5️⃣ PMI [-1 a +1] - LEADING INDICATOR
-**Logica:** PMI anticipa il PIL di 3-6 mesi. Considera livello (>50 = espansione) E direzione (delta).
+### 5️⃣ PMI [-1 a +1]
+**Logica:** PMI > 50 = espansione, PMI < 50 = contrazione
 
-**⚠️ PESI DIVERSI PER STRUTTURA ECONOMICA:**
-| Valuta | Peso Services | Peso Manufacturing | Motivo |
-|--------|---------------|-------------------|--------|
-| USD    | 70%           | 30%               | Economia basata su servizi |
-| EUR    | 50%           | 50%               | Mista (Germania manifattura + resto servizi) |
-| GBP    | 70%           | 30%               | Finanza e servizi professionali |
-| JPY    | 40%           | 60%               | Export e manifattura (auto, elettronica) |
-| CHF    | 60%           | 40%               | Finanza + pharma |
-| AUD    | 50%           | 50%               | Mining + servizi domestici |
-| CAD    | 50%           | 50%               | Energia + servizi |
+**PESI SETTORIALI per valuta:**
+| Valuta | Peso Manifattura | Peso Servizi | Motivo |
+|--------|------------------|--------------|--------|
+| EUR | 50% | 50% | Economia mista |
+| USD | 30% | 70% | Economia servizi-dominante |
+| GBP | 20% | 80% | Servizi finanziari dominanti |
+| JPY | 60% | 40% | Export manifatturiero |
+| CHF | 50% | 50% | Economia mista |
+| AUD | 50% | 50% | Mining + servizi |
+| CAD | 40% | 60% | Risorse + servizi |
 
-**Criteri di valutazione:**
-| Condizione | Valutazione |
-|------------|-------------|
-| PMI ponderato ≥52 + Delta positivo | Forte espansione (+1) |
-| PMI ponderato 50-52 + Delta positivo | Espansione moderata (+1) |
-| PMI ponderato 50-52 + Delta negativo | Rallentamento (0) |
-| PMI ponderato 48-50 + Delta positivo | Contrazione in recupero (0) |
-| PMI ponderato 48-50 + Delta negativo | Contrazione in peggioramento (-1) |
-| PMI ponderato <48 | Contrazione significativa (-1) |
+**Calcolo:** PMI_pesato = (Manuf × Peso_M) + (Serv × Peso_S)
 
-**Confronto DIRETTO:** Chi ha momentum economico migliore considerando i pesi settoriali?
+| PMI Pesato | Score |
+|------------|-------|
+| > 52 | +1 |
+| 48 - 52 | 0 |
+| < 48 | -1 |
 
 ---
 
 ### 6️⃣ RISK SENTIMENT [-1 a +1]
-**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso valute cicliche.
+**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso cicliche.
 
 **Classificazione valute:**
 - **Safe-haven:** USD, JPY, CHF
-- **Cicliche/Commodity:** AUD, CAD, GBP
-- **Semi-cicliche:** EUR
+- **Cicliche:** AUD, CAD, GBP
+- **Semi-ciclica:** EUR
 
-**Determinazione regime mercato:**
-- VIX > 25 O equity in forte calo O tensioni geopolitiche acute → **Risk-OFF**
-- VIX < 18 E equity positivo E sentiment ottimista → **Risk-ON**
+**Determina il regime di mercato dalle notizie:**
+- VIX > 25 O tensioni geopolitiche acute → **Risk-OFF**
+- VIX < 18 E sentiment positivo → **Risk-ON**
 - Altrimenti → **Neutro**
 
-**Matrice punteggi in base al TIPO di coppia:**
-| Tipo Coppia | Risk-OFF | Neutro | Risk-ON |
-|-------------|----------|--------|---------|
-| Ciclica vs Safe-haven (es: AUD/JPY) | Ciclica: -1, Safe: +1 | 0, 0 | Ciclica: +1, Safe: -1 |
-| Semi-ciclica vs Safe-haven (es: EUR/USD) | Semi: -1, Safe: +1 | 0, 0 | Semi: +1, Safe: -1 |
-| Entrambe cicliche (es: AUD/CAD) | 0, 0 | 0, 0 | 0, 0 |
-| Entrambe safe-haven (es: USD/JPY) | Analisi specifica | 0, 0 | Analisi specifica |
+| Regime | Safe-Haven | Cicliche | Semi-cicliche |
+|--------|------------|----------|---------------|
+| Risk-OFF | +1 | -1 | 0 |
+| Neutro | 0 | 0 | 0 |
+| Risk-ON | -1 | +1 | 0 |
 
 ---
 
 ### 7️⃣ BILANCIA/FISCALE [-1 a +1]
-**Logica:** Importante nel lungo termine, meno nel breve. Assegnare peso solo se notizie specifiche.
+**Logica:** Importante nel lungo termine. Peso solo se notizie specifiche.
 
 | Scenario | Score |
 |----------|-------|
-| Current Account surplus >2% PIL + debito gestibile | +1 |
-| Situazione nella media O nessuna notizia rilevante | 0 |
-| Deficit gemelli elevati O crisi debito in corso | -1 |
+| Current Account surplus + debito gestibile | +1 |
+| Situazione nella media O nessuna notizia | 0 |
+| Deficit gemelli O crisi debito in corso | -1 |
 
-**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito, assegnare 0 a entrambe le valute.
+**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito → 0
 
 ---
 
 ### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
-**Logica:** Cattura le SORPRESE economiche recenti (actual vs forecast) e gli shock geopolitici NON già prezzati.
+**Logica:** Sorprese economiche recenti (actual vs forecast) e shock geopolitici.
 
-⚠️ **ATTENZIONE AL DOPPIO CONTEGGIO CON RISK SENTIMENT!**
-- La componente DATI (70%) è quasi sempre applicabile
-- La componente GEOPOLITICA (30%) si applica SOLO se NON già conteggiata in Risk Sentiment!
-- Se hai dato punteggio in Risk Sentiment per tensioni geopolitiche → Geopolitica qui = 0
+**PARTE 1: DATI ECONOMICI (70%)**
+Usa i dati forniti in "DATI ECONOMICI RECENTI". Calcola sorpresa = Actual - Forecast.
 
-**PARTE 1: DATI ECONOMICI (70% del peso)** ← Questa parte NON ha problemi di doppio conteggio
-
-Usa i dati forniti nella sezione "DATI ECONOMICI RECENTI". Calcola la sorpresa = Actual - Forecast.
-
-| Indicatore | Soglie per +2 | Soglie per +1 | Soglie per -1 | Soglie per -2 |
-|------------|---------------|---------------|---------------|---------------|
+| Indicatore | +2 | +1 | -1 | -2 |
+|------------|----|----|----|----|
 | NFP (USD) | ≥+100k | +30k a +99k | -30k a -99k | ≤-100k |
 | CPI YoY | ≥+0.3pp | +0.2pp | -0.2pp | ≤-0.3pp |
 | GDP QoQ | ≥+0.5pp | +0.3pp | -0.3pp | ≤-0.5pp |
-| Retail Sales | ≥+0.5% | +0.3% | -0.3% | ≤-0.5% |
-| Unemployment | ≤-0.3pp | -0.2pp | +0.2pp | ≥+0.3pp |
-| Jobless Claims | ≤-30k | -15k | +15k | ≥+30k |
 
-⚠️ INTERPRETAZIONE SPECIALE:
-- CPI: sorpresa POSITIVA = inflazione sopra attese = HAWKISH = POSITIVO per valuta
-- Unemployment/Jobless: sorpresa NEGATIVA = meno disoccupazione = POSITIVO per valuta
+**PARTE 2: GEOPOLITICA (30%)**
+⚠️ NON duplicare con Risk Sentiment! Se Risk Sentiment ≠ 0 per tensioni → qui = 0
 
-**DECADIMENTO TEMPORALE:**
-- 0-2 giorni fa: peso 100%
-- 3-4 giorni fa: peso 50% (raddoppia le soglie)
-- 5-7 giorni fa: peso 25% (quadruplica le soglie)
-- >7 giorni fa: ignora
+| Evento | Safe-Haven | Cicliche |
+|--------|------------|----------|
+| Shock grave improvviso (<48h) | +2 | -2 |
+| Tensione nuova | +1 | -1 |
+| Nessuna news / già prezzato | 0 | 0 |
 
-**PARTE 2: GEOPOLITICA (30% del peso)** ← ⚠️ SOLO se NON già in Risk Sentiment!
+**Formula:** News_Catalyst = round((0.7 × Score_Dati) + (0.3 × Score_Geo))
 
-Se Risk Sentiment ≠ 0 a causa di tensioni geopolitiche → questa sezione = 0 per tutte le valute!
-Usa questa tabella SOLO per shock improvvisi (<48h) non ancora riflessi nel regime di mercato.
-
-| Evento | Safe Haven (USD,CHF,JPY) | Risk Currency (AUD,EUR,GBP) |
-|--------|--------------------------|----------------------------|
-| Shock grave IMPROVVISO (<48h) | +2 | -2 |
-| Tensione nuova non ancora prezzata | +1 | -1 |
-| Trade war/dazi NUOVI | +1 aggressor, -1 target | -1 target |
-| Risoluzione/distensione NUOVA | -1 | +1 |
-| Tensioni già note/prezzate | 0 | 0 |
-| Nessuna news rilevante | 0 | 0 |
-
-**CORRELAZIONI CROSS-VALUTA:**
-- AUD: considera anche dati CNY (Cina = primo partner) con peso 50%
-- CAD: considera prezzo petrolio (WTI ±5% = ±1)
-
-**FORMULA COMBINAZIONE:**
-News_Catalyst = min(+2, max(-2, round((0.7 × Score_Dati) + (0.3 × Score_Geopolitica))))
-
-## ⛔ REGOLA ANTI-DOPPIO CONTEGGIO - CRITICA! ⛔
-
-**PRINCIPIO FONDAMENTALE:** Ogni fattore economico o geopolitico può influenzare UN SOLO parametro.
-Se è già conteggiato in Risk Sentiment, NON può essere conteggiato anche in News Catalyst!
-
-**CONFLITTO PIÙ COMUNE - Risk Sentiment vs News Catalyst:**
-
-❌ ERRORE GRAVE (doppio conteggio):
-- Risk Sentiment JPY: +1 "safe-haven beneficia da tensioni geopolitiche"
-- News Catalyst JPY: +1 "safe-haven demand da tensioni Trump"
-→ SBAGLIATO! Stessa cosa contata due volte!
-
-✅ CORRETTO:
-- Risk Sentiment JPY: +1 "safe-haven beneficia da tensioni geopolitiche" 
-- News Catalyst JPY: 0 "Nessun dato economico sorpresa. Geopolitica già in Risk Sentiment."
-
-**REGOLA PRATICA per News Catalyst GEOPOLITICA:**
-- Se Risk Sentiment ≠ 0 per una valuta a causa di tensioni geopolitiche → News Catalyst Geopolitica = 0
-- News Catalyst Geopolitica ≠ 0 SOLO per eventi IMPROVVISI avvenuti nelle ultime 48h e NON ancora riflessi nel regime di mercato
-
-**COSA CONTA IN CIASCUN PARAMETRO:**
-
-| Parametro | Cosa conta | Cosa NON conta |
-|-----------|------------|----------------|
-| Risk Sentiment | Regime mercato generale (VIX, equity, tensioni) | Dati economici specifici |
-| News Catalyst DATI | Sorprese economiche (actual vs forecast) | Regime di mercato |
-| News Catalyst GEO | SOLO shock improvvisi <48h | Tensioni già note e prezzate |
-
-**ESEMPIO PRATICO:**
-Scenario: Tensioni commerciali USA-Cina in corso da settimane
-
-- Risk Sentiment: EUR -1, JPY +1 (risk-off per tensioni)
-- News Catalyst EUR: 0 (geopolitica già in Risk Sentiment), ma se CPI sorprende: ±1/2
-- News Catalyst JPY: 0 (geopolitica già in Risk Sentiment), ma se NFP sorprende: ±1/2
-
-**Se non sei sicuro → DAI 0 in News Catalyst Geopolitica!**
+---
 
 ## ═══════════════════════════════════════════════════════════════════
-## RANGE TOTALI
+## RANGE TOTALI PER VALUTA
 ## ═══════════════════════════════════════════════════════════════════
 
 - **Aspettative Tassi**: da -2 a +2 (peso doppio)
 - **News Catalyst**: da -2 a +2 (peso doppio)
 - **Altri 6 parametri**: da -1 a +1
-- **score_base**: da -10 a +10
-- **score_quote**: da -10 a +10
-- **differenziale**: da -20 a +20
+- **TOTALE per valuta**: da -10 a +10
 
 ## ═══════════════════════════════════════════════════════════════════
-## MOTIVAZIONI DETTAGLIATE (OBBLIGATORIO!)
+## FORMATO OUTPUT JSON
 ## ═══════════════════════════════════════════════════════════════════
 
-Le motivazioni devono essere ESPLICATIVE e COMPLETE:
-- Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %, PMI)
-- Citare i DELTA dei PMI e il peso settoriale applicato
-- Citare le ASPETTATIVE delle BC DALLE NOTIZIE WEB
-- Spiegare il RAGIONAMENTO COMPARATIVO dietro il punteggio
-
-ESEMPIO CORRETTO:
-"EUR: PIL 0.7% vs USD: PIL 2.1% - differenziale di 1.4pp favorevole a USD. EUR in stagnazione con rischi recessione in Germania, mentre USA mostra crescita sostenibile con inflazione in calo. Vantaggio netto per USD nel confronto."
-
-ESEMPIO SBAGLIATO:
-"EUR crescita debole, USD crescita forte"
-
-## FORMATO OUTPUT JSON:
 {
     "analysis_date": "YYYY-MM-DD",
-    "summary": "Breve riassunto del contesto macro globale in italiano",
-    "pair_analysis": {
-        "EUR/USD": {
-            "summary": "Descrivi i fattori chiave del confronto con dati numerici. NON scrivere 'bullish' o 'bearish' - il bias sarà determinato automaticamente dai punteggi.",
-            "key_drivers": ["driver1", "driver2"],
-            "current_price": "1.0850",
-            "price_scenarios": {
-                "base_range": "1.0750 - 1.0950",
-                "base_strong": "1.0950 - 1.1100",
-                "quote_strong": "1.0600 - 1.0750"
-            },
+    "market_regime": "risk-on | risk-off | neutral",
+    "market_summary": "Breve riassunto del contesto macro globale in italiano (2-3 frasi)",
+    "currency_analysis": {
+        "EUR": {
+            "total_score": 0,
+            "summary": "Sintesi della situazione EUR con dati numerici",
             "scores": {
                 "tassi_attuali": {
-                    "base": -1, "quote": 1,
-                    "motivation_base": "EUR tasso BCE 2.15% vs USD Fed 3.75% - spread -160bp sfavorevole per EUR. Carry trade favorisce USD.",
-                    "motivation_quote": "USD tasso Fed 3.75% vs EUR BCE 2.15% - spread +160bp favorevole. Rendimenti più attraenti per capitali."
+                    "score": 0,
+                    "motivation": "BCE 2.15%, livello medio nel contesto G7"
                 },
                 "aspettative_tassi": {
-                    "base": -2, "quote": 2,
-                    "motivation_base": "BCE dovish: taglio a dicembre, mercati prezzano 80% prob. ulteriori tagli. Lagarde conferma stance accomodante.",
-                    "motivation_quote": "Fed hawkish: Powell segnala hold prolungato, solo 25% prob. taglio prossimi 3 mesi. Dot plot indica 2 soli tagli nel 2025."
+                    "score": -1,
+                    "motivation": "BCE neutrale ma mercati prezzano 60% prob taglio entro marzo"
                 },
                 "inflazione": {
-                    "base": 1, "quote": 0,
-                    "motivation_base": "Inflazione EUR 2.14% vicina al target 2%, trend stabile. BCE ha margine di manovra.",
-                    "motivation_quote": "Inflazione USA 2.74% sopra target, core PCE sticky. Situazione gestibile ma non ideale."
+                    "score": 0,
+                    "motivation": "2.14% vicino al target 2%, situazione controllata"
                 },
                 "crescita_pil": {
-                    "base": -1, "quote": 1,
-                    "motivation_base": "PIL EUR 0.7% vs PIL USA 2.1% - differenziale 1.4pp sfavorevole. Germania in stagnazione, rischi recessione.",
-                    "motivation_quote": "PIL USA 2.1% con inflazione in calo - crescita sana e sostenibile. Mercato lavoro resiliente."
+                    "score": -1,
+                    "motivation": "PIL 0.7%, stagnazione con Germania in difficoltà"
                 },
                 "pmi": {
-                    "base": -1, "quote": 1,
-                    "motivation_base": "PMI EUR pesato (50/50): Manuf 45.1 (Δ-1.2) + Services 51.4 (Δ-0.8) = 48.25. Contrazione manifatturiera, trend negativo.",
-                    "motivation_quote": "PMI USA pesato (30/70): Manuf 49.3 (Δ+1.3) + Services 54.1 (Δ+2.1) = 52.66. Servizi forti, momentum positivo."
+                    "score": 0,
+                    "motivation": "PMI pesato 50.6 (Manuf 48.8 × 50% + Serv 52.4 × 50%), neutro"
                 },
                 "risk_sentiment": {
-                    "base": 0, "quote": 0,
-                    "motivation_base": "Regime neutro (VIX 18-25). EUR semi-ciclica non beneficia né soffre particolarmente.",
-                    "motivation_quote": "Regime neutro. USD safe-haven non attrae flussi risk-off significativi al momento."
+                    "score": 0,
+                    "motivation": "EUR semi-ciclica, neutrale in regime attuale"
                 },
                 "bilancia_fiscale": {
-                    "base": 0, "quote": 0,
-                    "motivation_base": "Nessuna notizia rilevante su crisi fiscale Eurozona. Situazione stabile.",
-                    "motivation_quote": "Deficit USA elevato ma nessun impatto immediato su mercati. Situazione gestibile."
+                    "score": 0,
+                    "motivation": "Nessuna notizia rilevante su crisi fiscale Eurozona"
                 },
                 "news_catalyst": {
-                    "base": -1, "quote": 2,
-                    "motivation_base": "EUR: CPI 1.9% vs 2.0% atteso (sorpresa -0.1pp) = neutro. Tensioni dazi Trump su EU = -1. Totale: -1",
-                    "motivation_quote": "USD: NFP 300k vs 180k atteso (sorpresa +120k) = +2. Risk-off favorisce USD. Totale: +2 (cap)",
-                    "evidence": {
-                        "base_data": [
-                            {"event": "CPI YoY", "actual": "1.9%", "forecast": "2.0%", "surprise": "-0.1pp", "score": 0, "days_ago": 2},
-                            {"event": "Geopolitics", "description": "Trump tariff threats on EU", "score": -1}
-                        ],
-                        "quote_data": [
-                            {"event": "NFP", "actual": "300k", "forecast": "180k", "surprise": "+120k", "score": 2, "days_ago": 5},
-                            {"event": "Risk Sentiment", "description": "Risk-off environment", "score": 1}
-                        ],
-                        "calculation_base": "(0.7 × 0) + (0.3 × -1) = -0.3 → -1",
-                        "calculation_quote": "(0.7 × 2) + (0.3 × 1) = 1.7 → +2 (cap)"
-                    }
+                    "score": 0,
+                    "motivation": "CPI in linea con attese. Nessuna sorpresa significativa"
                 }
             }
-        }
+        },
+        "USD": {
+            "total_score": 2,
+            "summary": "Sintesi della situazione USD con dati numerici",
+            "scores": {
+                "tassi_attuali": {
+                    "score": 1,
+                    "motivation": "Fed 3.75%, tra i più alti G7, carry attraente"
+                },
+                "aspettative_tassi": {
+                    "score": -1,
+                    "motivation": "Fed in ciclo tagli (2 consecutivi), stance dovish"
+                },
+                "inflazione": {
+                    "score": 0,
+                    "motivation": "2.74% sopra target ma in calo, situazione gestibile"
+                },
+                "crescita_pil": {
+                    "score": 1,
+                    "motivation": "PIL 2.1% con inflazione in calo, crescita sostenibile"
+                },
+                "pmi": {
+                    "score": 1,
+                    "motivation": "PMI pesato 53.2 (Manuf 49.3 × 30% + Serv 54.8 × 70%), espansione"
+                },
+                "risk_sentiment": {
+                    "score": 0,
+                    "motivation": "USD safe-haven ma regime neutro, nessun flusso risk-off"
+                },
+                "bilancia_fiscale": {
+                    "score": 0,
+                    "motivation": "Deficit elevato ma nessun impatto immediato"
+                },
+                "news_catalyst": {
+                    "score": 0,
+                    "motivation": "NFP in linea con attese. Geopolitica già in risk sentiment"
+                }
+            }
+        },
+        "GBP": { "total_score": 0, "summary": "...", "scores": { ... } },
+        "JPY": { "total_score": 0, "summary": "...", "scores": { ... } },
+        "CHF": { "total_score": 0, "summary": "...", "scores": { ... } },
+        "AUD": { "total_score": 0, "summary": "...", "scores": { ... } },
+        "CAD": { "total_score": 0, "summary": "...", "scores": { ... } }
     },
-    "weekly_events_warning": "⚠️ Eventi ad alto impatto in arrivo: Gio 23 ECB Rate Decision, Ven 24 Flash PMI EUR/USD/GBP",
-    "risk_sentiment": "risk-on/risk-off/neutral"
+    "weekly_events_warning": "⚠️ Eventi ad alto impatto: Mar 21 Fed Decision, Gio 23 ECB Decision"
 }
 
-## ⚠️ REGOLE COERENZA ASPETTATIVE TASSI:
-Il punteggio "aspettative_tassi" deve essere COERENTE con lo storico delle decisioni (se fornito):
-- **Trend HIKING** (2 rialzi) → La valuta NON PUÒ avere score -2 (molto dovish)
-- **Trend CUTTING** (2 tagli) → La valuta NON PUÒ avere score +2 (molto hawkish)
-- **Trend HOLDING** → Score può essere -1, 0, o +1 in base alle aspettative future
-- Usa le NOTIZIE WEB per determinare le aspettative future
+## ⚠️ REGOLE CRITICHE FINALI
 
-## REGOLE CRITICHE FINALI:
-- ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web, dati economici recenti)
-- ⚠️ CONFRONTO DIRETTO tra le due valute su ogni parametro
-- ⚠️ PMI: applica i PESI SETTORIALI corretti per ogni valuta
-- ⚠️ PIL: contestualizza con inflazione (no punti per crescita non sostenibile)
-- ⚠️ RISK SENTIMENT: dipende dal TIPO di coppia (safe-haven vs cicliche)
-- ⚠️ NEWS CATALYST: usa SOLO sorprese recenti (actual vs forecast) e geopolitica non prezzata
-- ⚠️ NEWS CATALYST: OBBLIGATORIO includere "evidence" con i dati usati per il calcolo
-- score_base = SOMMA degli 8 punteggi "base"
-- score_quote = SOMMA degli 8 punteggi "quote"
-- differenziale = score_base - score_quote
-
-## ⛔ REMINDER FINALE: TUTTE LE 19 COPPIE NEL JSON ⛔
-Il campo "pair_analysis" DEVE contenere ESATTAMENTE 19 chiavi, una per ogni coppia:
-EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, EUR/GBP, EUR/JPY, EUR/CHF, EUR/AUD, EUR/CAD,
-GBP/JPY, GBP/AUD, GBP/CHF, GBP/CAD, AUD/JPY, AUD/CAD, AUD/CHF, CAD/JPY, CAD/CHF
-
-Se ne manca anche solo UNA, l'analisi è INCOMPLETA!
-
-## ⚠️ NOTA SUL SUMMARY:
-Il campo "summary" deve descrivere i fattori chiave del confronto con dati numerici.
-NON scrivere "bullish", "bearish", "Strong" nel summary - il bias verrà determinato automaticamente dal sistema in base al differenziale calcolato.
-Concentrati sui FATTI: tassi, aspettative, inflazione, PMI, ecc.
+1. **TUTTE LE 7 VALUTE OBBLIGATORIE**: EUR, USD, GBP, JPY, CHF, AUD, CAD
+2. **total_score = SOMMA degli 8 punteggi** (verifica che sia corretto!)
+3. **USA SOLO I DATI FORNITI** - non inventare
+4. **MOTIVAZIONI CON NUMERI**: cita sempre i valori specifici (tassi %, inflazione %, PMI)
+5. **COERENZA**: se dai +1 a USD per tassi alti, non dare +1 anche a EUR che ha tassi più bassi
+6. **NO DOPPIO CONTEGGIO**: se Risk Sentiment ≠ 0 per geopolitica, News Catalyst geopolitica = 0
 """
 
 
@@ -2950,6 +2839,87 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
+# ============================================================================
+# FUNZIONE CALCOLO DIFFERENZIALI COPPIE DA VALUTE
+# ============================================================================
+
+SCORE_PARAMETERS = [
+    "tassi_attuali",
+    "aspettative_tassi", 
+    "inflazione",
+    "crescita_pil",
+    "pmi",
+    "risk_sentiment",
+    "bilancia_fiscale",
+    "news_catalyst"
+]
+
+def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
+    """
+    Calcola i punteggi per le 19 coppie forex a partire dai punteggi delle 7 valute.
+    
+    Args:
+        currency_analysis: Dict con struttura {
+            "EUR": {"total_score": X, "summary": "...", "scores": {...}},
+            "USD": {...},
+            ...
+        }
+    
+    Returns:
+        pair_analysis: Dict con struttura compatibile con UI esistente
+    """
+    pair_analysis = {}
+    
+    for pair in FOREX_PAIRS:
+        base, quote = pair.split("/")
+        
+        # Verifica che entrambe le valute siano presenti
+        if base not in currency_analysis or quote not in currency_analysis:
+            continue
+        
+        base_data = currency_analysis[base]
+        quote_data = currency_analysis[quote]
+        
+        # Calcola i punteggi per ogni parametro
+        scores = {}
+        for param in SCORE_PARAMETERS:
+            base_score = base_data.get("scores", {}).get(param, {}).get("score", 0)
+            quote_score = quote_data.get("scores", {}).get(param, {}).get("score", 0)
+            base_motivation = base_data.get("scores", {}).get(param, {}).get("motivation", "")
+            quote_motivation = quote_data.get("scores", {}).get(param, {}).get("motivation", "")
+            
+            scores[param] = {
+                "base": base_score,
+                "quote": quote_score,
+                "motivation_base": f"{base}: {base_motivation}",
+                "motivation_quote": f"{quote}: {quote_motivation}"
+            }
+        
+        # Calcola totali
+        score_base = base_data.get("total_score", 0)
+        score_quote = quote_data.get("total_score", 0)
+        differential = score_base - score_quote
+        
+        # Genera summary combinato
+        base_summary = base_data.get("summary", "")
+        quote_summary = quote_data.get("summary", "")
+        combined_summary = f"{base}: {base_summary} | {quote}: {quote_summary}"
+        
+        pair_analysis[pair] = {
+            "summary": combined_summary,
+            "score_base": score_base,
+            "score_quote": score_quote,
+            "differential": differential,
+            "scores": scores,
+            # Manteniamo campi per compatibilità
+            "key_drivers": [],
+            "current_price": "",
+            "price_scenarios": {}
+        }
+    
+    return pair_analysis
+
+
 def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
@@ -2966,7 +2936,6 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
     """
     client = anthropic.Anthropic(api_key=api_key)
     
-    pairs_list = ", ".join(FOREX_PAIRS)
     currencies_info = "\n".join([f"- {k}: {v['name']} ({v['central_bank']}) - Tipo: {v['type']}" 
                                   for k, v in CURRENCIES.items()])
     
@@ -3088,18 +3057,20 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
     
     today = get_italy_now()
     
+    currencies_list = ", ".join(CURRENCIES.keys())
+    
     user_prompt = f"""
-## ⛔ REQUISITO CRITICO: ANALIZZA TUTTE LE 19 COPPIE! ⛔
-Devi analizzare OGNI SINGOLA coppia nella lista seguente. NON saltare nessuna coppia!
+## ⛔ REQUISITO CRITICO: ANALIZZA TUTTE LE 7 VALUTE! ⛔
+Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna valuta!
 
-**Lista completa delle 19 coppie (TUTTE obbligatorie):**
-{pairs_list}
+**Lista completa delle 7 valute (TUTTE obbligatorie):**
+{currencies_list}
 
-⚠️ Se l'output JSON non contiene tutte le 19 coppie, l'analisi sarà INCOMPLETA e inutilizzabile!
+⚠️ Se l'output JSON non contiene tutte le 7 valute in "currency_analysis", l'analisi sarà INCOMPLETA!
 
 ## 📅 DATA ODIERNA: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})
 
-**Valute da analizzare:**
+**Dettagli valute:**
 {currencies_info}
 
 ---
@@ -3114,14 +3085,14 @@ Devi analizzare OGNI SINGOLA coppia nella lista seguente. NON saltare nessuna co
 
 ## ⭐ ISTRUZIONI:
 
-1. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il bias
-2. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
-3. **PMI sono LEADING indicators**: anticipano la crescita futura
-4. **PIL è LAGGING indicator**: conferma la crescita passata
-5. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
-6. Ogni **summary** deve spiegare PERCHÉ quel bias
-7. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
-8. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
+1. **ANALIZZA LE 7 VALUTE SINGOLARMENTE** - il sistema calcolerà i differenziali per le 19 coppie
+2. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il punteggio
+3. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
+4. **PMI sono LEADING indicators**: anticipano la crescita futura
+5. **PIL è LAGGING indicator**: conferma la crescita passata
+6. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
+7. Ogni **summary** deve spiegare la situazione della valuta con DATI NUMERICI
+8. **total_score** = somma degli 8 punteggi parametro (verifica sia corretto!)
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -3132,7 +3103,7 @@ Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
         response_text = ""
         with client.messages.stream(
             model="claude-sonnet-4-20250514",
-            max_tokens=25000,  # Aumentato per garantire tutte le 19 coppie
+            max_tokens=12000,  # Ridotto: ora analizziamo 7 valute invece di 19 coppie
             messages=[{"role": "user", "content": user_prompt}],
             system=SYSTEM_PROMPT_GLOBAL
         ) as stream:
@@ -3270,6 +3241,19 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
         
         analysis["pairs_analyzed"] = FOREX_PAIRS
         analysis["currencies"] = list(CURRENCIES.keys())
+        
+        # ===== NUOVO: Calcola pair_analysis da currency_analysis =====
+        if "currency_analysis" in analysis and "pair_analysis" not in analysis:
+            currency_analysis = analysis["currency_analysis"]
+            
+            # Verifica che tutte le 7 valute siano presenti
+            missing_currencies = set(CURRENCIES.keys()) - set(currency_analysis.keys())
+            if missing_currencies:
+                analysis["warning"] = f"Valute mancanti: {', '.join(missing_currencies)}"
+            
+            # Calcola i differenziali per le 19 coppie
+            pair_analysis = calculate_pair_from_currencies(currency_analysis)
+            analysis["pair_analysis"] = pair_analysis
         
         return analysis
         
@@ -3826,20 +3810,73 @@ def display_analysis_matrix(analysis: dict):
             st.caption(f"📅 Data analisi: {analysis['analysis_date']}")
     
     with col_sentiment:
-        if "risk_sentiment" in analysis:
-            sentiment = analysis["risk_sentiment"]
+        # Supporta sia "risk_sentiment" che "market_regime"
+        sentiment = analysis.get("market_regime") or analysis.get("risk_sentiment")
+        if sentiment:
             emoji = "🟢" if sentiment == "risk-on" else "🔴" if sentiment == "risk-off" else "🟡"
             st.markdown(f"**Risk Sentiment:** {emoji} {sentiment.upper()}")
     
-    # Summary
-    if "summary" in analysis:
-        st.info(f"📋 **Contesto:** {analysis['summary']}")
+    # Summary (supporta sia "summary" che "market_summary")
+    summary_text = analysis.get("market_summary") or analysis.get("summary")
+    if summary_text:
+        st.info(f"📋 **Contesto:** {summary_text}")
     
     # Weekly Events Warning
     if "weekly_events_warning" in analysis:
         st.warning(f"📅 {analysis['weekly_events_warning']}")
     
     st.markdown("---")
+    
+    # ===== SEZIONE ANALISI VALUTE =====
+    currency_analysis = analysis.get("currency_analysis", {})
+    
+    if currency_analysis:
+        st.markdown("### 💱 Analisi per Valuta")
+        st.caption("Punteggi assoluti per ogni valuta. I differenziali delle coppie sono calcolati automaticamente.")
+        
+        # Ordina valute per score (dalla più forte alla più debole)
+        currencies_sorted = sorted(
+            currency_analysis.items(),
+            key=lambda x: x[1].get("total_score", 0),
+            reverse=True
+        )
+        
+        # Crea tabella valute
+        currency_rows = []
+        for curr, data in currencies_sorted:
+            score = data.get("total_score", 0)
+            summary = data.get("summary", "")[:100] + "..." if len(data.get("summary", "")) > 100 else data.get("summary", "")
+            
+            # Colore basato sullo score
+            if score >= 3:
+                indicator = "🟢🟢"
+                strength = "Forte"
+            elif score > 0:
+                indicator = "🟢"
+                strength = "Positivo"
+            elif score <= -3:
+                indicator = "🔴🔴"
+                strength = "Debole"
+            elif score < 0:
+                indicator = "🔴"
+                strength = "Negativo"
+            else:
+                indicator = "🟡"
+                strength = "Neutro"
+            
+            currency_rows.append({
+                "Valuta": curr,
+                "Score": f"{indicator} {score:+d}",
+                "Forza": strength,
+                "Sintesi": summary
+            })
+        
+        # Mostra tabella
+        import pandas as pd
+        df_currencies = pd.DataFrame(currency_rows)
+        st.dataframe(df_currencies, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
     
     # ===== TOP BULLISH / TOP BEARISH =====
     pair_analysis = analysis.get("pair_analysis", {})
@@ -3848,15 +3885,19 @@ def display_analysis_matrix(analysis: dict):
         # Calcola differenziale per ogni coppia e ordina
         pairs_with_diff = []
         for p, d in pair_analysis.items():
-            # CALCOLA I TOTALI dalla somma dei singoli punteggi
-            scores = d.get("scores", {})
-            score_base = 0
-            score_quote = 0
-            for param_key, param_scores in scores.items():
-                if isinstance(param_scores, dict):
-                    score_base += param_scores.get("base", 0)
-                    score_quote += param_scores.get("quote", 0)
-            diff = score_base - score_quote
+            # Prima prova a usare valori pre-calcolati (nuovo formato)
+            if "differential" in d:
+                diff = d["differential"]
+            else:
+                # Fallback: calcola dalla somma dei singoli punteggi (vecchio formato)
+                scores = d.get("scores", {})
+                score_base = 0
+                score_quote = 0
+                for param_key, param_scores in scores.items():
+                    if isinstance(param_scores, dict):
+                        score_base += param_scores.get("base", 0)
+                        score_quote += param_scores.get("quote", 0)
+                diff = score_base - score_quote
             pairs_with_diff.append((p, d, diff))
         
         # Ordina per differenziale
@@ -3887,13 +3928,22 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
         
-        # ===== CONTROLLO COPPIE MANCANTI =====
+        # ===== CONTROLLO VALUTE/COPPIE MANCANTI =====
+        # Controlla valute mancanti
+        if currency_analysis:
+            analyzed_currencies = set(currency_analysis.keys())
+            expected_currencies = set(CURRENCIES.keys())
+            missing_currencies = expected_currencies - analyzed_currencies
+            if missing_currencies:
+                st.warning(f"⚠️ **Valute mancanti nell'analisi:** {', '.join(sorted(missing_currencies))} ({len(missing_currencies)} su 7)")
+        
+        # Controlla coppie mancanti
         analyzed_pairs = set(pair_analysis.keys())
         expected_pairs = set(FOREX_PAIRS)
         missing_pairs = expected_pairs - analyzed_pairs
         
         if missing_pairs:
-            st.warning(f"⚠️ **Coppie mancanti nell'analisi:** {', '.join(sorted(missing_pairs))} ({len(missing_pairs)} su 19)")
+            st.warning(f"⚠️ **Coppie mancanti:** {', '.join(sorted(missing_pairs))} ({len(missing_pairs)} su 19)")
         
         # ===== TABELLA TUTTE LE COPPIE CON SELEZIONE SINGOLA =====
         st.markdown("### 📋 Tutte le Coppie")
@@ -3904,15 +3954,19 @@ def display_analysis_matrix(analysis: dict):
         for pair, data in pair_analysis.items():
             summary = data.get("summary", "")
             
-            # CALCOLA I TOTALI dalla somma dei singoli punteggi
-            scores = data.get("scores", {})
-            score_base = 0
-            score_quote = 0
-            for param_key, param_scores in scores.items():
-                if isinstance(param_scores, dict):
-                    score_base += param_scores.get("base", 0)
-                    score_quote += param_scores.get("quote", 0)
-            differential = score_base - score_quote
+            # Prima prova a usare valori pre-calcolati (nuovo formato)
+            if "differential" in data:
+                differential = data["differential"]
+            else:
+                # Fallback: calcola dalla somma dei singoli punteggi (vecchio formato)
+                scores = data.get("scores", {})
+                score_base = 0
+                score_quote = 0
+                for param_key, param_scores in scores.items():
+                    if isinstance(param_scores, dict):
+                        score_base += param_scores.get("base", 0)
+                        score_quote += param_scores.get("quote", 0)
+                differential = score_base - score_quote
             
             # Genera il summary con prefisso bias corretto basato sul differenziale
             summary_with_bias = generate_summary_with_bias(summary, differential)
@@ -3989,15 +4043,20 @@ def display_analysis_matrix(analysis: dict):
             summary = pair_data.get("summary", "")
             scores = pair_data.get("scores", {})
             
-            # CALCOLA I TOTALI LOCALMENTE sommando i singoli punteggi
-            score_base = 0
-            score_quote = 0
-            for param_key, param_scores in scores.items():
-                if isinstance(param_scores, dict):
-                    score_base += param_scores.get("base", 0)
-                    score_quote += param_scores.get("quote", 0)
-            
-            differential = score_base - score_quote
+            # Usa valori pre-calcolati se disponibili (nuovo formato)
+            if "differential" in pair_data:
+                score_base = pair_data.get("score_base", 0)
+                score_quote = pair_data.get("score_quote", 0)
+                differential = pair_data["differential"]
+            else:
+                # Fallback: calcola dalla somma (vecchio formato)
+                score_base = 0
+                score_quote = 0
+                for param_key, param_scores in scores.items():
+                    if isinstance(param_scores, dict):
+                        score_base += param_scores.get("base", 0)
+                        score_quote += param_scores.get("quote", 0)
+                differential = score_base - score_quote
             
             # Estrai valute dalla coppia
             base_curr, quote_curr = selected_pair.split("/")
