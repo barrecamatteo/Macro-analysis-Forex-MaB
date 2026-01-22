@@ -1428,7 +1428,7 @@ PMI_CONFIG = {
     },
     "CAD": {
         "manufacturing": {"id": 185, "name": "ivey-pmi", "label": "Ivey PMI", "country": "ca"},
-        "services": {"id": 185, "name": "ivey-pmi", "label": "Ivey PMI", "country": "ca"}  # Canada usa Ivey PMI per entrambi
+        "services": None  # DuckDuckGo fallback cercherà Canada Services PMI
     }
 }
 
