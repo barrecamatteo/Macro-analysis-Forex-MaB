@@ -2751,70 +2751,87 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
 
-**Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast).
+**Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast) che NON sono già valutate in altri parametri.
 
-## ⛔ REGOLE RIGIDE - LEGGERE ATTENTAMENTE! ⛔
+## 🚨🚨🚨 REGOLA FONDAMENTALE 🚨🚨🚨
 
-**PRIMA di assegnare qualsiasi punteggio, verifica:**
-1. ✅ Ho un DATO CONCRETO con Actual vs Forecast? → Se NO → **Score = 0**
-2. ✅ Questo fattore è GIÀ conteggiato in un altro parametro? → Se SÌ → **Score = 0**
-3. ✅ La "sorpresa" è avvenuta negli ultimi 7 giorni? → Se NO → **Score = 0**
+**News Catalyst valuta SOLO notizie che NON RIENTRANO negli altri 7 parametri!**
 
-**CHECKLIST ANTI-DOPPIO CONTEGGIO:**
-| Se hai già dato punti per... | NON puoi dare punti in News Catalyst per... |
-|------------------------------|---------------------------------------------|
-| Aspettative Tassi (BC hawkish/dovish) | "BC hawkish/dovish stance" |
-| Tassi Attuali (differenziale tassi) | "Tassi alti/bassi", "carry trade" |
-| Inflazione | "Inflazione alta/bassa" (senza sorpresa) |
-| Risk Sentiment (tensioni geopolitiche) | "Tensioni geopolitiche", "safe-haven demand" |
+I seguenti temi sono **GIÀ VALUTATI** in altri parametri e **NON POSSONO** essere usati in News Catalyst:
 
-**PARTE 1: DATI ECONOMICI (peso 70%)**
+| Tema | Parametro che lo valuta | In News Catalyst = |
+|------|-------------------------|-------------------|
+| Tassi di interesse, carry trade | **Tassi Attuali** | ❌ **0** |
+| BC hawkish/dovish, tagli/rialzi attesi | **Aspettative Tassi** | ❌ **0** |
+| CPI, inflazione, deflazione, prezzi | **Inflazione** | ❌ **0** |
+| PIL, GDP, crescita, recessione | **Crescita/PIL** | ❌ **0** |
+| PMI, manifatturiero, servizi, espansione/contrazione | **PMI** | ❌ **0** |
+| Safe-haven, risk-off/on, tensioni geopolitiche, VIX | **Risk Sentiment** | ❌ **0** |
+| Debito, deficit, bilancia commerciale | **Bilancia/Fiscale** | ❌ **0** |
 
-⚠️ OBBLIGATORIO: Devi citare Actual vs Forecast nella motivazione!
+## ⛔ ESEMPI DI ERRORI DA EVITARE ⛔
 
-| Indicatore | +2 | +1 | -1 | -2 |
-|------------|----|----|----|----|
-| NFP (USD) | Sorpresa ≥+100k | +30k a +99k | -30k a -99k | ≤-100k |
-| CPI YoY | Sorpresa ≥+0.3pp | +0.2pp | -0.2pp | ≤-0.3pp |
-| GDP QoQ | Sorpresa ≥+0.5pp | +0.3pp | -0.3pp | ≤-0.5pp |
-| Retail Sales | Sorpresa ≥+0.5% | +0.3% | -0.3% | ≤-0.5% |
-| PMI Flash | Sorpresa ≥+3pt | +1.5pt | -1.5pt | ≤-3pt |
+❌ **CHF: "PMI manifatturiero crollo -3.9 punti → -2"**
+   → **ERRORE!** Il PMI è già valutato nel parametro PMI! → News Catalyst = **0**
 
-**Se NON ci sono dati con sorprese significative → Score Dati = 0**
-**"Mancanza di dati positivi" NON è un motivo per dare -1 o -2!**
+❌ **CAD: "BOC dovish stance pesa negativamente → -2"**  
+   → **ERRORE!** La stance BOC è già in Aspettative Tassi! → News Catalyst = **0**
 
-**PARTE 2: GEOPOLITICA (peso 30%)**
+❌ **JPY: "BOJ hawkish unica nel G7 → +2"**
+   → **ERRORE!** La stance BOJ è già in Aspettative Tassi! → News Catalyst = **0**
 
-⚠️ SOLO per eventi NUOVI (<48h) NON ancora riflessi in Risk Sentiment!
-Se Risk Sentiment ≠ 0 → Score Geopolitica = 0 (già conteggiato!)
+❌ **USD: "Inflazione sopra target → +1"**
+   → **ERRORE!** L'inflazione è già nel parametro Inflazione! → News Catalyst = **0**
 
-| Evento | Safe-Haven | Cicliche |
-|--------|------------|----------|
-| Shock grave improvviso (<48h) e NON in Risk Sentiment | +2 | -2 |
-| Tensione nuova (<48h) e NON in Risk Sentiment | +1 | -1 |
-| Qualsiasi altra situazione | **0** | **0** |
+## ✅ COSA PUÒ ESSERE VALUTATO IN NEWS CATALYST
 
-**Formula:** News_Catalyst = round((0.7 × Score_Dati) + (0.3 × Score_Geo))
+**SOLO questi tipi di notizie (se avvenute negli ultimi 7 giorni):**
 
-## ESEMPI DI MOTIVAZIONI
+1. **Sorprese su dati SECONDARI** (non coperti da altri parametri):
+   - Retail Sales sorpresa significativa
+   - Trade Balance sorpresa significativa  
+   - Employment Change (non NFP per USD)
+   - Consumer Confidence sorpresa
+   - Industrial Production sorpresa
 
-❌ **SBAGLIATE (score dovrebbe essere 0):**
-- "BOJ hawkish stance unica nel G7" → già in Aspettative Tassi!
-- "Mancanza di dati recenti positivi" → non è una sorpresa negativa!
-- "Differenziale monetario favorevole" → già in Tassi Attuali!
-- "Safe-haven demand per tensioni" → già in Risk Sentiment!
-- "BOE dovish pesa negativamente" → già in Aspettative Tassi!
-- "Nessuna sorpresa economica significativa, BOC dovish pesa → -2" → **ERRORE GRAVE!** Se non ci sono sorprese → 0!
-- "Nessun dato rilevante → -1" → **ERRORE!** Nessun dato = 0, non negativo!
+2. **Eventi geopolitici NUOVI** (<48h, NON già in Risk Sentiment):
+   - Annuncio improvviso di tariffe/sanzioni
+   - Crisi politica nuova
+   - Elezioni con risultato a sorpresa
 
-✅ **CORRETTE:**
-- "NFP 256k vs 180k atteso, sorpresa +76k → +1" (dato concreto con sorpresa)
-- "CPI 2.9% vs 2.6% atteso, sorpresa +0.3pp → +1" (dato concreto con sorpresa)
-- "Nessuna sorpresa significativa nei dati recenti → 0" (corretto!)
-- "Dati in linea con attese, geopolitica già in Risk Sentiment → 0" (corretto!)
-- "BOC dovish già conteggiato in Aspettative Tassi → 0" (corretto!)
+## ALGORITMO OBBLIGATORIO
 
-**NEL DUBBIO → DAI 0!**
+```
+STEP 1: La notizia riguarda tassi/inflazione/PIL/PMI/sentiment/bilancia?
+        → SÌ → STOP! News Catalyst = 0 (già in altri parametri)
+        
+STEP 2: È un dato con Actual vs Forecast?
+        → NO → STOP! News Catalyst = 0
+        
+STEP 3: La sorpresa è negli ultimi 7 giorni?
+        → NO → STOP! News Catalyst = 0
+        
+STEP 4: Calcola il punteggio basato sulla sorpresa
+```
+
+## FORMULA
+
+| Sorpresa su dati secondari | Score |
+|----------------------------|-------|
+| Molto positiva (>2 deviazioni std) | +2 |
+| Positiva | +1 |
+| Nessuna sorpresa / temi già coperti | **0** |
+| Negativa | -1 |
+| Molto negativa (>2 deviazioni std) | -2 |
+
+## ESEMPI CORRETTI
+
+✅ "Retail Sales USA +0.8% vs +0.3% atteso, sorpresa significativa → +1"
+✅ "Consumer Confidence crollato a 85 vs 95 atteso → -1"  
+✅ "Nessun dato secondario con sorprese, altri fattori già in parametri dedicati → 0"
+✅ "PMI già valutato in parametro PMI, stance BC già in Aspettative Tassi → 0"
+
+**REGOLA D'ORO: Nel 90% dei casi, News Catalyst dovrebbe essere 0!**
 
 ---
 
@@ -2947,30 +2964,39 @@ Se Risk Sentiment ≠ 0 → Score Geopolitica = 0 (già conteggiato!)
 - SÌ (es: BC hawkish → già in Aspettative Tassi) → **STOP! Score = 0**
 - NO → Calcola il punteggio basato sulla tabella delle sorprese
 
-## 🚫 PAROLE VIETATE NELLE MOTIVAZIONI (se le scrivi → Score DEVE essere 0):
+## 🚫 PAROLE VIETATE NELLE MOTIVAZIONI DI NEWS CATALYST:
 
-| Se scrivi... | Allora il punteggio DEVE essere... |
-|--------------|-------------------------------------|
-| "nessuna sorpresa" | **0** |
-| "mancanza di dati" | **0** |
-| "BOC/BOJ/BOE/Fed/BCE/RBA/SNB dovish/hawkish" | **0** (già in Aspettative Tassi) |
-| "safe-haven" | **0** (già in Risk Sentiment) |
-| "tensioni geopolitiche" | **0** (già in Risk Sentiment) |
-| "differenziale tassi" | **0** (già in Tassi Attuali) |
+**Se la motivazione contiene una di queste parole → Score DEVE essere 0:**
 
-## ❌ ERRORE COMUNE DA EVITARE:
-**NON PUOI scrivere "Nessuna sorpresa economica... → -2"!**
-Se non ci sono sorprese → il punteggio È ZERO, non negativo!
-La "mancanza" di sorprese positive NON è una sorpresa negativa!
+| Categoria | Parole vietate | Motivo |
+|-----------|----------------|--------|
+| **Tassi** | tassi, tasso, interest rate, carry trade | Già in Tassi Attuali |
+| **BC Stance** | dovish, hawkish, easing, tightening, taglio, rialzo | Già in Aspettative Tassi |
+| **Inflazione** | inflazione, CPI, prezzi, deflazione | Già in Inflazione |
+| **Crescita** | PIL, GDP, crescita, recessione, stagnazione | Già in Crescita/PIL |
+| **PMI** | PMI, manifatturiero, manufacturing, servizi, services, espansione, contrazione | Già in PMI |
+| **Sentiment** | safe-haven, risk-off, risk-on, tensioni, geopolitica, VIX | Già in Risk Sentiment |
+| **Fiscale** | debito, deficit, fiscale, bilancia | Già in Bilancia/Fiscale |
+| **Assenza** | nessuna sorpresa, nessun dato, mancanza | Non è una sorpresa! |
 
-- ❌ "BC hawkish/dovish" → GIÀ IN ASPETTATIVE TASSI → News Catalyst = 0
-- ❌ "Tassi alti/bassi" → GIÀ IN TASSI ATTUALI → News Catalyst = 0  
-- ❌ "Safe-haven/tensioni" → GIÀ IN RISK SENTIMENT → News Catalyst = 0
-- ❌ "Mancanza di dati positivi" → NON È UNA SORPRESA → News Catalyst = 0
-- ❌ "Nessuna sorpresa significativa... pesa negativamente" → CONTRADDIZIONE → News Catalyst = 0
-- ✅ "CPI 2.9% vs 2.6% atteso (+0.3pp sorpresa)" → CORRETTO, è una sorpresa concreta
+## ❌ ERRORI GRAVI DA NON COMMETTERE MAI:
 
-**Se non hai un dato Actual vs Forecast da citare → News Catalyst = 0**
+❌ **"PMI crollo -3.9 punti → -2"** → Il PMI è già valutato nel parametro PMI! → **0**
+❌ **"BOC dovish pesa → -2"** → La stance BC è già in Aspettative Tassi! → **0**
+❌ **"Inflazione sopra target → +1"** → L'inflazione è già nel parametro Inflazione! → **0**
+❌ **"Nessuna sorpresa... pesa negativamente → -2"** → Contraddizione! → **0**
+
+## ✅ UNICI CASI IN CUI NEWS CATALYST ≠ 0:
+
+1. **Retail Sales** con sorpresa significativa (Actual vs Forecast)
+2. **Consumer Confidence** con sorpresa significativa
+3. **Employment Change** con sorpresa (non NFP per USD)
+4. **Trade Balance** con sorpresa significativa
+5. **Evento geopolitico NUOVO** (<48h) NON già in Risk Sentiment
+
+**REGOLA D'ORO: Nel 90% dei casi, News Catalyst = 0!**
+
+**Se non hai un dato SECONDARIO con Actual vs Forecast → News Catalyst = 0**
 """
 
 
@@ -3373,21 +3399,50 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         "nessuna notizia rilevante",
         "no significant",
         "no surprise",
-        "pesa negativamente",  # Se usato senza dati concreti
-        "pesa positivamente",  # Se usato senza dati concreti
     ]
     
     # Parole che indicano doppio conteggio → score deve essere 0
+    # Questi temi sono GIÀ valutati in altri parametri!
     double_count_phrases = [
+        # === GIÀ IN TASSI ATTUALI ===
+        "tassi", "tasso", "interest rate", "carry trade",
+        
+        # === GIÀ IN ASPETTATIVE TASSI ===
         "boc dovish", "boc hawkish", "boj hawkish", "boj dovish", 
         "boe dovish", "boe hawkish", "fed hawkish", "fed dovish",
         "bce hawkish", "bce dovish", "ecb hawkish", "ecb dovish",
         "rba hawkish", "rba dovish", "snb hawkish", "snb dovish",
         "stance unica", "differenziazione monetaria", "divergenza monetaria",
-        "safe-haven", "safe haven", "tensioni geopolitiche",
-        "dovish stance", "hawkish stance",  # Aggiunto
-        "bias easing", "bias tightening",  # Aggiunto
-        "politica monetaria"  # Se non è una sorpresa concreta
+        "dovish stance", "hawkish stance", "dovish", "hawkish",
+        "bias easing", "bias tightening", "tightening", "easing",
+        "politica monetaria", "monetary policy", "rate cut", "rate hike",
+        "taglio tassi", "rialzo tassi", "pausa", "hold",
+        
+        # === GIÀ IN INFLAZIONE ===
+        "inflazione", "inflation", "cpi", "prezzi", "prices",
+        "deflazione", "deflation", "disinflazione",
+        
+        # === GIÀ IN CRESCITA/PIL ===
+        "pil", "gdp", "crescita", "growth", "recessione", "recession",
+        "stagnazione", "stagnation", "contrazione economia",
+        
+        # === GIÀ IN PMI ===
+        "pmi", "manifatturiero", "manufacturing", "servizi", "services",
+        "espansione", "contrazione", "expansion", "contraction",
+        "purchasing manager", "business activity",
+        
+        # === GIÀ IN RISK SENTIMENT ===
+        "safe-haven", "safe haven", "risk-off", "risk-on", "risk off", "risk on",
+        "tensioni geopolitiche", "geopolitical", "vix", "volatilità",
+        "flight to safety", "avversione al rischio",
+        
+        # === GIÀ IN BILANCIA/FISCALE ===
+        "debito", "debt", "deficit", "fiscale", "fiscal",
+        "bilancia commerciale", "trade balance", "current account",
+        
+        # === FRASI GENERICHE CHE INDICANO OPINIONE, NON DATI ===
+        "pesa negativamente", "pesa positivamente",
+        "pressione", "pressure", "momentum"
     ]
     
     # Range per ogni parametro
