@@ -966,7 +966,7 @@ def get_latest_analysis_data(user_id: str) -> dict:
     
     try:
         # Ottieni lista analisi recenti
-        recent = list_analyses(user_id, limit=1)
+        recent = get_user_analyses(user_id, limit=1)
         if not recent or len(recent) == 0:
             return cached_data
         
