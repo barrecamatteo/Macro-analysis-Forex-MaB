@@ -3459,7 +3459,7 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         
         # 3. Ricalcola total_score
         new_total = 0
-        for param_name in REQUIRED_PARAMS:
+        for param_name in SCORE_PARAMETERS:
             if param_name in scores and isinstance(scores[param_name], dict):
                 new_total += scores[param_name].get("score", 0)
         
