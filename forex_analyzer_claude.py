@@ -2501,9 +2501,17 @@ def fetch_all_pmi_data() -> dict:
         time.sleep(1.5)
         
         # Services PMI
-        if currency == "CHF":
-            # CHF Services da TradingEconomics (non disponibile su Investing.com)
-            result = fetch_chf_services_pmi_tradingeconomics()
+        # CHF e CAD hanno solo PMI unico (non separato manufacturing/services)
+        if currency in ["CHF", "CAD"]:
+            # Nessun Services PMI disponibile - non è un errore
+            result = {
+                "current": None, 
+                "previous": None, 
+                "delta": None, 
+                "date": None, 
+                "source": "N/D",  # Non Disponibile (non errore)
+                "not_available": True  # Flag per indicare che è normale
+            }
         else:
             # 1) Prova API JSON
             result = fetch_pmi_from_investing_json(currency, "services")
@@ -2512,13 +2520,13 @@ def fetch_all_pmi_data() -> dict:
             if result.get("current") is None:
                 time.sleep(1.0)
                 result = fetch_pmi_from_investing(currency, "services")
-        
-        # 3) Se ancora fallisce, prova DuckDuckGo
-        if result.get("current") is None:
-            time.sleep(0.5)
-            fallback_result = fetch_pmi_via_duckduckgo(currency, "services")
-            if fallback_result.get("current") is not None:
-                result = fallback_result
+            
+            # 3) Se ancora fallisce, prova DuckDuckGo (solo per valute con Services PMI)
+            if result.get("current") is None:
+                time.sleep(0.5)
+                fallback_result = fetch_pmi_via_duckduckgo(currency, "services")
+                if fallback_result.get("current") is not None:
+                    result = fallback_result
         
         pmi_data[currency]["services"] = result
         
@@ -2555,6 +2563,37 @@ def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
     elif manuf_delta > 0.1 or services_delta > 0.1:
         interpretation = "Misto+"
     elif manuf_delta < -0.1 or services_delta < -0.1:
+        interpretation = "Misto-"
+    else:
+        interpretation = "Neutro"
+    
+    return trend_text, interpretation
+
+
+def get_pmi_interpretation_single(pmi_delta: float) -> tuple:
+    """
+    Restituisce interpretazione e trend per valute con PMI unico (CHF, CAD).
+    
+    Returns:
+        (trend_text, interpretation)
+    """
+    if pmi_delta is None:
+        pmi_delta = 0
+    
+    # Trend solo per il PMI unico
+    pmi_trend = "↑" if pmi_delta > 0.1 else "↓" if pmi_delta < -0.1 else "→"
+    
+    # Testo indica che è PMI unico
+    trend_text = f"PMI{pmi_trend}"
+    
+    # Interpretazione basata solo sul PMI unico
+    if pmi_delta > 0.5:
+        interpretation = "Bullish"
+    elif pmi_delta > 0.1:
+        interpretation = "Misto+"
+    elif pmi_delta < -0.5:
+        interpretation = "Bearish"
+    elif pmi_delta < -0.1:
         interpretation = "Misto-"
     else:
         interpretation = "Neutro"
@@ -2648,21 +2687,28 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ### 5️⃣ PMI [-1 a +1]
 **Logica:** PMI > 50 = espansione, PMI < 50 = contrazione
 
-**PESI SETTORIALI per valuta:**
+**⚠️ NOTA IMPORTANTE PER CHF E CAD:**
+- **CHF** ha solo il **procure.ch PMI** (indice unico, non separato manufacturing/services)
+- **CAD** ha solo l'**Ivey PMI** (indice unico che copre tutta l'economia)
+- Per queste valute, NON fare media pesata ma usa direttamente il PMI unico disponibile
+
+**PESI SETTORIALI per valuta (solo per valute con PMI separati):**
 | Valuta | Peso Manifattura | Peso Servizi | Motivo |
 |--------|------------------|--------------|--------|
 | EUR | 50% | 50% | Economia mista |
 | USD | 30% | 70% | Economia servizi-dominante |
 | GBP | 20% | 80% | Servizi finanziari dominanti |
 | JPY | 60% | 40% | Export manifatturiero |
-| CHF | 50% | 50% | Economia mista |
 | AUD | 50% | 50% | Mining + servizi |
-| CAD | 40% | 60% | Risorse + servizi |
+| **CHF** | 100% | - | **PMI UNICO (procure.ch)** |
+| **CAD** | 100% | - | **PMI UNICO (Ivey)** |
 
-**Calcolo:** PMI_pesato = (Manuf × Peso_M) + (Serv × Peso_S)
+**Calcolo:** 
+- Per EUR, USD, GBP, JPY, AUD: PMI_pesato = (Manuf × Peso_M) + (Serv × Peso_S)
+- Per CHF, CAD: usa direttamente il valore PMI unico
 
-| PMI Pesato | Score |
-|------------|-------|
+| PMI (pesato o unico) | Score |
+|----------------------|-------|
 | > 52 | +1 |
 | 48 - 52 | 0 |
 | < 48 | -1 |
@@ -3948,6 +3994,7 @@ def display_pmi_table(pmi_data: dict):
         services_previous = services.get("previous")
         services_delta = services.get("delta")
         services_label = services.get("label", "Services")
+        services_not_available = services.get("not_available", False)
         
         # Formatta valori con label per USD (ISM)
         if curr == "USD":
@@ -3955,29 +4002,49 @@ def display_pmi_table(pmi_data: dict):
             services_display = f"{services_current} (ISM)" if services_current else "N/A"
         else:
             manuf_display = str(manuf_current) if manuf_current else "N/A"
-            services_display = str(services_current) if services_current else "N/A"
+            # Per CHF e CAD, mostra "-" (non disponibile) invece di "N/A" (errore)
+            if services_not_available:
+                services_display = "-"
+            else:
+                services_display = str(services_current) if services_current else "N/A"
         
         # Formatta delta con segno
-        def format_delta(delta):
-            if delta is None:
+        def format_delta(delta, not_available=False):
+            if not_available:
+                return "-"
+            elif delta is None:
                 return "N/A"
             elif delta > 0:
                 return f"+{delta}"
             else:
                 return str(delta)
         
-        # Calcola interpretazione
-        trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
+        # Formatta previous
+        def format_previous(prev, not_available=False):
+            if not_available:
+                return "-"
+            elif prev is None:
+                return "N/A"
+            else:
+                return str(prev)
         
-        # Traccia dati mancanti (controlla sia current che previous)
+        # Calcola interpretazione (per CHF/CAD usa solo manufacturing)
+        if services_not_available:
+            # Per valute con solo PMI unico, valuta solo manufacturing
+            trend_text, interpretation = get_pmi_interpretation_single(manuf_delta)
+        else:
+            trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
+        
+        # Traccia dati mancanti (NON includere CHF/CAD services perché non è un errore)
         if manuf_current is None:
             missing_data.append(f"{curr}-Manuf")
         elif manuf_previous is None:
             missing_data.append(f"{curr}-Manuf(Prev)")
-        if services_current is None:
-            missing_data.append(f"{curr}-Serv")
-        elif services_previous is None:
-            missing_data.append(f"{curr}-Serv(Prev)")
+        if not services_not_available:  # Solo se services dovrebbe esistere
+            if services_current is None:
+                missing_data.append(f"{curr}-Serv")
+            elif services_previous is None:
+                missing_data.append(f"{curr}-Serv(Prev)")
         
         row = {
             "Valuta": curr,
@@ -3985,8 +4052,8 @@ def display_pmi_table(pmi_data: dict):
             "Prev": str(manuf_previous) if manuf_previous else "N/A",
             "Δ Manuf": format_delta(manuf_delta),
             "🏢 Services": services_display,
-            "Prev ": str(services_previous) if services_previous else "N/A",  # Spazio per evitare duplicato colonna
-            "Δ Serv": format_delta(services_delta),
+            "Prev ": format_previous(services_previous, services_not_available),  # Spazio per evitare duplicato colonna
+            "Δ Serv": format_delta(services_delta, services_not_available),
             "Trend": trend_text,  # Es: "M↑ S↓"
             "Outlook": interpretation  # Es: "Bullish", "Bearish", "Misto+", etc.
         }
