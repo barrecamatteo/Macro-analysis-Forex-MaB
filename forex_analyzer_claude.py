@@ -3941,7 +3941,7 @@ def display_analysis_matrix(analysis: dict):
         currency_rows = []
         for curr, data in currencies_sorted:
             score = data.get("total_score", 0)
-            summary = data.get("summary", "")[:100] + "..." if len(data.get("summary", "")) > 100 else data.get("summary", "")
+            summary = data.get("summary", "")  # Non troncare più
             
             # Colore basato sullo score
             if score >= 3:
@@ -3967,10 +3967,32 @@ def display_analysis_matrix(analysis: dict):
                 "Sintesi": summary
             })
         
-        # Mostra tabella
+        # Mostra tabella con column_config per espandere la sintesi
         import pandas as pd
         df_currencies = pd.DataFrame(currency_rows)
-        st.dataframe(df_currencies, use_container_width=True, hide_index=True)
+        
+        currency_column_config = {
+            "Valuta": st.column_config.TextColumn("Valuta", width="small"),
+            "Score": st.column_config.TextColumn("Score", width="small"),
+            "Forza": st.column_config.TextColumn("Forza", width="small"),
+            "Sintesi": st.column_config.TextColumn("Sintesi", width="large"),
+        }
+        
+        st.dataframe(
+            df_currencies, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config=currency_column_config
+        )
+        
+        # Expander per vedere le sintesi complete
+        with st.expander("📝 Vedi sintesi complete per valuta"):
+            for curr, data in currencies_sorted:
+                score = data.get("total_score", 0)
+                summary = data.get("summary", "N/A")
+                indicator = "🟢🟢" if score >= 3 else "🟢" if score > 0 else "🔴🔴" if score <= -3 else "🔴" if score < 0 else "🟡"
+                st.markdown(f"**{curr}** {indicator} ({score:+d}): {summary}")
+                st.markdown("---")
         
         st.markdown("---")
     
@@ -4662,7 +4684,10 @@ def main():
         st.markdown("---")
         
         # ===== BOTTONE ANALISI =====
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news or opt_links)
+        # Permette l'analisi se:
+        # 1. Almeno un'opzione dati è selezionata, OPPURE
+        # 2. Solo Claude è selezionato (userà dati cached)
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news or opt_links or opt_claude)
         
         analyze_btn = st.button(
             "🚀 AVVIA ANALISI",
@@ -4670,6 +4695,10 @@ def main():
             use_container_width=True,
             type="primary"
         )
+        
+        # Warning se usa solo dati cached
+        if opt_claude and not (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news):
+            st.caption("♻️ *Userà dati cached dall'ultima analisi*")
         
         # Calcola tipo analisi
         analysis_type = "custom"
@@ -4788,6 +4817,10 @@ def main():
         if total_steps == 0:
             total_steps = 1  # Evita divisione per zero
         
+        # Funzione helper per calcolare progress senza superare 89 (lascia spazio per salvataggio)
+        def calc_progress(step, total):
+            return min(int(step / max(total, 1) * 80), 89)
+        
         # ===== CARICA DATI CACHED (se necessario) =====
         cached_data = {}
         using_cached = []  # Lista dei dati che useremo dalla cache
@@ -4813,7 +4846,7 @@ def main():
         # FASE 1: Dati Macro
         if opt_macro:
             step += 1
-            progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
+            progress.progress(calc_progress(step, total_steps), text="📊 Recupero dati macro...")
             macro_data = fetch_macro_data()
             st.session_state['last_macro_data'] = macro_data
         else:
@@ -4829,7 +4862,7 @@ def main():
         # FASE 2: Dati PMI
         if opt_pmi:
             step += 1
-            progress.progress(int(step/total_steps*80), text="📈 Recupero dati PMI...")
+            progress.progress(calc_progress(step, total_steps), text="📈 Recupero dati PMI...")
             pmi_data = fetch_all_pmi_data()
             st.session_state['last_pmi_data'] = pmi_data
         else:
@@ -4846,7 +4879,7 @@ def main():
         cb_history_data = {}
         if opt_cb_history:
             step += 1
-            progress.progress(int(step/total_steps*80), text="🏦 Recupero storico banche centrali...")
+            progress.progress(calc_progress(step, total_steps), text="🏦 Recupero storico banche centrali...")
             cb_history_data = get_central_bank_history_summary()
             st.session_state['last_cb_history'] = cb_history_data
         else:
@@ -4863,7 +4896,7 @@ def main():
         forex_prices = {}
         if opt_prices:
             step += 1
-            progress.progress(int(step/total_steps*80), text="💱 Recupero prezzi forex...")
+            progress.progress(calc_progress(step, total_steps), text="💱 Recupero prezzi forex...")
             forex_prices = fetch_forex_prices()
             st.session_state['last_forex_prices'] = forex_prices
         else:
@@ -4883,11 +4916,11 @@ def main():
         # FASE 3: Notizie Web
         if opt_news:
             step += 1
-            progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
+            progress.progress(calc_progress(step, total_steps), text="📰 Ricerca notizie web...")
             news_text, news_structured = search_web_news()
             
             # Aggiungi news dirette da ForexFactory
-            progress.progress(int(step/total_steps*80), text="📰 Recupero ForexFactory news...")
+            progress.progress(calc_progress(step, total_steps), text="📰 Recupero ForexFactory news...")
             ff_news = fetch_forexfactory_news()
             if ff_news.get("success") and ff_news.get("news"):
                 # Aggiungi alle news structured
@@ -4909,7 +4942,7 @@ def main():
         # FASE 4: Link Aggiuntivi
         if opt_links and additional_urls.strip():
             step += 1
-            progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
+            progress.progress(calc_progress(step, total_steps), text="📎 Processamento link...")
             url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
             additional_text, links_structured = fetch_additional_resources(url_list)
             st.session_state['last_links_text'] = additional_text
@@ -4918,7 +4951,7 @@ def main():
         # FASE 5: Analisi Claude
         if opt_claude:
             step += 1
-            progress.progress(int(step/total_steps*80), text="📊 Recupero dati economici per News Catalyst...")
+            progress.progress(calc_progress(step, total_steps), text="📊 Recupero dati economici per News Catalyst...")
             
             # Recupera dati economici recenti per News Catalyst
             economic_events = {}
@@ -4935,7 +4968,7 @@ def main():
                     st.session_state['last_economic_events'] = economic_events
             
             step += 1
-            progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
+            progress.progress(calc_progress(step, total_steps), text="🤖 Claude sta analizzando...")
             
             # Usa dati dalla sessione o dalla cache se non aggiornati ora
             if not opt_news:
