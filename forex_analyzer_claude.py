@@ -3347,6 +3347,134 @@ SCORE_PARAMETERS = [
     "news_catalyst"
 ]
 
+
+def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
+    """
+    Valida e corregge i punteggi delle valute, in particolare news_catalyst.
+    
+    Regole di validazione:
+    1. news_catalyst deve essere nel range [-2, +2]
+    2. Se la motivazione contiene parole vietate E score != 0, forza a 0
+    3. Ricalcola total_score dopo le correzioni
+    
+    Args:
+        currency_analysis: Dict con struttura {"EUR": {"total_score": X, "scores": {...}}, ...}
+    
+    Returns:
+        currency_analysis corretto
+    """
+    # Parole che indicano "nessuna sorpresa" → score deve essere 0
+    forbidden_phrases_zero = [
+        "nessuna sorpresa",
+        "nessun dato",
+        "mancanza di dati",
+        "assenza di sorprese",
+        "dati in linea",
+        "nessuna notizia rilevante",
+        "no significant",
+        "no surprise",
+        "pesa negativamente",  # Se usato senza dati concreti
+        "pesa positivamente",  # Se usato senza dati concreti
+    ]
+    
+    # Parole che indicano doppio conteggio → score deve essere 0
+    double_count_phrases = [
+        "boc dovish", "boc hawkish", "boj hawkish", "boj dovish", 
+        "boe dovish", "boe hawkish", "fed hawkish", "fed dovish",
+        "bce hawkish", "bce dovish", "ecb hawkish", "ecb dovish",
+        "rba hawkish", "rba dovish", "snb hawkish", "snb dovish",
+        "stance unica", "differenziazione monetaria", "divergenza monetaria",
+        "safe-haven", "safe haven", "tensioni geopolitiche",
+        "dovish stance", "hawkish stance",  # Aggiunto
+        "bias easing", "bias tightening",  # Aggiunto
+        "politica monetaria"  # Se non è una sorpresa concreta
+    ]
+    
+    # Range per ogni parametro
+    score_ranges = {
+        "tassi_attuali": (-1, 1),
+        "aspettative_tassi": (-2, 2),
+        "inflazione": (-1, 1),
+        "crescita_pil": (-1, 1),
+        "pmi": (-1, 1),
+        "risk_sentiment": (-1, 1),
+        "bilancia_fiscale": (-1, 1),
+        "news_catalyst": (-2, 2)
+    }
+    
+    corrections_made = []
+    
+    for currency, data in currency_analysis.items():
+        if not isinstance(data, dict) or "scores" not in data:
+            continue
+        
+        scores = data.get("scores", {})
+        
+        for param, score_data in scores.items():
+            if not isinstance(score_data, dict):
+                continue
+            
+            score = score_data.get("score", 0)
+            motivation = score_data.get("motivation", "").lower()
+            original_score = score
+            
+            # 1. Controlla range
+            if param in score_ranges:
+                min_val, max_val = score_ranges[param]
+                if score < min_val:
+                    score = min_val
+                    corrections_made.append(f"{currency}/{param}: {original_score} → {score} (fuori range)")
+                elif score > max_val:
+                    score = max_val
+                    corrections_made.append(f"{currency}/{param}: {original_score} → {score} (fuori range)")
+            
+            # 2. Controlla parole vietate per news_catalyst
+            if param == "news_catalyst" and score != 0:
+                should_be_zero = False
+                reason = ""
+                
+                # Controlla frasi che indicano nessuna sorpresa
+                for phrase in forbidden_phrases_zero:
+                    if phrase in motivation:
+                        should_be_zero = True
+                        reason = f"contiene '{phrase}'"
+                        break
+                
+                # Controlla frasi che indicano doppio conteggio
+                if not should_be_zero:
+                    for phrase in double_count_phrases:
+                        if phrase in motivation:
+                            should_be_zero = True
+                            reason = f"doppio conteggio: '{phrase}'"
+                            break
+                
+                if should_be_zero:
+                    corrections_made.append(
+                        f"{currency}/news_catalyst: {original_score} → 0 ({reason})"
+                    )
+                    score = 0
+            
+            # Aggiorna il punteggio
+            score_data["score"] = score
+        
+        # 3. Ricalcola total_score
+        new_total = 0
+        for param_name in REQUIRED_PARAMS:
+            if param_name in scores and isinstance(scores[param_name], dict):
+                new_total += scores[param_name].get("score", 0)
+        
+        old_total = data.get("total_score", 0)
+        if old_total != new_total:
+            corrections_made.append(f"{currency}/total_score: {old_total} → {new_total}")
+            data["total_score"] = new_total
+    
+    # Log delle correzioni (opzionale, per debug)
+    if corrections_made:
+        currency_analysis["_corrections"] = corrections_made
+    
+    return currency_analysis
+
+
 def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
     """
     Calcola i punteggi per le 19 coppie forex a partire dai punteggi delle 7 valute.
@@ -3738,6 +3866,14 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
         # ===== NUOVO: Calcola pair_analysis da currency_analysis =====
         if "currency_analysis" in analysis and "pair_analysis" not in analysis:
             currency_analysis = analysis["currency_analysis"]
+            
+            # ===== VALIDAZIONE E CORREZIONE PUNTEGGI =====
+            currency_analysis = validate_and_fix_currency_scores(currency_analysis)
+            analysis["currency_analysis"] = currency_analysis
+            
+            # Log correzioni se presenti
+            if "_corrections" in currency_analysis:
+                analysis["score_corrections"] = currency_analysis.pop("_corrections")
             
             # Verifica che tutte le 7 valute siano presenti
             missing_currencies = set(CURRENCIES.keys()) - set(currency_analysis.keys())
@@ -4729,6 +4865,14 @@ def display_analysis_matrix(analysis: dict):
             missing_currencies = expected_currencies - analyzed_currencies
             if missing_currencies:
                 st.warning(f"⚠️ **Valute mancanti nell'analisi:** {', '.join(sorted(missing_currencies))} ({len(missing_currencies)} su 7)")
+        
+        # ===== MOSTRA CORREZIONI PUNTEGGI =====
+        if "score_corrections" in analysis:
+            corrections = analysis["score_corrections"]
+            with st.expander(f"🔧 Correzioni punteggi automatiche ({len(corrections)})", expanded=False):
+                st.warning("I seguenti punteggi sono stati corretti automaticamente per violazione delle regole:")
+                for correction in corrections:
+                    st.markdown(f"- {correction}")
         
         # Controlla coppie mancanti
         analyzed_pairs = set(pair_analysis.keys())
