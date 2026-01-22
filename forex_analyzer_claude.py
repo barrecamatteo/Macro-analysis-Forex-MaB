@@ -3683,8 +3683,6 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 def display_forex_prices(forex_prices: dict):
     """Mostra la tabella dei prezzi forex recuperati"""
     
-    st.markdown("### 💱 Prezzi Forex")
-    
     if not forex_prices:
         st.warning("⚠️ Nessun dato prezzi disponibile")
         return
@@ -3755,8 +3753,6 @@ def display_forex_prices(forex_prices: dict):
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
     """Mostra il riepilogo delle notizie trovate con link"""
-    
-    st.markdown("### 📰 Notizie Web")
     
     # Conteggio fonti trovate
     sources_found = []
@@ -3887,8 +3883,6 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
 
 def display_macro_data(macro_data: dict):
     """Mostra i dati macro in formato tabella"""
-    st.markdown("### 📊 Dati Macroeconomici")
-    
     if macro_data:
         table_rows = []
         for curr, data in macro_data.items():
@@ -3924,8 +3918,6 @@ def display_pmi_table(pmi_data: dict):
     |--------|----------|------|---|-------------|------|---|---------|
     | USD    | 47.9     | 48.2 |-0.3| 54.4       | 52.6 |+1.8| 🏭↓ 🏢↑ |
     """
-    st.markdown("### 📈 Dati PMI (Manufacturing & Services)")
-    
     if not pmi_data:
         st.warning("⚠️ Nessun dato PMI disponibile")
         return
@@ -4096,9 +4088,6 @@ def display_central_bank_history(history_data: dict = None):
     Args:
         history_data: Dati storico già recuperati (opzionale). Se None, usa sessione o recupera.
     """
-    st.markdown("### 📜 Storico Decisioni Banche Centrali")
-    st.caption("Ultime 2 decisioni per ogni banca centrale")
-    
     # Usa dati passati, dalla sessione, o recupera nuovi
     if history_data:
         history = history_data
@@ -4341,38 +4330,88 @@ def render_calendar_sidebar(user_id: str, analyses_list: list) -> dict | None:
     cal = calendar.Calendar(firstweekday=0)  # Lunedì = 0
     month_days = cal.monthdayscalendar(year, month)
     
-    # Header giorni
-    st.markdown("```\nLu Ma Me Gi Ve Sa Do\n```")
+    # Costruisci calendario come HTML per evitare deformazioni
+    calendar_html = """
+    <style>
+    .cal-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .cal-table th { padding: 4px; text-align: center; color: #6b7280; font-weight: normal; }
+    .cal-table td { padding: 6px 4px; text-align: center; }
+    .cal-day { color: #9ca3af; }
+    .cal-day-analysis { color: #10b981; font-weight: bold; }
+    .cal-day-today { color: #3b82f6; font-weight: bold; }
+    .cal-day-today-analysis { color: #10b981; font-weight: bold; text-decoration: underline; }
+    </style>
+    <table class="cal-table">
+    <tr><th>Lu</th><th>Ma</th><th>Me</th><th>Gi</th><th>Ve</th><th>Sa</th><th>Do</th></tr>
+    """
     
-    selected_analysis = None
+    dates_with_analysis = []
     
-    # Righe calendario
     for week in month_days:
-        cols = st.columns(7)
-        for i, day in enumerate(week):
-            with cols[i]:
-                if day == 0:
-                    st.write("")
+        calendar_html += "<tr>"
+        for day in week:
+            if day == 0:
+                calendar_html += "<td></td>"
+            else:
+                date_str = f"{year}-{month:02d}-{day:02d}"
+                is_today = (day == now.day and month == now.month and year == now.year)
+                has_analysis = date_str in analyses_by_date
+                
+                if has_analysis:
+                    dates_with_analysis.append(date_str)
+                
+                if has_analysis and is_today:
+                    css_class = "cal-day-today-analysis"
+                elif has_analysis:
+                    css_class = "cal-day-analysis"
+                elif is_today:
+                    css_class = "cal-day-today"
                 else:
-                    date_str = f"{year}-{month:02d}-{day:02d}"
-                    is_today = (day == now.day and month == now.month and year == now.year)
-                    has_analysis = date_str in analyses_by_date
-                    
-                    if has_analysis:
-                        # Bottone cliccabile con indicatore
-                        btn_label = f"🟢{day}"
-                        if st.button(btn_label, key=f"cal_{date_str}", help=f"Carica analisi del {day}/{month}"):
-                            # Prendi la prima analisi di quel giorno
-                            selected_analysis = analyses_by_date[date_str][0]
-                    elif is_today:
-                        st.markdown(f"**🔵{day}**")
-                    else:
-                        st.caption(f"{day}")
+                    css_class = "cal-day"
+                
+                calendar_html += f'<td class="{css_class}">{day}</td>'
+        calendar_html += "</tr>"
+    
+    calendar_html += "</table>"
+    
+    st.markdown(calendar_html, unsafe_allow_html=True)
     
     # Legenda
     st.caption("🟢 Analisi salvata | 🔵 Oggi")
     
+    st.markdown("---")
+    
+    # Selectbox per scegliere data con analisi
+    selected_analysis = None
+    
+    if dates_with_analysis:
+        # Ordina date in ordine decrescente (più recenti prima)
+        dates_with_analysis.sort(reverse=True)
+        
+        # Crea opzioni leggibili
+        date_options = ["-- Seleziona data --"] + [
+            datetime.strptime(d, "%Y-%m-%d").strftime("%d/%m/%Y") 
+            for d in dates_with_analysis
+        ]
+        
+        selected_date_display = st.selectbox(
+            "📅 Carica analisi:",
+            date_options,
+            key="calendar_date_select"
+        )
+        
+        if selected_date_display != "-- Seleziona data --":
+            # Converti in formato originale
+            selected_date = datetime.strptime(selected_date_display, "%d/%m/%Y").strftime("%Y-%m-%d")
+            
+            if st.button("📂 Carica", use_container_width=True, key="load_analysis_btn"):
+                if selected_date in analyses_by_date:
+                    selected_analysis = analyses_by_date[selected_date][0]
+    else:
+        st.caption("Nessuna analisi in questo mese")
+    
     # Pulsante per tornare a oggi
+    st.markdown("---")
     if st.button("📅 Vai a Oggi", use_container_width=True):
         st.session_state['calendar_year'] = now.year
         st.session_state['calendar_month'] = now.month
