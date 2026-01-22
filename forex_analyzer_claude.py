@@ -1427,8 +1427,8 @@ PMI_CONFIG = {
         "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI", "country": "au"}
     },
     "CAD": {
-        "manufacturing": {"id": 1029, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "us"},
-        "services": {"id": 2265, "name": "services-pmi", "label": "Services PMI", "country": "us"}
+        "manufacturing": {"id": 185, "name": "ivey-pmi", "label": "Ivey PMI", "country": "ca"},
+        "services": {"id": 185, "name": "ivey-pmi", "label": "Ivey PMI", "country": "ca"}  # Canada usa Ivey PMI per entrambi
     }
 }
 
