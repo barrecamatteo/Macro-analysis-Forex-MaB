@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 import hashlib
 import re
+import calendar
 
 # Timezone Italia (con fallback)
 try:
@@ -25,6 +26,322 @@ def get_italy_now():
     else:
         # Fallback: UTC + 1 ora (o +2 in estate, ma approssimativo)
         return datetime.utcnow() + timedelta(hours=1)
+
+
+# ============================================================================
+# CALENDARIO BANCHE CENTRALI 2025 (Date meeting ufficiali)
+# ============================================================================
+
+CB_MEETING_DATES_2025 = {
+    "USD": [  # Federal Reserve FOMC
+        "2025-01-29", "2025-03-19", "2025-05-07", 
+        "2025-06-18", "2025-07-30", "2025-09-17",
+        "2025-11-05", "2025-12-17"
+    ],
+    "EUR": [  # BCE / ECB
+        "2025-01-30", "2025-03-06", "2025-04-17",
+        "2025-06-05", "2025-07-17", "2025-09-11",
+        "2025-10-30", "2025-12-18"
+    ],
+    "GBP": [  # Bank of England
+        "2025-02-06", "2025-03-20", "2025-05-08",
+        "2025-06-19", "2025-08-07", "2025-09-18",
+        "2025-11-06", "2025-12-18"
+    ],
+    "JPY": [  # Bank of Japan
+        "2025-01-24", "2025-03-14", "2025-05-01",
+        "2025-06-13", "2025-07-31", "2025-09-19",
+        "2025-10-31", "2025-12-19"
+    ],
+    "CHF": [  # Swiss National Bank (trimestrale)
+        "2025-03-20", "2025-06-19", 
+        "2025-09-18", "2025-12-11"
+    ],
+    "AUD": [  # Reserve Bank of Australia
+        "2025-02-18", "2025-04-01", "2025-05-20",
+        "2025-07-08", "2025-08-12", "2025-09-30",
+        "2025-11-04", "2025-12-09"
+    ],
+    "CAD": [  # Bank of Canada
+        "2025-01-29", "2025-03-12", "2025-04-16",
+        "2025-06-04", "2025-07-30", "2025-09-17",
+        "2025-10-29", "2025-12-10"
+    ]
+}
+
+
+# ============================================================================
+# FUNZIONI FRESHNESS DATI (Regole Euristiche)
+# ============================================================================
+
+def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
+    """
+    Controlla se i dati sono aggiornati o da aggiornare.
+    
+    Args:
+        data_type: "macro", "cb_history", "pmi", "prices", "news"
+        last_updated: datetime dell'ultimo aggiornamento (o None se mai aggiornato)
+    
+    Returns:
+        {
+            "is_fresh": True/False,
+            "status": "🟢" o "🟠",
+            "message": "Descrizione stato",
+            "reason": "Motivo se da aggiornare"
+        }
+    """
+    now = get_italy_now()
+    
+    # Se non c'è timestamp, i dati non esistono
+    if last_updated is None:
+        return {
+            "is_fresh": False,
+            "status": "🟠",
+            "message": "Mai aggiornato",
+            "reason": "Nessun dato disponibile"
+        }
+    
+    # Rendi last_updated timezone-aware se necessario
+    if last_updated.tzinfo is None and ITALY_TZ:
+        last_updated = last_updated.replace(tzinfo=ITALY_TZ)
+    
+    age = now - last_updated
+    age_days = age.days
+    age_hours = age.total_seconds() / 3600
+    day_of_month = now.day
+    
+    # ===== PREZZI FOREX =====
+    if data_type == "prices":
+        # Da aggiornare se non aggiornati oggi dopo le 7:00
+        today_7am = now.replace(hour=7, minute=0, second=0, microsecond=0)
+        if now.hour >= 7 and last_updated < today_7am:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornati ieri",
+                "reason": "Non aggiornati oggi"
+            }
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornati oggi",
+            "reason": ""
+        }
+    
+    # ===== NOTIZIE =====
+    if data_type == "news":
+        # Da aggiornare se non aggiornate oggi dopo le 7:00
+        today_7am = now.replace(hour=7, minute=0, second=0, microsecond=0)
+        if now.hour >= 7 and last_updated < today_7am:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornate ieri",
+                "reason": "Non aggiornate oggi"
+            }
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornate oggi",
+            "reason": ""
+        }
+    
+    # ===== STORICO BANCHE CENTRALI =====
+    if data_type == "cb_history":
+        # Controlla se c'è stato un meeting DOPO last_updated
+        meetings_after = []
+        for currency, dates in CB_MEETING_DATES_2025.items():
+            for date_str in dates:
+                meeting_date = datetime.strptime(date_str, "%Y-%m-%d")
+                if ITALY_TZ:
+                    meeting_date = meeting_date.replace(tzinfo=ITALY_TZ)
+                # Meeting è passato E dopo l'ultimo aggiornamento
+                if last_updated.replace(tzinfo=None) < meeting_date.replace(tzinfo=None) <= now.replace(tzinfo=None):
+                    meetings_after.append(f"{currency} ({date_str})")
+        
+        if meetings_after:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Meeting recenti: {', '.join(meetings_after[:3])}",
+                "reason": "Meeting BC avvenuti dopo ultimo aggiornamento"
+            }
+        
+        # Trova prossimo meeting
+        next_meetings = []
+        for currency, dates in CB_MEETING_DATES_2025.items():
+            for date_str in dates:
+                meeting_date = datetime.strptime(date_str, "%Y-%m-%d")
+                if meeting_date.replace(tzinfo=None) > now.replace(tzinfo=None):
+                    days_until = (meeting_date.replace(tzinfo=None) - now.replace(tzinfo=None)).days
+                    if days_until <= 7:
+                        next_meetings.append(f"{currency} tra {days_until}gg")
+                    break
+        
+        msg = f"Aggiornati {age_days}gg fa"
+        if next_meetings:
+            msg += f" | Prossimi: {', '.join(next_meetings[:2])}"
+        
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": msg,
+            "reason": ""
+        }
+    
+    # ===== PMI =====
+    if data_type == "pmi":
+        # Periodi critici: 1-3 (PMI finale) e 22-24 (PMI flash)
+        in_pmi_period = (1 <= day_of_month <= 4) or (22 <= day_of_month <= 25)
+        
+        if in_pmi_period:
+            # Siamo in periodo PMI, controlla se aggiornati in questo periodo
+            if day_of_month <= 4:
+                period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                period_start = now.replace(day=22, hour=0, minute=0, second=0, microsecond=0)
+            
+            if last_updated < period_start:
+                return {
+                    "is_fresh": False,
+                    "status": "🟠",
+                    "message": f"Nuovi PMI disponibili",
+                    "reason": f"Periodo PMI ({'Flash' if day_of_month >= 22 else 'Finale'}) - aggiorna!"
+                }
+        
+        # Fuori periodo critico, controlla solo età
+        if age_days > 20:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornati {age_days}gg fa",
+                "reason": "Dati troppo vecchi"
+            }
+        
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornati {age_days}gg fa",
+            "reason": ""
+        }
+    
+    # ===== DATI MACRO (Inflazione, PIL, etc.) =====
+    if data_type == "macro":
+        # Periodo critico: 10-15 del mese (CPI)
+        in_cpi_period = 10 <= day_of_month <= 16
+        
+        if in_cpi_period:
+            period_start = now.replace(day=10, hour=0, minute=0, second=0, microsecond=0)
+            if last_updated < period_start:
+                return {
+                    "is_fresh": False,
+                    "status": "🟠",
+                    "message": f"Periodo CPI (10-15 del mese)",
+                    "reason": "Nuovi dati inflazione probabilmente disponibili"
+                }
+        
+        # Controlla età generale
+        if age_days > 7:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornati {age_days}gg fa",
+                "reason": "Dati vecchi di oltre 7 giorni"
+            }
+        
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornati {age_days}gg fa",
+            "reason": ""
+        }
+    
+    # Default
+    return {
+        "is_fresh": True,
+        "status": "🟢",
+        "message": "OK",
+        "reason": ""
+    }
+
+
+def get_all_data_freshness(timestamps: dict) -> tuple[bool, dict]:
+    """
+    Controlla la freshness di tutti i tipi di dati.
+    
+    Args:
+        timestamps: dict con chiavi "macro", "cb_history", "pmi", "prices", "news"
+                   e valori datetime o None
+    
+    Returns:
+        (all_fresh: bool, details: dict con stato per ogni tipo)
+    """
+    data_types = ["macro", "cb_history", "pmi", "prices", "news"]
+    details = {}
+    all_fresh = True
+    
+    for dt in data_types:
+        last_updated = timestamps.get(dt)
+        freshness = check_data_freshness(dt, last_updated)
+        details[dt] = freshness
+        if not freshness["is_fresh"]:
+            all_fresh = False
+    
+    return all_fresh, details
+
+
+# ============================================================================
+# FUNZIONI GESTIONE TIMESTAMPS DATI
+# ============================================================================
+
+def save_data_timestamp(data_type: str, user_id: str):
+    """Salva il timestamp di aggiornamento per un tipo di dato."""
+    key = f"timestamp_{data_type}"
+    now = get_italy_now()
+    st.session_state[key] = now
+    
+    # Per ora salviamo solo in session_state
+    # La persistenza avviene attraverso l'analisi salvata che contiene i dati
+
+
+def load_data_timestamps(user_id: str) -> dict:
+    """Carica tutti i timestamps dei dati per un utente."""
+    timestamps = {}
+    data_types = ["macro", "cb_history", "pmi", "prices", "news"]
+    
+    # Prima controlla session_state
+    for dt in data_types:
+        key = f"timestamp_{dt}"
+        if key in st.session_state:
+            timestamps[dt] = st.session_state[key]
+    
+    # Se mancano timestamps, prova a recuperarli dall'ultima analisi salvata
+    if len(timestamps) < len(data_types):
+        try:
+            cached = get_latest_analysis_data(user_id)
+            if cached.get("cached_datetime"):
+                cached_dt = datetime.strptime(cached["cached_datetime"], "%Y-%m-%d_%H-%M-%S")
+                if ITALY_TZ:
+                    cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
+                
+                # Usa il datetime dell'analisi come fallback per i dati mancanti
+                data_keys = {
+                    "macro": "macro_data",
+                    "cb_history": "cb_history_data", 
+                    "pmi": "pmi_data",
+                    "prices": "forex_prices",
+                    "news": "news_structured"
+                }
+                for dt in data_types:
+                    data_key = data_keys.get(dt, f"{dt}_data")
+                    if dt not in timestamps and cached.get(data_key):
+                        timestamps[dt] = cached_dt
+                        st.session_state[f"timestamp_{dt}"] = cached_dt
+        except:
+            pass
+    
+    return timestamps
+
 
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
@@ -3888,6 +4205,224 @@ def generate_summary_with_bias(summary: str, differential: int) -> str:
     return f"{prefix}: {summary_clean}"
 
 
+# ============================================================================
+# FUNZIONI LAYOUT NUOVO (Dati Input + Calendario)
+# ============================================================================
+
+def render_data_section(
+    title: str,
+    icon: str,
+    data_type: str,
+    data: dict | list | None,
+    timestamp: datetime | None,
+    user_id: str,
+    display_func: callable,
+    fetch_func: callable,
+    extra_content: callable = None
+) -> bool:
+    """
+    Renderizza una sezione dati con header, stato freshness e bottone aggiorna.
+    
+    Returns:
+        True se l'utente ha cliccato "Aggiorna"
+    """
+    # Calcola stato freshness
+    freshness = check_data_freshness(data_type, timestamp)
+    
+    # Header con titolo e bottone
+    col_title, col_status, col_btn = st.columns([3, 2, 1])
+    
+    with col_title:
+        st.markdown(f"### {icon} {title}")
+    
+    with col_status:
+        if timestamp:
+            ts_str = timestamp.strftime("%d/%m %H:%M") if hasattr(timestamp, 'strftime') else str(timestamp)
+            st.caption(f"📅 {ts_str} - {freshness['status']} {freshness['message']}")
+        else:
+            st.caption(f"📅 Mai aggiornato - {freshness['status']}")
+    
+    with col_btn:
+        update_clicked = st.button(f"🔄", key=f"update_{data_type}", help=f"Aggiorna {title}")
+    
+    # Se cliccato aggiorna, esegui il fetch
+    if update_clicked:
+        with st.spinner(f"Aggiornamento {title}..."):
+            try:
+                new_data = fetch_func()
+                st.session_state[f'last_{data_type}_data'] = new_data
+                save_data_timestamp(data_type, user_id)
+                st.success(f"✅ {title} aggiornati!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Errore: {str(e)[:100]}")
+        return True
+    
+    # Mostra contenuto
+    if data:
+        display_func(data)
+    else:
+        st.info(f"ℹ️ Nessun dato disponibile. Clicca 🔄 per aggiornare.")
+    
+    # Contenuto extra (es. link aggiuntivi per la sezione news)
+    if extra_content:
+        extra_content()
+    
+    st.markdown("---")
+    return False
+
+
+def render_calendar_sidebar(user_id: str, analyses_list: list) -> dict | None:
+    """
+    Renderizza il calendario nella sidebar con le date delle analisi evidenziate.
+    
+    Returns:
+        L'analisi selezionata se l'utente clicca su una data, None altrimenti
+    """
+    st.markdown("### 📂 Storico Analisi")
+    
+    # Costruisci mappa date -> analisi
+    analyses_by_date = {}
+    for analysis in analyses_list:
+        dt_str = analysis.get("analysis_datetime", "")
+        if not dt_str:
+            data_obj = analysis.get("data", {})
+            if isinstance(data_obj, dict):
+                dt_str = data_obj.get("analysis_datetime", "")
+        
+        if dt_str:
+            try:
+                # Formato: 2025-01-21_14-30-00
+                date_part = dt_str.split("_")[0]
+                if date_part not in analyses_by_date:
+                    analyses_by_date[date_part] = []
+                analyses_by_date[date_part].append(analysis)
+            except:
+                pass
+    
+    # Ottieni mese/anno corrente o selezionato
+    now = get_italy_now()
+    
+    if 'calendar_year' not in st.session_state:
+        st.session_state['calendar_year'] = now.year
+    if 'calendar_month' not in st.session_state:
+        st.session_state['calendar_month'] = now.month
+    
+    year = st.session_state['calendar_year']
+    month = st.session_state['calendar_month']
+    
+    # Navigazione mese
+    col_prev, col_month, col_next = st.columns([1, 2, 1])
+    
+    with col_prev:
+        if st.button("◀", key="cal_prev"):
+            if month == 1:
+                st.session_state['calendar_month'] = 12
+                st.session_state['calendar_year'] = year - 1
+            else:
+                st.session_state['calendar_month'] = month - 1
+            st.rerun()
+    
+    with col_month:
+        month_names = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", 
+                       "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
+        st.markdown(f"**{month_names[month]} {year}**")
+    
+    with col_next:
+        if st.button("▶", key="cal_next"):
+            if month == 12:
+                st.session_state['calendar_month'] = 1
+                st.session_state['calendar_year'] = year + 1
+            else:
+                st.session_state['calendar_month'] = month + 1
+            st.rerun()
+    
+    # Genera calendario
+    cal = calendar.Calendar(firstweekday=0)  # Lunedì = 0
+    month_days = cal.monthdayscalendar(year, month)
+    
+    # Header giorni
+    st.markdown("```\nLu Ma Me Gi Ve Sa Do\n```")
+    
+    selected_analysis = None
+    
+    # Righe calendario
+    for week in month_days:
+        cols = st.columns(7)
+        for i, day in enumerate(week):
+            with cols[i]:
+                if day == 0:
+                    st.write("")
+                else:
+                    date_str = f"{year}-{month:02d}-{day:02d}"
+                    is_today = (day == now.day and month == now.month and year == now.year)
+                    has_analysis = date_str in analyses_by_date
+                    
+                    if has_analysis:
+                        # Bottone cliccabile con indicatore
+                        btn_label = f"🟢{day}"
+                        if st.button(btn_label, key=f"cal_{date_str}", help=f"Carica analisi del {day}/{month}"):
+                            # Prendi la prima analisi di quel giorno
+                            selected_analysis = analyses_by_date[date_str][0]
+                    elif is_today:
+                        st.markdown(f"**🔵{day}**")
+                    else:
+                        st.caption(f"{day}")
+    
+    # Legenda
+    st.caption("🟢 Analisi salvata | 🔵 Oggi")
+    
+    # Pulsante per tornare a oggi
+    if st.button("📅 Vai a Oggi", use_container_width=True):
+        st.session_state['calendar_year'] = now.year
+        st.session_state['calendar_month'] = now.month
+        st.rerun()
+    
+    return selected_analysis
+
+
+def render_additional_links_section(user_id: str) -> tuple[str, list]:
+    """
+    Renderizza la sezione link aggiuntivi dentro la sezione news.
+    
+    Returns:
+        (additional_text, links_structured)
+    """
+    additional_text = ""
+    links_structured = []
+    
+    with st.expander("📎 Link Aggiuntivi (opzionale)", expanded=False):
+        urls = st.text_area(
+            "Inserisci URL (uno per riga)",
+            height=80,
+            placeholder="https://federalreserve.gov/...\nhttps://reuters.com/...",
+            help="Max 10 URL",
+            key="additional_urls_input"
+        )
+        
+        if urls.strip():
+            url_list = [u.strip() for u in urls.split('\n') if u.strip().startswith('http')]
+            st.info(f"📌 {len(url_list)} URL inseriti")
+            
+            if st.button("🔄 Processa Link", key="process_links"):
+                with st.spinner("Elaborazione link..."):
+                    try:
+                        additional_text, links_structured = fetch_additional_resources(url_list)
+                        st.session_state['last_links_text'] = additional_text
+                        st.session_state['last_links_structured'] = links_structured
+                        st.success(f"✅ {len(links_structured)} link processati")
+                    except Exception as e:
+                        st.error(f"❌ Errore: {str(e)[:100]}")
+        
+        # Mostra link già processati
+        if 'last_links_structured' in st.session_state and st.session_state['last_links_structured']:
+            st.caption(f"📎 {len(st.session_state['last_links_structured'])} link già processati")
+            links_structured = st.session_state['last_links_structured']
+            additional_text = st.session_state.get('last_links_text', '')
+    
+    return additional_text, links_structured
+
+
 def display_analysis_matrix(analysis: dict):
     """Mostra la matrice delle analisi forex - LAYOUT OTTIMIZZATO"""
     
@@ -4593,576 +5128,368 @@ def main():
         if st.button("🚪 Logout", type="secondary"):
             logout()
     
-    # --- SIDEBAR ---
+    # ===== CARICA DATI E TIMESTAMPS =====
+    timestamps = load_data_timestamps(user_id)
+    all_fresh, freshness_details = get_all_data_freshness(timestamps)
+    
+    # Carica dati esistenti dalla sessione o dall'ultima analisi
+    cached_data = get_latest_analysis_data(user_id)
+    
+    # Recupera dati dalla sessione o dalla cache
+    macro_data = st.session_state.get('last_macro_data') or cached_data.get('macro_data')
+    pmi_data = st.session_state.get('last_pmi_data') or cached_data.get('pmi_data')
+    cb_history_data = st.session_state.get('last_cb_history') or cached_data.get('cb_history_data')
+    forex_prices = st.session_state.get('last_forex_prices') or cached_data.get('forex_prices')
+    news_structured = st.session_state.get('last_news_structured') or cached_data.get('news_structured', {})
+    
+    # Aggiorna timestamps se abbiamo recuperato dati dalla cache
+    if cached_data.get('cached_datetime') and not timestamps:
+        try:
+            cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
+            if ITALY_TZ:
+                cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
+            for dt in ['macro', 'pmi', 'cb_history', 'prices', 'news']:
+                if dt not in timestamps:
+                    timestamps[dt] = cached_dt
+                    st.session_state[f'timestamp_{dt}'] = cached_dt
+            all_fresh, freshness_details = get_all_data_freshness(timestamps)
+        except:
+            pass
+    
+    # --- SIDEBAR (Solo calendario) ---
     with st.sidebar:
-        st.header("⚙️ Configurazione")
+        # Status compatto
+        st.markdown(f"### 👤 {username}")
         
-        # Status
         if API_KEY_LOADED:
-            st.success("✅ API Claude configurata")
+            st.caption("✅ API Claude OK")
         else:
-            st.error("❌ API Key mancante")
-        
-        if SUPABASE_ENABLED:
-            st.success("☁️ Database Supabase attivo")
-        else:
-            st.warning("💾 Modalità locale")
+            st.caption("❌ API Key mancante")
         
         st.markdown("---")
         
-        # ===== OPZIONI ANALISI =====
-        st.markdown("### 🎛️ Opzioni Analisi")
+        # Calendario analisi
+        user_analyses = get_user_analyses(user_id, limit=60)
+        selected_from_calendar = render_calendar_sidebar(user_id, user_analyses)
         
-        st.caption("Seleziona cosa includere nell'analisi:")
-        
-        opt_macro = st.checkbox(
-            "📊 Aggiorna Dati Macro",
-            value=True,
-            help="Recupera tassi, inflazione, PIL, disoccupazione (GRATIS)"
-        )
-        
-        opt_pmi = st.checkbox(
-            "📈 Aggiorna Dati PMI",
-            value=True,
-            help="Recupera PMI Manufacturing e Services da Investing.com (GRATIS)"
-        )
-        
-        opt_cb_history = st.checkbox(
-            "🏦 Storico Banche Centrali",
-            value=True,
-            help="Recupera ultime 2 decisioni sui tassi per ogni BC (GRATIS)"
-        )
-        
-        opt_prices = st.checkbox(
-            "💱 Recupera Prezzi Forex",
-            value=True,
-            help="Recupera prezzi attuali delle 19 coppie forex da Yahoo Finance (GRATIS)"
-        )
-        
-        opt_news = st.checkbox(
-            "📰 Ricerca Notizie Web",
-            value=True,
-            help="Cerca su Forex Factory, outlook BC, geopolitica (GRATIS)"
-        )
-        
-        opt_links = st.checkbox(
-            "📎 Processa Link Aggiuntivi",
-            value=False,
-            help="Analizza gli URL inseriti sotto (GRATIS)"
-        )
-        
-        # Textarea per link (visibile solo se opzione attiva)
-        additional_urls = ""
-        if opt_links:
-            additional_urls = st.text_area(
-                "URL (uno per riga)",
-                height=100,
-                placeholder="https://federalreserve.gov/...\nhttps://reuters.com/...",
-                help="Max 10 URL",
-                key="additional_urls"
-            )
-            
-            if additional_urls.strip():
-                url_count = len([u for u in additional_urls.split('\n') if u.strip().startswith('http')])
-                st.info(f"📌 {url_count} URL da processare")
-        
-        st.markdown("---")
-        
-        opt_claude = st.checkbox(
-            "🤖 Analisi Claude AI",
-            value=True,
-            help="Genera analisi completa forex ($$$ - costa token)"
-        )
-        
-        if opt_claude:
-            st.warning("⚠️ L'analisi Claude consuma token API")
-        
-        # Validazione: almeno un'opzione dati se Claude attivo
-        if opt_claude and not (opt_macro or opt_pmi or opt_cb_history or opt_news or opt_links):
-            st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
-        
-        st.markdown("---")
-        
-        # ===== BOTTONE ANALISI =====
-        # Permette l'analisi se:
-        # 1. Almeno un'opzione dati è selezionata, OPPURE
-        # 2. Solo Claude è selezionato (userà dati cached)
-        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news or opt_links or opt_claude)
-        
-        analyze_btn = st.button(
-            "🚀 AVVIA ANALISI",
-            disabled=not can_analyze,
-            use_container_width=True,
-            type="primary"
-        )
-        
-        # Warning se usa solo dati cached
-        if opt_claude and not (opt_macro or opt_pmi or opt_cb_history or opt_prices or opt_news):
-            st.caption("♻️ *Userà dati cached dall'ultima analisi*")
-        
-        # Calcola tipo analisi
-        analysis_type = "custom"
-        if opt_macro and opt_pmi and opt_cb_history and opt_news and opt_claude and not opt_links:
-            analysis_type = "full"
-        elif opt_macro and not opt_news and not opt_links:
-            analysis_type = "macro_only"
-        elif opt_news and not opt_macro and not opt_links:
-            analysis_type = "news_only"
-        elif opt_links and not opt_macro and not opt_news:
-            analysis_type = "links_only"
-        elif opt_cb_history and not opt_macro and not opt_pmi and not opt_news and not opt_links:
-            analysis_type = "cb_history_only"
-        
-        st.caption(f"📋 Tipo: {get_analysis_type_label(analysis_type)}")
-        
-        st.markdown("---")
-        st.markdown(f"**Coppie:** {len(FOREX_PAIRS)}")
-        st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
-        
-        st.markdown("---")
-        
-        # ===== STORICO ANALISI (menu a tendina) =====
-        user_analyses = get_user_analyses(user_id, limit=30)
-        
-        if user_analyses:
-            st.markdown("### 📁 Analisi Salvate")
-            
-            # Crea lista opzioni per selectbox
-            analysis_options = []
-            for analysis_record in user_analyses:
-                datetime_str = analysis_record.get("analysis_datetime", "")
-                if not datetime_str:
-                    data_obj = analysis_record.get("data", {})
-                    if isinstance(data_obj, dict):
-                        datetime_str = data_obj.get("analysis_datetime", "")
-                
-                analysis_type = analysis_record.get("analysis_type") or "full"
-                date_display = format_datetime_display(datetime_str) if datetime_str else "Data sconosciuta"
-                type_label = get_analysis_type_label(analysis_type)
-                
-                analysis_options.append({
-                    "label": f"{date_display} - {type_label}",
-                    "datetime": datetime_str,
-                    "record": analysis_record
-                })
-            
-            # Selectbox
-            selected_idx = st.selectbox(
-                "Seleziona analisi:",
-                range(len(analysis_options)),
-                format_func=lambda x: analysis_options[x]["label"],
-                key="analysis_selector"
-            )
-            
-            selected_analysis = analysis_options[selected_idx]
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📂 Carica", use_container_width=True):
-                    st.session_state['current_analysis'] = selected_analysis["record"]
-                    st.session_state['analysis_source'] = 'loaded'
-                    st.rerun()
-            
-            with col2:
-                if st.button("🗑️ Elimina", use_container_width=True, type="secondary"):
-                    st.session_state['confirm_delete'] = selected_analysis["datetime"]
-            
-            # Conferma eliminazione
-            if 'confirm_delete' in st.session_state and st.session_state['confirm_delete'] == selected_analysis["datetime"]:
-                st.warning(f"⚠️ Eliminare questa analisi?")
-                col_yes, col_no = st.columns(2)
-                with col_yes:
-                    if st.button("✅ Sì", use_container_width=True):
-                        del_user_id = selected_analysis["record"].get("user_id") or user_id
-                        if delete_analysis(selected_analysis["datetime"], del_user_id):
-                            st.success("Eliminata!")
-                            del st.session_state['confirm_delete']
-                            st.rerun()
-                with col_no:
-                    if st.button("❌ No", use_container_width=True):
-                        del st.session_state['confirm_delete']
-                        st.rerun()
-        else:
-            st.info("📁 Nessuna analisi salvata")
+        # Se selezionata un'analisi dal calendario, caricala
+        if selected_from_calendar:
+            st.session_state['current_analysis'] = selected_from_calendar
+            st.session_state['analysis_source'] = 'loaded'
+            st.session_state['viewing_historical'] = True
+            st.rerun()
     
-    # --- MAIN AREA ---
+    # ===== BANNER SE VISUALIZZANDO ANALISI STORICA =====
+    if st.session_state.get('viewing_historical'):
+        analysis = st.session_state.get('current_analysis', {})
+        dt_str = analysis.get('analysis_datetime', analysis.get('data', {}).get('analysis_datetime', ''))
+        
+        col_banner, col_close = st.columns([5, 1])
+        with col_banner:
+            st.warning(f"📂 **Visualizzando analisi storica del {format_datetime_display(dt_str)}**")
+        with col_close:
+            if st.button("✕ Chiudi", type="secondary"):
+                st.session_state['viewing_historical'] = False
+                if 'current_analysis' in st.session_state:
+                    del st.session_state['current_analysis']
+                st.rerun()
+        
+        # Mostra i dati dell'analisi storica
+        data_container = analysis.get('data', analysis)
+        
+        st.markdown("## 📊 Dati dell'analisi storica")
+        
+        # Macro
+        if data_container.get('macro_data'):
+            st.markdown("### 📊 Dati Macro")
+            display_macro_data(data_container['macro_data'])
+        
+        # CB History
+        if data_container.get('cb_history_data'):
+            st.markdown("### 🏦 Storico Banche Centrali")
+            display_central_bank_history(data_container['cb_history_data'])
+        
+        # PMI
+        if data_container.get('pmi_data'):
+            st.markdown("### 📈 Dati PMI")
+            display_pmi_table(data_container['pmi_data'])
+        
+        # Prezzi
+        if data_container.get('forex_prices'):
+            st.markdown("### 💱 Prezzi Forex")
+            display_forex_prices(data_container['forex_prices'])
+        
+        # News
+        if data_container.get('news_structured'):
+            st.markdown("### 📰 Notizie")
+            display_news_summary(data_container['news_structured'], data_container.get('links_structured'))
+        
+        st.markdown("---")
+        
+        # Analisi Claude storica
+        if data_container.get('claude_analysis'):
+            display_analysis_matrix(data_container['claude_analysis'])
+        
+        return  # Stop qui se visualizzando analisi storica
     
-    # ===== ESECUZIONE ANALISI =====
-    if analyze_btn:
+    # ===== MAIN AREA - DATI INPUT =====
+    st.markdown("## 📊 Dati di Input")
+    
+    # --- SEZIONE 1: DATI MACRO ---
+    col_title1, col_status1, col_btn1 = st.columns([3, 3, 1])
+    with col_title1:
+        st.markdown("### 📊 Dati Macro")
+    with col_status1:
+        f = freshness_details.get('macro', {})
+        ts = timestamps.get('macro')
+        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
+        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
+    with col_btn1:
+        if st.button("🔄", key="upd_macro", help="Aggiorna Dati Macro"):
+            with st.spinner("Aggiornamento..."):
+                new_data = fetch_macro_data()
+                st.session_state['last_macro_data'] = new_data
+                st.session_state['timestamp_macro'] = get_italy_now()
+                save_data_timestamp('macro', user_id)
+                st.rerun()
+    
+    if macro_data:
+        display_macro_data(macro_data)
+    else:
+        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
+    st.markdown("---")
+    
+    # --- SEZIONE 2: STORICO BC ---
+    col_title2, col_status2, col_btn2 = st.columns([3, 3, 1])
+    with col_title2:
+        st.markdown("### 🏦 Storico Banche Centrali")
+    with col_status2:
+        f = freshness_details.get('cb_history', {})
+        ts = timestamps.get('cb_history')
+        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
+        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
+    with col_btn2:
+        if st.button("🔄", key="upd_cb", help="Aggiorna Storico BC"):
+            with st.spinner("Aggiornamento..."):
+                new_data = get_central_bank_history_summary()
+                st.session_state['last_cb_history'] = new_data
+                st.session_state['timestamp_cb_history'] = get_italy_now()
+                save_data_timestamp('cb_history', user_id)
+                st.rerun()
+    
+    if cb_history_data:
+        display_central_bank_history(cb_history_data)
+    else:
+        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
+    st.markdown("---")
+    
+    # --- SEZIONE 3: PMI ---
+    col_title3, col_status3, col_btn3 = st.columns([3, 3, 1])
+    with col_title3:
+        st.markdown("### 📈 Dati PMI")
+    with col_status3:
+        f = freshness_details.get('pmi', {})
+        ts = timestamps.get('pmi')
+        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
+        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
+    with col_btn3:
+        if st.button("🔄", key="upd_pmi", help="Aggiorna PMI"):
+            with st.spinner("Aggiornamento..."):
+                new_data = fetch_all_pmi_data()
+                st.session_state['last_pmi_data'] = new_data
+                st.session_state['timestamp_pmi'] = get_italy_now()
+                save_data_timestamp('pmi', user_id)
+                st.rerun()
+    
+    if pmi_data:
+        display_pmi_table(pmi_data)
+    else:
+        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
+    st.markdown("---")
+    
+    # --- SEZIONE 4: PREZZI FOREX ---
+    col_title4, col_status4, col_btn4 = st.columns([3, 3, 1])
+    with col_title4:
+        st.markdown("### 💱 Prezzi Forex")
+    with col_status4:
+        f = freshness_details.get('prices', {})
+        ts = timestamps.get('prices')
+        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
+        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
+    with col_btn4:
+        if st.button("🔄", key="upd_prices", help="Aggiorna Prezzi"):
+            with st.spinner("Aggiornamento..."):
+                new_data = fetch_forex_prices()
+                st.session_state['last_forex_prices'] = new_data
+                st.session_state['timestamp_prices'] = get_italy_now()
+                save_data_timestamp('prices', user_id)
+                st.rerun()
+    
+    if forex_prices:
+        display_forex_prices(forex_prices)
+    else:
+        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
+    st.markdown("---")
+    
+    # --- SEZIONE 5: NOTIZIE ---
+    col_title5, col_status5, col_btn5 = st.columns([3, 3, 1])
+    with col_title5:
+        st.markdown("### 📰 Notizie")
+    with col_status5:
+        f = freshness_details.get('news', {})
+        ts = timestamps.get('news')
+        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
+        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
+    with col_btn5:
+        if st.button("🔄", key="upd_news", help="Aggiorna Notizie"):
+            with st.spinner("Aggiornamento notizie..."):
+                news_text, new_structured = search_web_news()
+                
+                # Aggiungi ForexFactory news
+                ff_news = fetch_forexfactory_news()
+                if ff_news.get("success") and ff_news.get("news"):
+                    new_structured["forexfactory_direct"] = ff_news["news"]
+                
+                st.session_state['last_news_text'] = news_text
+                st.session_state['last_news_structured'] = new_structured
+                st.session_state['timestamp_news'] = get_italy_now()
+                save_data_timestamp('news', user_id)
+                st.rerun()
+    
+    if news_structured:
+        display_news_summary(news_structured, st.session_state.get('last_links_structured'))
+    else:
+        st.info("ℹ️ Nessuna notizia. Clicca 🔄 per aggiornare.")
+    
+    # Link aggiuntivi (dentro sezione news)
+    additional_text, links_structured = render_additional_links_section(user_id)
+    
+    st.markdown("---")
+    
+    # ===== SEZIONE ANALISI CLAUDE =====
+    st.markdown("## 🤖 Analisi Claude AI")
+    
+    # Ricalcola freshness (potrebbe essere cambiata dopo aggiornamenti)
+    timestamps = load_data_timestamps(user_id)
+    all_fresh, freshness_details = get_all_data_freshness(timestamps)
+    
+    # Conta dati mancanti o non freschi
+    not_fresh = [k for k, v in freshness_details.items() if not v.get('is_fresh', False)]
+    
+    if not_fresh:
+        st.warning(f"⚠️ **Alcuni dati non sono aggiornati:** {', '.join(not_fresh).upper()}")
+        st.caption("Aggiorna tutti i dati prima di lanciare una nuova analisi, oppure carica una vecchia analisi dal calendario.")
+        can_analyze = False
+    else:
+        st.success("✅ Tutti i dati sono aggiornati!")
+        can_analyze = API_KEY_LOADED
+    
+    # Bottone analisi
+    if st.button(
+        "🤖 AVVIA ANALISI CLAUDE",
+        disabled=not can_analyze,
+        use_container_width=True,
+        type="primary"
+    ):
         progress = st.progress(0, text="Inizializzazione...")
         
-        # Variabili per raccogliere i dati
-        macro_data = None
-        pmi_data = None
-        news_text = ""
-        news_structured = {}
-        additional_text = ""
-        links_structured = []
-        claude_analysis = None
-        economic_events = {}
-        
-        options_selected = {
-            "macro": opt_macro,
-            "pmi": opt_pmi,
-            "cb_history": opt_cb_history,
-            "prices": opt_prices,
-            "news": opt_news,
-            "links": opt_links,
-            "claude": opt_claude
-        }
-        
-        step = 0
-        total_steps = sum([opt_macro, opt_pmi, opt_cb_history, opt_prices, opt_news, opt_links, opt_claude])
-        if total_steps == 0:
-            total_steps = 1  # Evita divisione per zero
-        
-        # Funzione helper per calcolare progress senza superare 89 (lascia spazio per salvataggio)
-        def calc_progress(step, total):
-            return min(int(step / max(total, 1) * 80), 89)
-        
-        # ===== CARICA DATI CACHED (se necessario) =====
-        cached_data = {}
-        using_cached = []  # Lista dei dati che useremo dalla cache
-        
-        # Verifica se ci sono opzioni non selezionate che potrebbero usare dati cached
-        needs_cached = (not opt_macro or not opt_pmi or not opt_cb_history or 
-                       not opt_prices or not opt_news)
-        
-        if needs_cached:
-            # Prima controlla la sessione, poi carica dall'ultima analisi
-            if not any(k in st.session_state for k in ['last_macro_data', 'last_pmi_data', 'last_cb_history']):
-                cached_data = get_latest_analysis_data(user_id)
-                if cached_data.get('cached_datetime'):
-                    # Formatta la data in modo leggibile
-                    cached_dt = cached_data['cached_datetime']
-                    try:
-                        # Formato: 2025-01-21_14-30-00
-                        dt_formatted = cached_dt.replace("_", " ").replace("-", "/", 2).replace("-", ":")
-                    except:
-                        dt_formatted = cached_dt
-                    st.info(f"📦 Dati cache disponibili dall'analisi del **{dt_formatted}**")
-        
-        # FASE 1: Dati Macro
-        if opt_macro:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="📊 Recupero dati macro...")
-            macro_data = fetch_macro_data()
-            st.session_state['last_macro_data'] = macro_data
-        else:
-            # Usa dati macro dalla sessione o dalla cache
-            if 'last_macro_data' in st.session_state and st.session_state['last_macro_data']:
-                macro_data = st.session_state['last_macro_data']
-                using_cached.append("Macro")
-            elif 'macro_data' in cached_data:
-                macro_data = cached_data['macro_data']
-                st.session_state['last_macro_data'] = macro_data
-                using_cached.append("Macro")
-        
-        # FASE 2: Dati PMI
-        if opt_pmi:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="📈 Recupero dati PMI...")
-            pmi_data = fetch_all_pmi_data()
-            st.session_state['last_pmi_data'] = pmi_data
-        else:
-            # Usa dati PMI dalla sessione o dalla cache
-            if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
-                pmi_data = st.session_state['last_pmi_data']
-                using_cached.append("PMI")
-            elif 'pmi_data' in cached_data:
-                pmi_data = cached_data['pmi_data']
-                st.session_state['last_pmi_data'] = pmi_data
-                using_cached.append("PMI")
-        
-        # FASE 2.5: Storico Banche Centrali
-        cb_history_data = {}
-        if opt_cb_history:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="🏦 Recupero storico banche centrali...")
-            cb_history_data = get_central_bank_history_summary()
-            st.session_state['last_cb_history'] = cb_history_data
-        else:
-            # Usa storico dalla sessione o dalla cache
-            if 'last_cb_history' in st.session_state and st.session_state['last_cb_history']:
-                cb_history_data = st.session_state['last_cb_history']
-                using_cached.append("BC History")
-            elif 'cb_history_data' in cached_data:
-                cb_history_data = cached_data['cb_history_data']
-                st.session_state['last_cb_history'] = cb_history_data
-                using_cached.append("BC History")
-        
-        # FASE 3: Prezzi Forex
-        forex_prices = {}
-        if opt_prices:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="💱 Recupero prezzi forex...")
-            forex_prices = fetch_forex_prices()
-            st.session_state['last_forex_prices'] = forex_prices
-        else:
-            # Usa prezzi dalla sessione o dalla cache
-            if 'last_forex_prices' in st.session_state and st.session_state['last_forex_prices']:
-                forex_prices = st.session_state['last_forex_prices']
-                using_cached.append("Prezzi")
-            elif 'forex_prices' in cached_data:
-                forex_prices = cached_data['forex_prices']
-                st.session_state['last_forex_prices'] = forex_prices
-                using_cached.append("Prezzi")
-        
-        # Mostra quali dati cached stiamo usando
-        if using_cached:
-            st.caption(f"♻️ Usando dati cached: {', '.join(using_cached)}")
-        
-        # FASE 3: Notizie Web
-        if opt_news:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="📰 Ricerca notizie web...")
-            news_text, news_structured = search_web_news()
-            
-            # Aggiungi news dirette da ForexFactory
-            progress.progress(calc_progress(step, total_steps), text="📰 Recupero ForexFactory news...")
-            ff_news = fetch_forexfactory_news()
-            if ff_news.get("success") and ff_news.get("news"):
-                # Aggiungi alle news structured
-                news_structured["forexfactory_direct"] = ff_news["news"]
-                # Aggiungi al testo per Claude
-                ff_text = "\n\n=== FOREX FACTORY NEWS (ULTIME) ===\n"
-                for item in ff_news["news"][:15]:
-                    ff_text += f"• {item['title']}"
-                    if item.get('currency'):
-                        ff_text += f" [{item['currency']}]"
-                    if item.get('time'):
-                        ff_text += f" ({item['time']})"
-                    ff_text += "\n"
-                news_text += ff_text
-            
-            st.session_state['last_news_text'] = news_text
-            st.session_state['last_news_structured'] = news_structured
-        
-        # FASE 4: Link Aggiuntivi
-        if opt_links and additional_urls.strip():
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="📎 Processamento link...")
-            url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
-            additional_text, links_structured = fetch_additional_resources(url_list)
-            st.session_state['last_links_text'] = additional_text
-            st.session_state['last_links_structured'] = links_structured
-        
-        # FASE 5: Analisi Claude
-        if opt_claude:
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="📊 Recupero dati economici per News Catalyst...")
-            
-            # Recupera dati economici recenti per News Catalyst
+        try:
+            # Recupera dati economici per News Catalyst
+            progress.progress(10, text="📊 Recupero dati economici...")
             economic_events = {}
             try:
                 economic_events = fetch_all_economic_events()
                 st.session_state['last_economic_events'] = economic_events
             except Exception as e:
-                st.warning(f"⚠️ Errore recupero dati economici: {str(e)[:50]}")
-                # Usa dati dalla sessione o dalla cache se disponibili
-                if 'last_economic_events' in st.session_state:
-                    economic_events = st.session_state['last_economic_events']
-                elif 'economic_events' in cached_data:
-                    economic_events = cached_data['economic_events']
-                    st.session_state['last_economic_events'] = economic_events
+                st.warning(f"⚠️ Errore dati economici: {str(e)[:50]}")
+                economic_events = st.session_state.get('last_economic_events', {})
             
-            step += 1
-            progress.progress(calc_progress(step, total_steps), text="🤖 Claude sta analizzando...")
+            # Recupera news text per Claude
+            news_text = st.session_state.get('last_news_text', '')
+            if not news_text and news_structured:
+                # Ricostruisci news_text dalle news structured
+                news_text = ""
+                for source, items in news_structured.items():
+                    if isinstance(items, list):
+                        for item in items[:10]:
+                            if isinstance(item, dict):
+                                news_text += f"• {item.get('title', '')}\n"
             
-            # Usa dati dalla sessione o dalla cache se non aggiornati ora
-            if not opt_news:
-                if 'last_news_text' in st.session_state:
-                    news_text = st.session_state['last_news_text']
-                    news_structured = st.session_state.get('last_news_structured', {})
-                elif 'news_structured' in cached_data:
-                    news_structured = cached_data['news_structured']
-                    # Ricostruisci news_text dalle news structured (per Claude)
-                    news_text = ""
-                    for source, items in news_structured.items():
-                        if isinstance(items, list):
-                            for item in items[:10]:
-                                if isinstance(item, dict):
-                                    news_text += f"• {item.get('title', '')}\n"
-                    st.session_state['last_news_text'] = news_text
-                    st.session_state['last_news_structured'] = news_structured
-                    
-            if not opt_links and 'last_links_text' in st.session_state:
-                additional_text = st.session_state['last_links_text']
-            if not opt_pmi and 'last_pmi_data' in st.session_state:
-                pmi_data = st.session_state['last_pmi_data']
-            if not opt_cb_history and 'last_cb_history' in st.session_state:
-                cb_history_data = st.session_state['last_cb_history']
+            # Link aggiuntivi
+            add_text = st.session_state.get('last_links_text', '')
             
-            # Recupera prezzi forex dalla sessione
-            forex_prices = st.session_state.get('last_forex_prices', {})
+            # Analisi Claude
+            progress.progress(30, text="🤖 Claude sta analizzando...")
             
             claude_analysis = analyze_with_claude(
                 ANTHROPIC_API_KEY,
                 macro_data,
                 news_text,
-                additional_text,
+                add_text,
                 pmi_data,
                 forex_prices,
                 economic_events,
                 cb_history_data
             )
-        
-        # ===== SALVATAGGIO =====
-        progress.progress(90, text="💾 Salvataggio...")
-        
-        analysis_result = {
-            "macro_data": macro_data,
-            "pmi_data": pmi_data,
-            "cb_history_data": cb_history_data,
-            "forex_prices": forex_prices,
-            "economic_events": economic_events,
-            "news_structured": news_structured,
-            "links_structured": links_structured,
-            "claude_analysis": claude_analysis,
-            "options_selected": options_selected
-        }
-        
-        if save_analysis(analysis_result, user_id, analysis_type, options_selected):
-            st.session_state['current_analysis'] = analysis_result
-            st.session_state['analysis_source'] = 'new'
-            progress.progress(100, text="✅ Completato!")
-            st.rerun()
-        else:
-            progress.progress(100, text="❌ Errore")
-            # L'errore dettagliato è già mostrato da save_analysis
+            
+            # Salva risultato
+            progress.progress(80, text="💾 Salvataggio...")
+            
+            analysis_result = {
+                "macro_data": macro_data,
+                "pmi_data": pmi_data,
+                "cb_history_data": cb_history_data,
+                "forex_prices": forex_prices,
+                "economic_events": economic_events,
+                "news_structured": news_structured,
+                "links_structured": links_structured,
+                "claude_analysis": claude_analysis,
+                "options_selected": {"full": True}
+            }
+            
+            if save_analysis(analysis_result, user_id, "full", {"full": True}):
+                st.session_state['current_analysis'] = analysis_result
+                st.session_state['analysis_source'] = 'new'
+                progress.progress(100, text="✅ Completato!")
+                st.rerun()
+            else:
+                progress.progress(100, text="❌ Errore salvataggio")
+                
+        except Exception as e:
+            st.error(f"❌ Errore analisi: {str(e)}")
     
-    # ===== VISUALIZZAZIONE RISULTATI =====
-    if 'current_analysis' in st.session_state:
+    # ===== MOSTRA ULTIMA ANALISI (se dati freschi) =====
+    if all_fresh and 'current_analysis' in st.session_state:
         analysis = st.session_state['current_analysis']
         source = st.session_state.get('analysis_source', 'unknown')
         
-        if source == 'new':
-            st.success("✅ Nuova analisi completata!")
-        elif source == 'loaded':
-            st.info("📂 Analisi caricata da archivio")
-        
-        # DEBUG: mostra struttura (rimuovere dopo test)
-        # with st.expander("🔍 Debug struttura dati"):
-        #     st.json(analysis)
-        
-        # Estrai dati - gestisci multipli formati
-        # Formato Supabase: { "data": {...}, "analysis_datetime": "...", ... }
-        # Formato v3: data contiene { "macro_data": ..., "claude_analysis": ... }
-        # Formato legacy: data contiene direttamente { "pair_analysis": ..., "market_summary": ... }
-        
+        # Estrai claude_analysis dal container
         data_container = analysis.get('data', analysis)
+        claude_analysis = data_container.get('claude_analysis')
         
-        # Se data_container è una stringa (JSON serializzato), deserializza
-        if isinstance(data_container, str):
-            try:
-                data_container = json.loads(data_container)
-            except:
-                data_container = {}
-        
-        # Inizializza variabili
-        macro_data = None
-        pmi_data = None
-        news_structured = {}
-        links_structured = []
-        claude_analysis = None
-        
-        # Rileva formato e estrai dati
-        if 'claude_analysis' in data_container:
-            # Formato v3 nuovo
-            macro_data = data_container.get('macro_data')
-            pmi_data = data_container.get('pmi_data')
-            news_structured = data_container.get('news_structured', {})
-            links_structured = data_container.get('links_structured', [])
-            claude_analysis = data_container.get('claude_analysis')
-        elif 'pair_analysis' in data_container:
-            # Formato legacy - data_container È l'analisi Claude
-            claude_analysis = data_container
-        elif 'macro_data' in data_container:
-            # Formato v3 senza Claude
-            macro_data = data_container.get('macro_data')
-            pmi_data = data_container.get('pmi_data')
-            news_structured = data_container.get('news_structured', {})
-            links_structured = data_container.get('links_structured', [])
-        
-        # Salva in session_state per visualizzazione tabella PMI
-        if pmi_data:
-            st.session_state['last_pmi_data'] = pmi_data
-        
-        # Verifica se c'è qualcosa da mostrare
-        has_content = macro_data or pmi_data or news_structured or links_structured or claude_analysis
-        
-        if not has_content:
-            st.warning("⚠️ Questa analisi non contiene dati visualizzabili")
-            with st.expander("🔍 Dettagli struttura"):
-                st.json(analysis)
-        
-        # === ORDINE VISUALIZZAZIONE ===
-        # 1. Dati Macro
-        # 2. Dati PMI
-        # 3. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
-        # 4. Notizie Web (alla fine)
-        
-        if macro_data:
-            display_macro_data(macro_data)
-            st.markdown("---")
-        
-        if pmi_data:
-            display_pmi_table(pmi_data)
-            st.markdown("---")
-        
-        # Storico Decisioni Banche Centrali (dati da Investing.com API, non Claude)
-        cb_history = analysis.get("cb_history_data", {})
-        if not cb_history and 'last_cb_history' in st.session_state:
-            cb_history = st.session_state['last_cb_history']
-        display_central_bank_history(cb_history)
-        st.markdown("---")
-        
-        # 1️⃣ Mostra tabella prezzi forex se disponibili
-        forex_prices = analysis.get("forex_prices", {})
-        if not forex_prices and 'last_forex_prices' in st.session_state:
-            forex_prices = st.session_state['last_forex_prices']
-        
-        if forex_prices and forex_prices.get("prices"):
-            display_forex_prices(forex_prices)
-            st.markdown("---")
-        
-        # 2️⃣ Notizie e Calendario (subito dopo prezzi)
-        if news_structured or links_structured:
-            display_news_summary(news_structured, links_structured)
-            st.markdown("---")
-        
-        # 3️⃣ Analisi Claude
         if claude_analysis:
+            if source == 'new':
+                st.success("✅ Nuova analisi completata!")
+            
+            # Mostra data analisi
+            dt_str = analysis.get('analysis_datetime', data_container.get('analysis_datetime', ''))
+            if dt_str:
+                st.caption(f"📅 Analisi del {format_datetime_display(dt_str)}")
+            
             display_analysis_matrix(claude_analysis)
     
-    else:
-        # Stato iniziale
-        st.markdown("""
-        ### 👋 Benvenuto!
-        
-        Seleziona le opzioni nella sidebar e clicca **🚀 AVVIA ANALISI**.
-        
-        **Opzioni disponibili:**
-        - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
-        - 📈 **Dati PMI** - Manufacturing & Services PMI (gratis)
-        - 💱 **Prezzi Forex** - Prezzi attuali delle 19 coppie (gratis)
-        - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
-        - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
-        - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
-        
-        💡 **Suggerimento:** Puoi aggiornare solo le notizie senza richiamare Claude per risparmiare!
-        """)
+    elif not all_fresh:
+        # Messaggio quando dati non freschi
+        st.info("💡 Aggiorna i dati per visualizzare/creare un'analisi, oppure carica un'analisi storica dal calendario nella sidebar.")
     
-    # --- FOOTER ---
+    # ===== FOOTER =====
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #6b7280; font-size: 0.8rem;">
-        📊 Forex Macro Analyst v3.0 | Powered by Claude AI<br>
+        📊 Forex Macro Analyst v4.0 | Powered by Claude AI<br>
         ⚠️ Non costituisce consiglio di investimento
     </div>
     """, unsafe_allow_html=True)
-
 
 # ============================================================================
 # RUN
