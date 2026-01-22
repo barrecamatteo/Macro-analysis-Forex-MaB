@@ -5168,32 +5168,58 @@ def main():
             logout()
     
     # ===== CARICA DATI E TIMESTAMPS =====
-    timestamps = load_data_timestamps(user_id)
-    all_fresh, freshness_details = get_all_data_freshness(timestamps)
     
     # Carica dati esistenti dalla sessione o dall'ultima analisi
-    cached_data = get_latest_analysis_data(user_id)
+    cached_data = {}
     
-    # Recupera dati dalla sessione o dalla cache
-    macro_data = st.session_state.get('last_macro_data') or cached_data.get('macro_data')
-    pmi_data = st.session_state.get('last_pmi_data') or cached_data.get('pmi_data')
-    cb_history_data = st.session_state.get('last_cb_history') or cached_data.get('cb_history_data')
-    forex_prices = st.session_state.get('last_forex_prices') or cached_data.get('forex_prices')
-    news_structured = st.session_state.get('last_news_structured') or cached_data.get('news_structured', {})
+    # Se non abbiamo dati in sessione, carica dall'ultima analisi
+    if not st.session_state.get('last_macro_data'):
+        cached_data = get_latest_analysis_data(user_id)
+        
+        # Se abbiamo trovato dati in cache, salvali in session_state
+        if cached_data:
+            if cached_data.get('macro_data'):
+                st.session_state['last_macro_data'] = cached_data['macro_data']
+            if cached_data.get('pmi_data'):
+                st.session_state['last_pmi_data'] = cached_data['pmi_data']
+            if cached_data.get('cb_history_data'):
+                st.session_state['last_cb_history'] = cached_data['cb_history_data']
+            if cached_data.get('forex_prices'):
+                st.session_state['last_forex_prices'] = cached_data['forex_prices']
+            if cached_data.get('news_structured'):
+                st.session_state['last_news_structured'] = cached_data['news_structured']
+            
+            # Imposta anche i timestamps dalla data dell'analisi
+            if cached_data.get('cached_datetime'):
+                try:
+                    cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
+                    if ITALY_TZ:
+                        cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
+                    
+                    # Imposta timestamp per ogni tipo di dato presente
+                    if cached_data.get('macro_data'):
+                        st.session_state['timestamp_macro'] = cached_dt
+                    if cached_data.get('cb_history_data'):
+                        st.session_state['timestamp_cb_history'] = cached_dt
+                    if cached_data.get('pmi_data'):
+                        st.session_state['timestamp_pmi'] = cached_dt
+                    if cached_data.get('forex_prices'):
+                        st.session_state['timestamp_prices'] = cached_dt
+                    if cached_data.get('news_structured'):
+                        st.session_state['timestamp_news'] = cached_dt
+                except:
+                    pass
     
-    # Aggiorna timestamps se abbiamo recuperato dati dalla cache
-    if cached_data.get('cached_datetime') and not timestamps:
-        try:
-            cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
-            if ITALY_TZ:
-                cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
-            for dt in ['macro', 'pmi', 'cb_history', 'prices', 'news']:
-                if dt not in timestamps:
-                    timestamps[dt] = cached_dt
-                    st.session_state[f'timestamp_{dt}'] = cached_dt
-            all_fresh, freshness_details = get_all_data_freshness(timestamps)
-        except:
-            pass
+    # Ora recupera i dati dalla sessione
+    macro_data = st.session_state.get('last_macro_data')
+    pmi_data = st.session_state.get('last_pmi_data')
+    cb_history_data = st.session_state.get('last_cb_history')
+    forex_prices = st.session_state.get('last_forex_prices')
+    news_structured = st.session_state.get('last_news_structured', {})
+    
+    # Carica timestamps e calcola freshness
+    timestamps = load_data_timestamps(user_id)
+    all_fresh, freshness_details = get_all_data_freshness(timestamps)
     
     # --- SIDEBAR (Solo calendario) ---
     with st.sidebar:
