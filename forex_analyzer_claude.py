@@ -2804,12 +2804,15 @@ Se Risk Sentiment ≠ 0 → Score Geopolitica = 0 (già conteggiato!)
 - "Differenziale monetario favorevole" → già in Tassi Attuali!
 - "Safe-haven demand per tensioni" → già in Risk Sentiment!
 - "BOE dovish pesa negativamente" → già in Aspettative Tassi!
+- "Nessuna sorpresa economica significativa, BOC dovish pesa → -2" → **ERRORE GRAVE!** Se non ci sono sorprese → 0!
+- "Nessun dato rilevante → -1" → **ERRORE!** Nessun dato = 0, non negativo!
 
 ✅ **CORRETTE:**
 - "NFP 256k vs 180k atteso, sorpresa +76k → +1" (dato concreto con sorpresa)
 - "CPI 2.9% vs 2.6% atteso, sorpresa +0.3pp → +1" (dato concreto con sorpresa)
 - "Nessuna sorpresa significativa nei dati recenti → 0" (corretto!)
 - "Dati in linea con attese, geopolitica già in Risk Sentiment → 0" (corretto!)
+- "BOC dovish già conteggiato in Aspettative Tassi → 0" (corretto!)
 
 **NEL DUBBIO → DAI 0!**
 
@@ -2930,10 +2933,41 @@ Se Risk Sentiment ≠ 0 → Score Geopolitica = 0 (già conteggiato!)
 
 **News Catalyst richiede SORPRESE CONCRETE (Actual vs Forecast)!**
 
+## 🚨 ALGORITMO OBBLIGATORIO PER NEWS CATALYST 🚨
+
+**STEP 1:** Hai un dato concreto con Actual vs Forecast?
+- NO → **STOP! Score = 0**
+- SÌ → vai a Step 2
+
+**STEP 2:** La sorpresa è negli ultimi 7 giorni?
+- NO → **STOP! Score = 0**
+- SÌ → vai a Step 3
+
+**STEP 3:** Questo fattore è già conteggiato in un altro parametro?
+- SÌ (es: BC hawkish → già in Aspettative Tassi) → **STOP! Score = 0**
+- NO → Calcola il punteggio basato sulla tabella delle sorprese
+
+## 🚫 PAROLE VIETATE NELLE MOTIVAZIONI (se le scrivi → Score DEVE essere 0):
+
+| Se scrivi... | Allora il punteggio DEVE essere... |
+|--------------|-------------------------------------|
+| "nessuna sorpresa" | **0** |
+| "mancanza di dati" | **0** |
+| "BOC/BOJ/BOE/Fed/BCE/RBA/SNB dovish/hawkish" | **0** (già in Aspettative Tassi) |
+| "safe-haven" | **0** (già in Risk Sentiment) |
+| "tensioni geopolitiche" | **0** (già in Risk Sentiment) |
+| "differenziale tassi" | **0** (già in Tassi Attuali) |
+
+## ❌ ERRORE COMUNE DA EVITARE:
+**NON PUOI scrivere "Nessuna sorpresa economica... → -2"!**
+Se non ci sono sorprese → il punteggio È ZERO, non negativo!
+La "mancanza" di sorprese positive NON è una sorpresa negativa!
+
 - ❌ "BC hawkish/dovish" → GIÀ IN ASPETTATIVE TASSI → News Catalyst = 0
 - ❌ "Tassi alti/bassi" → GIÀ IN TASSI ATTUALI → News Catalyst = 0  
 - ❌ "Safe-haven/tensioni" → GIÀ IN RISK SENTIMENT → News Catalyst = 0
 - ❌ "Mancanza di dati positivi" → NON È UNA SORPRESA → News Catalyst = 0
+- ❌ "Nessuna sorpresa significativa... pesa negativamente" → CONTRADDIZIONE → News Catalyst = 0
 - ✅ "CPI 2.9% vs 2.6% atteso (+0.3pp sorpresa)" → CORRETTO, è una sorpresa concreta
 
 **Se non hai un dato Actual vs Forecast da citare → News Catalyst = 0**
