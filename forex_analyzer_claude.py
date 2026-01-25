@@ -9,7 +9,6 @@ from pathlib import Path
 import requests
 import hashlib
 import re
-import calendar
 
 # Timezone Italia (con fallback)
 try:
@@ -26,322 +25,6 @@ def get_italy_now():
     else:
         # Fallback: UTC + 1 ora (o +2 in estate, ma approssimativo)
         return datetime.utcnow() + timedelta(hours=1)
-
-
-# ============================================================================
-# CALENDARIO BANCHE CENTRALI 2025 (Date meeting ufficiali)
-# ============================================================================
-
-CB_MEETING_DATES_2025 = {
-    "USD": [  # Federal Reserve FOMC
-        "2025-01-29", "2025-03-19", "2025-05-07", 
-        "2025-06-18", "2025-07-30", "2025-09-17",
-        "2025-11-05", "2025-12-17"
-    ],
-    "EUR": [  # BCE / ECB
-        "2025-01-30", "2025-03-06", "2025-04-17",
-        "2025-06-05", "2025-07-17", "2025-09-11",
-        "2025-10-30", "2025-12-18"
-    ],
-    "GBP": [  # Bank of England
-        "2025-02-06", "2025-03-20", "2025-05-08",
-        "2025-06-19", "2025-08-07", "2025-09-18",
-        "2025-11-06", "2025-12-18"
-    ],
-    "JPY": [  # Bank of Japan
-        "2025-01-24", "2025-03-14", "2025-05-01",
-        "2025-06-13", "2025-07-31", "2025-09-19",
-        "2025-10-31", "2025-12-19"
-    ],
-    "CHF": [  # Swiss National Bank (trimestrale)
-        "2025-03-20", "2025-06-19", 
-        "2025-09-18", "2025-12-11"
-    ],
-    "AUD": [  # Reserve Bank of Australia
-        "2025-02-18", "2025-04-01", "2025-05-20",
-        "2025-07-08", "2025-08-12", "2025-09-30",
-        "2025-11-04", "2025-12-09"
-    ],
-    "CAD": [  # Bank of Canada
-        "2025-01-29", "2025-03-12", "2025-04-16",
-        "2025-06-04", "2025-07-30", "2025-09-17",
-        "2025-10-29", "2025-12-10"
-    ]
-}
-
-
-# ============================================================================
-# FUNZIONI FRESHNESS DATI (Regole Euristiche)
-# ============================================================================
-
-def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
-    """
-    Controlla se i dati sono aggiornati o da aggiornare.
-    
-    Args:
-        data_type: "macro", "cb_history", "pmi", "prices", "news"
-        last_updated: datetime dell'ultimo aggiornamento (o None se mai aggiornato)
-    
-    Returns:
-        {
-            "is_fresh": True/False,
-            "status": "🟢" o "🟠",
-            "message": "Descrizione stato",
-            "reason": "Motivo se da aggiornare"
-        }
-    """
-    now = get_italy_now()
-    
-    # Se non c'è timestamp, i dati non esistono
-    if last_updated is None:
-        return {
-            "is_fresh": False,
-            "status": "🟠",
-            "message": "Mai aggiornato",
-            "reason": "Nessun dato disponibile"
-        }
-    
-    # Rendi last_updated timezone-aware se necessario
-    if last_updated.tzinfo is None and ITALY_TZ:
-        last_updated = last_updated.replace(tzinfo=ITALY_TZ)
-    
-    age = now - last_updated
-    age_days = age.days
-    age_hours = age.total_seconds() / 3600
-    day_of_month = now.day
-    
-    # ===== PREZZI FOREX =====
-    if data_type == "prices":
-        # Da aggiornare se non aggiornati oggi dopo le 7:00
-        today_7am = now.replace(hour=7, minute=0, second=0, microsecond=0)
-        if now.hour >= 7 and last_updated < today_7am:
-            return {
-                "is_fresh": False,
-                "status": "🟠",
-                "message": f"Aggiornati ieri",
-                "reason": "Non aggiornati oggi"
-            }
-        return {
-            "is_fresh": True,
-            "status": "🟢",
-            "message": f"Aggiornati oggi",
-            "reason": ""
-        }
-    
-    # ===== NOTIZIE =====
-    if data_type == "news":
-        # Da aggiornare se non aggiornate oggi dopo le 7:00
-        today_7am = now.replace(hour=7, minute=0, second=0, microsecond=0)
-        if now.hour >= 7 and last_updated < today_7am:
-            return {
-                "is_fresh": False,
-                "status": "🟠",
-                "message": f"Aggiornate ieri",
-                "reason": "Non aggiornate oggi"
-            }
-        return {
-            "is_fresh": True,
-            "status": "🟢",
-            "message": f"Aggiornate oggi",
-            "reason": ""
-        }
-    
-    # ===== STORICO BANCHE CENTRALI =====
-    if data_type == "cb_history":
-        # Controlla se c'è stato un meeting DOPO last_updated
-        meetings_after = []
-        for currency, dates in CB_MEETING_DATES_2025.items():
-            for date_str in dates:
-                meeting_date = datetime.strptime(date_str, "%Y-%m-%d")
-                if ITALY_TZ:
-                    meeting_date = meeting_date.replace(tzinfo=ITALY_TZ)
-                # Meeting è passato E dopo l'ultimo aggiornamento
-                if last_updated.replace(tzinfo=None) < meeting_date.replace(tzinfo=None) <= now.replace(tzinfo=None):
-                    meetings_after.append(f"{currency} ({date_str})")
-        
-        if meetings_after:
-            return {
-                "is_fresh": False,
-                "status": "🟠",
-                "message": f"Meeting recenti: {', '.join(meetings_after[:3])}",
-                "reason": "Meeting BC avvenuti dopo ultimo aggiornamento"
-            }
-        
-        # Trova prossimo meeting
-        next_meetings = []
-        for currency, dates in CB_MEETING_DATES_2025.items():
-            for date_str in dates:
-                meeting_date = datetime.strptime(date_str, "%Y-%m-%d")
-                if meeting_date.replace(tzinfo=None) > now.replace(tzinfo=None):
-                    days_until = (meeting_date.replace(tzinfo=None) - now.replace(tzinfo=None)).days
-                    if days_until <= 7:
-                        next_meetings.append(f"{currency} tra {days_until}gg")
-                    break
-        
-        msg = f"Aggiornati {age_days}gg fa"
-        if next_meetings:
-            msg += f" | Prossimi: {', '.join(next_meetings[:2])}"
-        
-        return {
-            "is_fresh": True,
-            "status": "🟢",
-            "message": msg,
-            "reason": ""
-        }
-    
-    # ===== PMI =====
-    if data_type == "pmi":
-        # Periodi critici: 1-3 (PMI finale) e 22-24 (PMI flash)
-        in_pmi_period = (1 <= day_of_month <= 4) or (22 <= day_of_month <= 25)
-        
-        if in_pmi_period:
-            # Siamo in periodo PMI, controlla se aggiornati in questo periodo
-            if day_of_month <= 4:
-                period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            else:
-                period_start = now.replace(day=22, hour=0, minute=0, second=0, microsecond=0)
-            
-            if last_updated < period_start:
-                return {
-                    "is_fresh": False,
-                    "status": "🟠",
-                    "message": f"Nuovi PMI disponibili",
-                    "reason": f"Periodo PMI ({'Flash' if day_of_month >= 22 else 'Finale'}) - aggiorna!"
-                }
-        
-        # Fuori periodo critico, controlla solo età
-        if age_days > 20:
-            return {
-                "is_fresh": False,
-                "status": "🟠",
-                "message": f"Aggiornati {age_days}gg fa",
-                "reason": "Dati troppo vecchi"
-            }
-        
-        return {
-            "is_fresh": True,
-            "status": "🟢",
-            "message": f"Aggiornati {age_days}gg fa",
-            "reason": ""
-        }
-    
-    # ===== DATI MACRO (Inflazione, PIL, etc.) =====
-    if data_type == "macro":
-        # Periodo critico: 10-15 del mese (CPI)
-        in_cpi_period = 10 <= day_of_month <= 16
-        
-        if in_cpi_period:
-            period_start = now.replace(day=10, hour=0, minute=0, second=0, microsecond=0)
-            if last_updated < period_start:
-                return {
-                    "is_fresh": False,
-                    "status": "🟠",
-                    "message": f"Periodo CPI (10-15 del mese)",
-                    "reason": "Nuovi dati inflazione probabilmente disponibili"
-                }
-        
-        # Controlla età generale
-        if age_days > 7:
-            return {
-                "is_fresh": False,
-                "status": "🟠",
-                "message": f"Aggiornati {age_days}gg fa",
-                "reason": "Dati vecchi di oltre 7 giorni"
-            }
-        
-        return {
-            "is_fresh": True,
-            "status": "🟢",
-            "message": f"Aggiornati {age_days}gg fa",
-            "reason": ""
-        }
-    
-    # Default
-    return {
-        "is_fresh": True,
-        "status": "🟢",
-        "message": "OK",
-        "reason": ""
-    }
-
-
-def get_all_data_freshness(timestamps: dict) -> tuple[bool, dict]:
-    """
-    Controlla la freshness di tutti i tipi di dati.
-    
-    Args:
-        timestamps: dict con chiavi "macro", "cb_history", "pmi", "prices", "news"
-                   e valori datetime o None
-    
-    Returns:
-        (all_fresh: bool, details: dict con stato per ogni tipo)
-    """
-    data_types = ["macro", "cb_history", "pmi", "prices", "news"]
-    details = {}
-    all_fresh = True
-    
-    for dt in data_types:
-        last_updated = timestamps.get(dt)
-        freshness = check_data_freshness(dt, last_updated)
-        details[dt] = freshness
-        if not freshness["is_fresh"]:
-            all_fresh = False
-    
-    return all_fresh, details
-
-
-# ============================================================================
-# FUNZIONI GESTIONE TIMESTAMPS DATI
-# ============================================================================
-
-def save_data_timestamp(data_type: str, user_id: str):
-    """Salva il timestamp di aggiornamento per un tipo di dato."""
-    key = f"timestamp_{data_type}"
-    now = get_italy_now()
-    st.session_state[key] = now
-    
-    # Per ora salviamo solo in session_state
-    # La persistenza avviene attraverso l'analisi salvata che contiene i dati
-
-
-def load_data_timestamps(user_id: str) -> dict:
-    """Carica tutti i timestamps dei dati per un utente."""
-    timestamps = {}
-    data_types = ["macro", "cb_history", "pmi", "prices", "news"]
-    
-    # Prima controlla session_state
-    for dt in data_types:
-        key = f"timestamp_{dt}"
-        if key in st.session_state:
-            timestamps[dt] = st.session_state[key]
-    
-    # Se mancano timestamps, prova a recuperarli dall'ultima analisi salvata
-    if len(timestamps) < len(data_types):
-        try:
-            cached = get_latest_analysis_data(user_id)
-            if cached.get("cached_datetime"):
-                cached_dt = datetime.strptime(cached["cached_datetime"], "%Y-%m-%d_%H-%M-%S")
-                if ITALY_TZ:
-                    cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
-                
-                # Usa il datetime dell'analisi come fallback per i dati mancanti
-                data_keys = {
-                    "macro": "macro_data",
-                    "cb_history": "cb_history_data", 
-                    "pmi": "pmi_data",
-                    "prices": "forex_prices",
-                    "news": "news_structured"
-                }
-                for dt in data_types:
-                    data_key = data_keys.get(dt, f"{dt}_data")
-                    if dt not in timestamps and cached.get(data_key):
-                        timestamps[dt] = cached_dt
-                        st.session_state[f"timestamp_{dt}"] = cached_dt
-        except:
-            pass
-    
-    return timestamps
-
 
 # Import modulo dati macro da API ufficiali
 from macro_data_fetcher import MacroDataFetcher
@@ -955,50 +638,6 @@ def load_analysis(datetime_str: str, user_id: str) -> dict | None:
     return None
 
 
-def get_latest_analysis_data(user_id: str) -> dict:
-    """
-    Carica i dati dall'ultima analisi salvata per usarli come fallback.
-    
-    Returns:
-        Dict con i dati disponibili (macro_data, pmi_data, ecc.) o dict vuoto
-    """
-    cached_data = {}
-    
-    try:
-        # Ottieni lista analisi recenti
-        recent = get_user_analyses(user_id, limit=1)
-        if not recent or len(recent) == 0:
-            return cached_data
-        
-        # Trova il datetime key
-        datetime_key = recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime")
-        if not datetime_key:
-            return cached_data
-        
-        # Carica l'analisi completa
-        last_analysis = load_analysis(datetime_key, user_id)
-        if not last_analysis:
-            return cached_data
-        
-        # I dati sono dentro 'data' per Supabase, direttamente per locale
-        data_container = last_analysis.get('data', last_analysis)
-        
-        # Estrai tutti i dati disponibili
-        for key in ['macro_data', 'pmi_data', 'cb_history_data', 'forex_prices', 
-                    'economic_events', 'news_structured', 'links_structured']:
-            if key in data_container and data_container[key]:
-                cached_data[key] = data_container[key]
-        
-        # Aggiungi anche il datetime per mostrare quanto sono vecchi i dati
-        cached_data['cached_datetime'] = datetime_key
-        
-    except Exception as e:
-        # Se fallisce, ritorna dict vuoto
-        pass
-    
-    return cached_data
-
-
 def delete_analysis(datetime_str: str, user_id: str) -> bool:
     """Cancella un'analisi da Supabase. Gestisce sia analisi con user_id che legacy."""
     try:
@@ -1094,7 +733,6 @@ def get_analysis_type_label(analysis_type: str) -> str:
         "macro_only": "📊 Solo Macro",
         "news_only": "📰 Solo Notizie",
         "links_only": "📎 Solo Link",
-        "cb_history_only": "🏦 Solo Storico BC",
         "macro_news": "📊📰 Macro + Notizie",
         "macro_links": "📊📎 Macro + Link",
         "news_links": "📰📎 Notizie + Link",
@@ -1125,948 +763,147 @@ FOREX_PAIRS = [
     "AUD/CHF", "EUR/USD", "EUR/GBP", "GBP/USD",
 ]
 
-
-# ============================================================================
-# CONFIGURAZIONE BANCHE CENTRALI - Per scraping automatico storico decisioni
-# ============================================================================
-
-CENTRAL_BANK_CONFIG = {
-    "USD": {
-        "bank_name": "Federal Reserve",
-        "bank_short": "Fed",
-        "event_id": 168,  # interest-rate-decision-168
-        "country_codes": ["us"],  # Lista di country codes da provare
-        "rate_type": "range",
-    },
-    "EUR": {
-        "bank_name": "European Central Bank",
-        "bank_short": "ECB",
-        "event_id": 164,  # ecb-interest-rate-decision-164
-        "country_codes": ["eu", "us"],
-        "rate_type": "single",
-    },
-    "GBP": {
-        "bank_name": "Bank of England",
-        "bank_short": "BOE",
-        "event_id": 170,  # boe-interest-rate-decision-170
-        "country_codes": ["uk", "us"],
-        "rate_type": "single",
-    },
-    "JPY": {
-        "bank_name": "Bank of Japan",
-        "bank_short": "BOJ",
-        "event_id": 165,  # boj-interest-rate-decision-165
-        "country_codes": ["jp", "us"],
-        "rate_type": "single",
-    },
-    "CHF": {
-        "bank_name": "Swiss National Bank",
-        "bank_short": "SNB",
-        "event_id": 169,  # snb-interest-rate-decision-169
-        "country_codes": ["ch", "us"],
-        "rate_type": "single",
-    },
-    "AUD": {
-        "bank_name": "Reserve Bank of Australia",
-        "bank_short": "RBA",
-        "event_id": 171,  # interest-rate-decision-171 (RBA)
-        "country_codes": ["au", "us"],
-        "rate_type": "single",
-    },
-    "CAD": {
-        "bank_name": "Bank of Canada",
-        "bank_short": "BOC",
-        "event_id": 166,  # boc-interest-rate-decision-166
-        "country_codes": ["ca", "us"],
-        "rate_type": "single",
-    }
+# Volatilità tipica giornaliera per coppia (in % del prezzo)
+# Usata per calcolare gli scenari di prezzo
+PAIR_VOLATILITY = {
+    # Major pairs - volatilità più bassa
+    "EUR/USD": 0.50,
+    "GBP/USD": 0.65,
+    "USD/JPY": 0.55,
+    "USD/CHF": 0.55,
+    "AUD/USD": 0.60,
+    "USD/CAD": 0.55,
+    # Cross pairs - volatilità media/alta
+    "EUR/GBP": 0.45,
+    "EUR/JPY": 0.70,
+    "GBP/JPY": 0.90,  # Molto volatile
+    "EUR/CHF": 0.40,
+    "GBP/CHF": 0.70,
+    "AUD/JPY": 0.75,
+    "CAD/JPY": 0.70,
+    "EUR/AUD": 0.70,
+    "GBP/AUD": 0.85,
+    "EUR/CAD": 0.60,
+    "GBP/CAD": 0.75,
+    "AUD/CAD": 0.55,
+    "AUD/CHF": 0.60,
+    "CAD/CHF": 0.55,
 }
 
 
-def fetch_central_bank_history_from_api(currency: str) -> dict:
+def calculate_price_scenarios(pair: str, current_price: float, differential: int) -> dict:
     """
-    Recupera lo storico decisioni tassi da Investing.com JSON API.
-    Prova diversi country codes come fallback.
+    Calcola scenari di prezzo con probabilità basate sul differenziale.
+    
+    Args:
+        pair: Coppia forex (es. "EUR/USD")
+        current_price: Prezzo attuale
+        differential: Differenziale score_base - score_quote
     
     Returns:
-        dict con: current_rate, meetings (ultimi 2-3), trend
+        dict con scenari e probabilità
     """
-    config = CENTRAL_BANK_CONFIG.get(currency)
-    if not config:
-        return {"error": f"Currency {currency} not configured"}
+    if current_price is None or current_price <= 0:
+        return None
     
-    event_id = config["event_id"]
-    country_codes = config.get("country_codes", ["us"])
+    # Ottieni volatilità della coppia (default 0.6% se non trovata)
+    volatility_pct = PAIR_VOLATILITY.get(pair, 0.60)
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.investing.com/'
-    }
+    # Calcola range in punti
+    base_range = current_price * (volatility_pct / 100)
+    extended_range = current_price * (volatility_pct * 1.5 / 100)
     
-    last_error = None
-    
-    # Prova ogni country code finché uno funziona
-    for country in country_codes:
-        url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
-        
-        try:
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            if response.status_code != 200:
-                last_error = f"HTTP {response.status_code} for {country}"
-                continue
-            
-            data = response.json()
-            attr = data.get("attr", [])
-            
-            if not attr or len(attr) < 2:
-                last_error = f"Insufficient data for {country}"
-                continue
-            
-            # Dati trovati! Processa
-            # Prendi gli ultimi 3 meeting (per calcolare trend)
-            recent_meetings = attr[-3:] if len(attr) >= 3 else attr
-            recent_meetings.reverse()  # Più recente prima
-            
-            meetings = []
-            for i, m in enumerate(recent_meetings):
-                timestamp = m.get("timestamp", 0)
-                actual = m.get("actual")
-                actual_formatted = m.get("actual_formatted", "")
-                
-                # Converti timestamp in data
-                from datetime import datetime
-                try:
-                    date = datetime.fromtimestamp(timestamp / 1000)
-                    date_str = date.strftime("%Y-%m-%d")
-                    date_formatted = date.strftime("%b %d, %Y")
-                except:
-                    date_str = "N/A"
-                    date_formatted = "N/A"
-                
-                # Calcola variazione rispetto al meeting precedente
-                change = None
-                decision = "hold"
-                if i < len(recent_meetings) - 1:
-                    prev_actual = recent_meetings[i + 1].get("actual")
-                    if actual is not None and prev_actual is not None:
-                        try:
-                            diff = float(actual) - float(prev_actual)
-                            if abs(diff) < 0.001:  # Praticamente uguale
-                                decision = "hold"
-                                change = "0bp"
-                            elif diff > 0:
-                                decision = "hike"
-                                change = f"+{int(diff * 100)}bp"
-                            else:
-                                decision = "cut"
-                                change = f"{int(diff * 100)}bp"
-                        except:
-                            pass
-                
-                meetings.append({
-                    "date": date_str,
-                    "date_formatted": date_formatted,
-                    "rate": actual_formatted if actual_formatted else f"{actual}%",
-                    "decision": decision,
-                    "change": change if change else "N/A",
-                    "vote": "N/A",
-                    "dissent": None
-                })
-            
-            # Tasso attuale (ultimo meeting)
-            current_rate = meetings[0]["rate"] if meetings else "N/A"
-            
-            # Calcola trend basato su ultimi 2 meeting
-            trend_info = calculate_trend_from_meetings(meetings)
-            
-            return {
-                "bank_name": config["bank_name"],
-                "bank_short": config["bank_short"],
-                "current_rate": current_rate,
-                "meetings": meetings[:2],
-                "trend": trend_info["trend"],
-                "trend_label": trend_info["trend_label"],
-                "trend_emoji": trend_info["trend_emoji"],
-                "stance_hint": trend_info["stance_hint"],
-                "source_country": country  # Debug: quale country ha funzionato
-            }
-            
-        except Exception as e:
-            last_error = f"{country}: {str(e)[:50]}"
-            continue
-    
-    # Nessun country code ha funzionato
-    return {"error": last_error or "All country codes failed"}
-
-
-def calculate_trend_from_meetings(meetings: list) -> dict:
-    """
-    Calcola il trend basato sulle decisioni degli ultimi meeting.
-    """
-    if len(meetings) < 2:
-        return {"trend": "unknown", "trend_label": "Sconosciuto", "trend_emoji": "❓", "stance_hint": None}
-    
-    d1 = meetings[0].get("decision", "hold")  # Più recente
-    d2 = meetings[1].get("decision", "hold")  # Precedente
-    
-    # Logica trend
-    if d1 == "hike" and d2 == "hike":
-        return {"trend": "hiking", "trend_label": "Hiking", "trend_emoji": "🟢 ▲", "stance_hint": "hawkish"}
-    elif d1 == "cut" and d2 == "cut":
-        return {"trend": "cutting", "trend_label": "Cutting", "trend_emoji": "🔴 ▼", "stance_hint": "dovish"}
-    elif d1 == "hold" and d2 == "hold":
-        return {"trend": "holding", "trend_label": "Holding", "trend_emoji": "➖", "stance_hint": "neutral"}
-    elif d1 == "hike" and d2 == "hold":
-        return {"trend": "tightening", "trend_label": "Tightening", "trend_emoji": "🟢 ▲", "stance_hint": "hawkish"}
-    elif d1 == "hold" and d2 == "hike":
-        return {"trend": "pause_after_hike", "trend_label": "Pausa (post-rialzo)", "trend_emoji": "⏸️", "stance_hint": "hawkish"}
-    elif d1 == "cut" and d2 == "hold":
-        return {"trend": "easing", "trend_label": "Easing", "trend_emoji": "🔴 ▼", "stance_hint": "dovish"}
-    elif d1 == "hold" and d2 == "cut":
-        return {"trend": "pause_after_cut", "trend_label": "Pausa (post-taglio)", "trend_emoji": "⏸️", "stance_hint": "dovish"}
+    # Determina decimali in base alla coppia
+    if "JPY" in pair:
+        decimals = 2
     else:
-        return {"trend": "mixed", "trend_label": "Misto", "trend_emoji": "🔀", "stance_hint": None}
+        decimals = 4
+    
+    # Calcola livelli di prezzo
+    range_low = round(current_price - base_range, decimals)
+    range_high = round(current_price + base_range, decimals)
+    
+    base_strong_low = round(current_price + base_range, decimals)
+    base_strong_high = round(current_price + extended_range, decimals)
+    
+    quote_strong_low = round(current_price - extended_range, decimals)
+    quote_strong_high = round(current_price - base_range, decimals)
+    
+    # Calcola probabilità basate sul differenziale
+    if differential >= 7:
+        prob_base_strong = 65
+        prob_range = 25
+        prob_quote_strong = 10
+    elif differential >= 4:
+        prob_base_strong = 55
+        prob_range = 30
+        prob_quote_strong = 15
+    elif differential >= 1:
+        prob_base_strong = 45
+        prob_range = 35
+        prob_quote_strong = 20
+    elif differential == 0:
+        prob_base_strong = 33
+        prob_range = 34
+        prob_quote_strong = 33
+    elif differential >= -3:
+        prob_base_strong = 20
+        prob_range = 35
+        prob_quote_strong = 45
+    elif differential >= -6:
+        prob_base_strong = 15
+        prob_range = 30
+        prob_quote_strong = 55
+    else:  # <= -7
+        prob_base_strong = 10
+        prob_range = 25
+        prob_quote_strong = 65
+    
+    return {
+        "base_range": f"{range_low} - {range_high}",
+        "base_strong": f"{base_strong_low} - {base_strong_high}",
+        "quote_strong": f"{quote_strong_low} - {quote_strong_high}",
+        "prob_base_strong": prob_base_strong,
+        "prob_range": prob_range,
+        "prob_quote_strong": prob_quote_strong,
+        "current_price": round(current_price, decimals)
+    }
 
 
-def fetch_all_central_bank_history() -> dict:
-    """
-    Recupera lo storico di tutte le banche centrali.
-    """
-    import time
-    
-    all_history = {}
-    
-    for currency in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
-        result = fetch_central_bank_history_from_api(currency)
-        all_history[currency] = result
-        time.sleep(0.5)  # Rate limiting
-    
-    return all_history
-
-
-def get_central_bank_history_summary() -> dict:
-    """
-    Restituisce un riassunto dello storico formattato per visualizzazione e prompt.
-    """
-    all_history = fetch_all_central_bank_history()
-    
-    summary = {}
-    
-    for currency, data in all_history.items():
-        if "error" in data:
-            summary[currency] = {
-                "bank_name": CENTRAL_BANK_CONFIG.get(currency, {}).get("bank_name", currency),
-                "bank_short": CENTRAL_BANK_CONFIG.get(currency, {}).get("bank_short", currency),
-                "current_rate": "N/A",
-                "meeting_1": "N/A",
-                "meeting_2": "N/A",
-                "trend": "unknown",
-                "trend_label": "Errore",
-                "trend_emoji": "⚠️",
-                "stance_hint": None,
-                "next_meeting": "N/A"
-            }
-            continue
-        
-        meetings = data.get("meetings", [])
-        
-        # Formatta meeting 1 e 2
-        meeting_1 = "N/A"
-        meeting_2 = "N/A"
-        
-        if len(meetings) >= 1:
-            m1 = meetings[0]
-            vote_str = f" ({m1['vote']})" if m1.get('vote') and m1['vote'] != 'N/A' else ""
-            meeting_1 = f"{m1.get('change', 'N/A')} ({m1.get('date_formatted', 'N/A')}){vote_str}"
-        
-        if len(meetings) >= 2:
-            m2 = meetings[1]
-            vote_str = f" ({m2['vote']})" if m2.get('vote') and m2['vote'] != 'N/A' else ""
-            meeting_2 = f"{m2.get('change', 'N/A')} ({m2.get('date_formatted', 'N/A')}){vote_str}"
-        
-        summary[currency] = {
-            "bank_name": data.get("bank_name"),
-            "bank_short": data.get("bank_short"),
-            "current_rate": data.get("current_rate", "N/A"),
-            "meeting_1": meeting_1,
-            "meeting_2": meeting_2,
-            "trend": data.get("trend", "unknown"),
-            "trend_label": data.get("trend_label", "N/A"),
-            "trend_emoji": data.get("trend_emoji", "❓"),
-            "stance_hint": data.get("stance_hint"),
-            "next_meeting": "N/A"  # Da implementare separatamente
-        }
-    
-    return summary
+# ============================================================================
+# CONFIGURAZIONE PMI - INVESTING.COM IDs
+# ============================================================================
 
 PMI_CONFIG = {
     "USD": {
-        "manufacturing": {"id": 173, "name": "ism-manufacturing-pmi", "label": "ISM Manufacturing", "country": "us"},
-        "services": {"id": 176, "name": "ism-non-manufacturing-pmi", "label": "ISM Services", "country": "us"}
+        "manufacturing": {"id": 173, "name": "ism-manufacturing-pmi", "label": "ISM Manufacturing"},
+        "services": {"id": 176, "name": "ism-non-manufacturing-pmi", "label": "ISM Services"}
     },
     "EUR": {
-        "manufacturing": {"id": 201, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "eu"},
-        "services": {"id": 272, "name": "services-pmi", "label": "Services PMI", "country": "eu"}
+        "manufacturing": {"id": 201, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 272, "name": "services-pmi", "label": "Services PMI"}
     },
     "GBP": {
-        "manufacturing": {"id": 204, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "uk"},
-        "services": {"id": 274, "name": "services-pmi", "label": "Services PMI", "country": "uk"}
+        "manufacturing": {"id": 204, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 274, "name": "services-pmi", "label": "Services PMI"}
     },
     "JPY": {
-        "manufacturing": {"id": 202, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "jp"},
-        "services": {"id": 1912, "name": "services-pmi", "label": "Services PMI", "country": "jp"}
+        "manufacturing": {"id": 202, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 1912, "name": "services-pmi", "label": "Services PMI"}
     },
     "CHF": {
-        "manufacturing": {"id": 278, "name": "procure.ch-pmi", "label": "procure.ch PMI", "country": "ch"},
+        "manufacturing": {"id": 278, "name": "procure.ch-pmi", "label": "procure.ch PMI"},
         "services": None  # CHF Services PMI non disponibile su Investing.com
     },
     "AUD": {
-        "manufacturing": {"id": 1838, "name": "manufacturing-pmi", "label": "Manufacturing PMI", "country": "au"},
-        "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI", "country": "au"}
+        "manufacturing": {"id": 1838, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 1839, "name": "services-pmi", "label": "Services PMI"}
     },
     "CAD": {
-        "manufacturing": {"id": 185, "name": "ivey-pmi", "label": "Ivey PMI", "country": "ca"},
-        "services": None  # DuckDuckGo fallback cercherà Canada Services PMI
+        "manufacturing": {"id": 1029, "name": "manufacturing-pmi", "label": "Manufacturing PMI"},
+        "services": {"id": 2265, "name": "services-pmi", "label": "Services PMI"}
     }
 }
-
-# =============================================================================
-# CONFIGURAZIONE EVENTI ECONOMICI PER NEWS CATALYST
-# =============================================================================
-ECONOMIC_EVENTS_CONFIG = {
-    "USD": {
-        "nfp": {
-            "id": 227, 
-            "name": "nonfarm-payrolls", 
-            "label": "Nonfarm Payrolls",
-            "country": "us",
-            "unit": "k",
-            "thresholds": {"strong_pos": 100, "pos": 30, "neg": -30, "strong_neg": -100},
-            "impact": "high"
-        },
-        "cpi": {
-            "id": 733, 
-            "name": "cpi", 
-            "label": "CPI YoY",
-            "country": "us",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"  # Inflazione alta = hawkish = positivo per valuta
-        },
-        "gdp": {
-            "id": 375, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "us",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 300, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "us",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "high",
-            "interpretation": "inverse"  # Disoccupazione bassa = positivo
-        },
-        "retail_sales": {
-            "id": 256, 
-            "name": "retail-sales", 
-            "label": "Retail Sales MoM",
-            "country": "us",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        },
-        "jobless_claims": {
-            "id": 294, 
-            "name": "initial-jobless-claims", 
-            "label": "Initial Jobless Claims",
-            "country": "us",
-            "unit": "k",
-            "thresholds": {"strong_pos": -30, "pos": -15, "neg": 15, "strong_neg": 30},
-            "impact": "medium",
-            "interpretation": "inverse"  # Meno claims = positivo
-        }
-    },
-    "EUR": {
-        "cpi": {
-            "id": 68, 
-            "name": "cpi", 
-            "label": "CPI YoY",
-            "country": "eu",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 121, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "eu",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 304, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "eu",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "medium",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 212, 
-            "name": "retail-sales", 
-            "label": "Retail Sales MoM",
-            "country": "eu",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    "GBP": {
-        "cpi": {
-            "id": 67, 
-            "name": "cpi", 
-            "label": "CPI YoY",
-            "country": "uk",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 122, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "uk",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 305, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "uk",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "medium",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 256, 
-            "name": "retail-sales", 
-            "label": "Retail Sales MoM",
-            "country": "uk",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    "JPY": {
-        "cpi": {
-            "id": 722, 
-            "name": "national-cpi", 
-            "label": "CPI YoY",
-            "country": "jp",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 119, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "jp",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 495, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "jp",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "medium",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 492, 
-            "name": "retail-sales", 
-            "label": "Retail Sales YoY",
-            "country": "jp",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    "CHF": {
-        "cpi": {
-            "id": 328, 
-            "name": "cpi", 
-            "label": "CPI YoY",
-            "country": "ch",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 336, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "ch",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 327, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "ch",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "medium",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 335, 
-            "name": "retail-sales", 
-            "label": "Retail Sales YoY",
-            "country": "ch",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    "AUD": {
-        "cpi": {
-            "id": 329, 
-            "name": "cpi", 
-            "label": "CPI QoQ",
-            "country": "au",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 330, 
-            "name": "gdp", 
-            "label": "GDP QoQ",
-            "country": "au",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 323, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "au",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "high",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 331, 
-            "name": "retail-sales", 
-            "label": "Retail Sales MoM",
-            "country": "au",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    "CAD": {
-        "cpi": {
-            "id": 741, 
-            "name": "cpi", 
-            "label": "CPI YoY",
-            "country": "ca",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high",
-            "interpretation": "hawkish"
-        },
-        "gdp": {
-            "id": 234, 
-            "name": "gdp", 
-            "label": "GDP MoM",
-            "country": "ca",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.3, "pos": 0.2, "neg": -0.2, "strong_neg": -0.3},
-            "impact": "high"
-        },
-        "unemployment": {
-            "id": 298, 
-            "name": "unemployment-rate", 
-            "label": "Unemployment Rate",
-            "country": "ca",
-            "unit": "%",
-            "thresholds": {"strong_pos": -0.3, "pos": -0.2, "neg": 0.2, "strong_neg": 0.3},
-            "impact": "high",
-            "interpretation": "inverse"
-        },
-        "retail_sales": {
-            "id": 235, 
-            "name": "retail-sales", 
-            "label": "Retail Sales MoM",
-            "country": "ca",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "medium"
-        }
-    },
-    # Dati cinesi per correlazione AUD
-    "CNY": {
-        "gdp": {
-            "id": 461, 
-            "name": "chinese-gdp", 
-            "label": "GDP YoY",
-            "country": "cn",
-            "unit": "%",
-            "thresholds": {"strong_pos": 0.5, "pos": 0.3, "neg": -0.3, "strong_neg": -0.5},
-            "impact": "high",
-            "affects": ["AUD"]  # Correlazione con AUD
-        },
-        "trade_balance": {
-            "id": 464, 
-            "name": "trade-balance", 
-            "label": "Trade Balance",
-            "country": "cn",
-            "unit": "B",
-            "thresholds": {"strong_pos": 20, "pos": 10, "neg": -10, "strong_neg": -20},
-            "impact": "medium",
-            "affects": ["AUD"]
-        }
-    }
-}
-
-
-def fetch_economic_event_data(currency: str, event_key: str) -> dict:
-    """
-    Recupera i dati di un evento economico da Investing.com API JSON.
-    Restituisce actual, forecast (se disponibile), previous e calcola la sorpresa.
-    
-    Args:
-        currency: Codice valuta (USD, EUR, etc.)
-        event_key: Chiave evento (nfp, cpi, gdp, etc.)
-    
-    Returns:
-        dict con actual, forecast, previous, surprise, date, impact_score
-    """
-    config = ECONOMIC_EVENTS_CONFIG.get(currency, {}).get(event_key)
-    
-    if not config:
-        return {"error": f"Event {event_key} not configured for {currency}"}
-    
-    country = config.get("country", "us")
-    event_id = config["id"]
-    json_url = f"https://sbcharts.investing.com/events_charts/{country}/{event_id}.json"
-    
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Referer': 'https://www.investing.com/',
-        }
-        
-        response = requests.get(json_url, headers=headers, timeout=15)
-        
-        if response.status_code != 200:
-            return {"error": f"HTTP {response.status_code}", "source": json_url}
-        
-        data = response.json()
-        attr = data.get("attr", [])
-        
-        if len(attr) < 1:
-            return {"error": "No data", "source": json_url}
-        
-        # Ultimo dato (più recente)
-        latest = attr[-1]
-        previous_data = attr[-2] if len(attr) >= 2 else None
-        
-        actual = latest.get("actual")
-        forecast = latest.get("forecast")  # Potrebbe non esserci
-        revised = latest.get("revised")
-        timestamp = latest.get("timestamp", 0)
-        
-        # Converti timestamp in data
-        event_date = None
-        days_ago = None
-        if timestamp:
-            try:
-                from datetime import datetime, timedelta
-                event_date = datetime.fromtimestamp(timestamp / 1000)
-                days_ago = (datetime.now() - event_date).days
-            except:
-                pass
-        
-        # Valore precedente
-        previous = previous_data.get("actual") if previous_data else None
-        
-        # Calcola sorpresa (actual - forecast)
-        surprise = None
-        surprise_pct = None
-        if actual is not None and forecast is not None:
-            try:
-                surprise = float(actual) - float(forecast)
-                if float(forecast) != 0:
-                    surprise_pct = (surprise / abs(float(forecast))) * 100
-            except:
-                pass
-        
-        # Calcola impact score basato su soglie
-        impact_score = 0
-        thresholds = config.get("thresholds", {})
-        interpretation = config.get("interpretation", "normal")
-        
-        if surprise is not None:
-            if interpretation == "inverse":
-                # Per unemployment/jobless claims: sorpresa negativa è positiva
-                surprise = -surprise
-            
-            if surprise >= thresholds.get("strong_pos", 999):
-                impact_score = 2
-            elif surprise >= thresholds.get("pos", 999):
-                impact_score = 1
-            elif surprise <= thresholds.get("strong_neg", -999):
-                impact_score = -2
-            elif surprise <= thresholds.get("neg", -999):
-                impact_score = -1
-        
-        # Applica decadimento temporale
-        if days_ago is not None:
-            if days_ago > 7:
-                impact_score = 0  # Troppo vecchio
-            elif days_ago >= 5:
-                impact_score = int(impact_score * 0.25)
-            elif days_ago >= 3:
-                impact_score = int(impact_score * 0.5)
-            # 0-2 giorni: peso pieno
-        
-        return {
-            "event": config["label"],
-            "currency": currency,
-            "actual": actual,
-            "forecast": forecast,
-            "previous": previous,
-            "surprise": round(surprise, 2) if surprise is not None else None,
-            "surprise_pct": round(surprise_pct, 1) if surprise_pct is not None else None,
-            "impact_score": impact_score,
-            "date": event_date.strftime("%Y-%m-%d") if event_date else None,
-            "days_ago": days_ago,
-            "unit": config.get("unit", ""),
-            "impact_level": config.get("impact", "medium"),
-            "source": "Investing.com API"
-        }
-        
-    except Exception as e:
-        return {"error": str(e)[:100], "source": json_url}
-
-
-def fetch_all_economic_events(currencies: list = None) -> dict:
-    """
-    Recupera tutti gli eventi economici per le valute specificate.
-    
-    Returns:
-        dict con eventi per valuta e sommario
-    """
-    if currencies is None:
-        currencies = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
-    
-    all_events = {}
-    
-    for currency in currencies:
-        currency_events = {}
-        config = ECONOMIC_EVENTS_CONFIG.get(currency, {})
-        
-        for event_key in config.keys():
-            event_data = fetch_economic_event_data(currency, event_key)
-            if "error" not in event_data:
-                currency_events[event_key] = event_data
-        
-        if currency_events:
-            all_events[currency] = currency_events
-    
-    # Aggiungi dati CNY per correlazione AUD
-    if "AUD" in currencies:
-        cny_config = ECONOMIC_EVENTS_CONFIG.get("CNY", {})
-        cny_events = {}
-        for event_key in cny_config.keys():
-            event_data = fetch_economic_event_data("CNY", event_key)
-            if "error" not in event_data:
-                cny_events[event_key] = event_data
-        if cny_events:
-            all_events["CNY"] = cny_events
-    
-    return all_events
-
-
-def format_economic_events_for_claude(economic_events: dict) -> str:
-    """
-    Formatta gli eventi economici in testo per il prompt di Claude.
-    """
-    lines = []
-    lines.append("=" * 60)
-    lines.append("📊 DATI ECONOMICI RECENTI (per calcolo News Catalyst)")
-    lines.append("=" * 60)
-    lines.append("")
-    
-    for currency, events in economic_events.items():
-        if not events:
-            continue
-            
-        lines.append(f"### {currency}:")
-        for event_key, data in events.items():
-            if "error" in data:
-                continue
-            
-            actual = data.get("actual", "N/A")
-            forecast = data.get("forecast", "N/A")
-            surprise = data.get("surprise")
-            days_ago = data.get("days_ago", "?")
-            unit = data.get("unit", "")
-            event_name = data.get("event", event_key)
-            impact = data.get("impact_level", "medium")
-            
-            surprise_str = f"{surprise:+.2f}" if surprise is not None else "N/A"
-            impact_emoji = "⭐⭐⭐" if impact == "high" else "⭐⭐" if impact == "medium" else "⭐"
-            
-            # Indica se sorpresa è significativa
-            impact_score = data.get("impact_score", 0)
-            if impact_score >= 2:
-                signal = "🟢🟢 MOLTO POSITIVO"
-            elif impact_score == 1:
-                signal = "🟢 Positivo"
-            elif impact_score <= -2:
-                signal = "🔴🔴 MOLTO NEGATIVO"
-            elif impact_score == -1:
-                signal = "🔴 Negativo"
-            else:
-                signal = "⚪ Neutro"
-            
-            lines.append(f"  - {event_name} {impact_emoji}")
-            lines.append(f"    Actual: {actual}{unit} | Forecast: {forecast}{unit} | Sorpresa: {surprise_str}{unit}")
-            lines.append(f"    {days_ago} giorni fa | Impatto: {signal}")
-            lines.append("")
-    
-    # Aggiungi nota su correlazioni
-    lines.append("")
-    lines.append("📌 CORRELAZIONI IMPORTANTI:")
-    lines.append("  - AUD: considera anche dati CNY (Cina = primo partner commerciale)")
-    lines.append("  - CAD: considera anche prezzo petrolio")
-    lines.append("  - CHF/JPY: beneficiano da risk-off")
-    lines.append("")
-    
-    return "\n".join(lines)
-
-
-def fetch_pmi_from_investing_json(currency: str, pmi_type: str) -> dict:
-    """
-    Scarica i dati PMI dall'API JSON di Investing.com (più affidabile).
-    
-    Args:
-        currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
-        pmi_type: "manufacturing" o "services"
-    
-    Returns:
-        dict con: current, previous, delta, date, source
-    """
-    config = PMI_CONFIG.get(currency, {}).get(pmi_type)
-    
-    if config is None:
-        return {"current": None, "previous": None, "delta": None, "date": None, "source": "N/A"}
-    
-    # API JSON endpoint con country code corretto
-    country = config.get("country", "us")
-    json_url = f"https://sbcharts.investing.com/events_charts/{country}/{config['id']}.json"
-    
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Referer': 'https://www.investing.com/',
-        }
-        
-        response = requests.get(json_url, headers=headers, timeout=15)
-        
-        if response.status_code != 200:
-            return {"current": None, "previous": None, "delta": None, "source": json_url, "error": f"HTTP {response.status_code}"}
-        
-        data = response.json()
-        
-        # Estrai dati dall'array "attr" (contiene i valori formattati)
-        attr = data.get("attr", [])
-        
-        if len(attr) >= 2:
-            # L'ultimo elemento è il più recente
-            current_data = attr[-1]
-            previous_data = attr[-2]
-            
-            current_value = current_data.get("actual")
-            previous_value = previous_data.get("actual")
-            
-            # Verifica che siano numeri validi per PMI (30-70)
-            if current_value and 30 <= float(current_value) <= 70:
-                current_value = float(current_value)
-            else:
-                current_value = None
-                
-            if previous_value and 30 <= float(previous_value) <= 70:
-                previous_value = float(previous_value)
-            else:
-                previous_value = None
-            
-            delta = None
-            if current_value is not None and previous_value is not None:
-                delta = round(current_value - previous_value, 1)
-            
-            return {
-                "current": current_value,
-                "previous": previous_value,
-                "delta": delta,
-                "date": None,
-                "source": "Investing.com API",
-                "label": config['label']
-            }
-        
-        elif len(attr) == 1:
-            current_data = attr[0]
-            current_value = current_data.get("actual")
-            
-            if current_value and 30 <= float(current_value) <= 70:
-                return {
-                    "current": float(current_value),
-                    "previous": None,
-                    "delta": None,
-                    "date": None,
-                    "source": "Investing.com API",
-                    "label": config['label']
-                }
-        
-        return {"current": None, "previous": None, "delta": None, "source": json_url, "error": "No data in response"}
-        
-    except Exception as e:
-        return {"current": None, "previous": None, "delta": None, "source": json_url, "error": str(e)[:50]}
 
 
 def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5) -> dict:
@@ -2135,9 +972,7 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5)
                 r'Actual\s+([0-9]+\.?[0-9]*)',
                 r'Actual[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
                 r'"actual"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-                r'Actual.*?([0-9]{2}\.[0-9]{1,2})',  # Fixed: 1-2 decimali
-                r'PMI[+\s]+([0-9]{2}\.[0-9]{1,2})',  # Pattern per Twitter share: PMI+46.50
-                r'event_last_actual["\s:]+([0-9]{2}\.[0-9]{1,2})',  # JSON data
+                r'Actual.*?([0-9]{2}\.[0-9])',
             ]
             
             for pattern in actual_patterns:
@@ -2157,8 +992,7 @@ def fetch_pmi_from_investing(currency: str, pmi_type: str, max_retries: int = 5)
                 r'Previous\s+([0-9]+\.?[0-9]*)',
                 r'Previous[:\s]*</span>\s*<span[^>]*>([0-9]+\.?[0-9]*)',
                 r'"previous"\s*:\s*"?([0-9]+\.?[0-9]*)"?',
-                r'Previous.*?([0-9]{2}\.[0-9]{1,2})',  # Fixed: 1-2 decimali
-                r'event_last_previous["\s:]+([0-9]{2}\.[0-9]{1,2})',  # JSON data
+                r'Previous.*?([0-9]{2}\.[0-9])',
             ]
             
             for pattern in previous_patterns:
@@ -2379,88 +1213,9 @@ def fetch_chf_services_pmi_tradingeconomics() -> dict:
     return {"current": None, "previous": None, "delta": None, "date": None, "source": url, "error": "Max retries exceeded"}
 
 
-def fetch_pmi_via_duckduckgo(currency: str, pmi_type: str) -> dict:
-    """
-    Fallback: cerca i dati PMI più recenti via DuckDuckGo.
-    
-    Args:
-        currency: Codice valuta (USD, EUR, GBP, JPY, CHF, AUD, CAD)
-        pmi_type: "manufacturing" o "services"
-    
-    Returns:
-        dict con: current, previous, delta, date, source
-    """
-    currency_names = {
-        "USD": "US ISM" if pmi_type == "manufacturing" else "US ISM Non-Manufacturing",
-        "EUR": "Eurozone",
-        "GBP": "UK",
-        "JPY": "Japan Jibun Bank",
-        "CHF": "Switzerland procure.ch" if pmi_type == "manufacturing" else "Switzerland Services",
-        "AUD": "Australia",
-        "CAD": "Canada Ivey" if pmi_type == "manufacturing" else "Canada Services"
-    }
-    
-    search_term = f"{currency_names.get(currency, currency)} {pmi_type} PMI January 2026"
-    
-    try:
-        results = DDGS().text(search_term, max_results=5)
-        
-        current_value = None
-        previous_value = None
-        
-        for r in results:
-            text = r.get('body', '') + ' ' + r.get('title', '')
-            
-            # Cerca pattern come "PMI 47.9" o "came in at 52.3"
-            pmi_patterns = [
-                r'PMI[:\s]+(\d{2}\.\d)',
-                r'(?:came in|fell to|rose to|at|to)\s+(\d{2}\.\d)',
-                r'(\d{2}\.\d)\s*(?:in|for|from)',
-                r'(?:actual|reading)[:\s]+(\d{2}\.\d)',
-            ]
-            
-            for pattern in pmi_patterns:
-                match = re.search(pattern, text, re.IGNORECASE)
-                if match:
-                    try:
-                        val = float(match.group(1))
-                        if 30 <= val <= 70:  # Range valido per PMI
-                            if current_value is None:
-                                current_value = val
-                            elif previous_value is None and val != current_value:
-                                previous_value = val
-                            break
-                    except:
-                        pass
-            
-            if current_value and previous_value:
-                break
-        
-        # Calcola delta
-        delta = None
-        if current_value is not None and previous_value is not None:
-            delta = round(current_value - previous_value, 1)
-        
-        if current_value is not None:
-            return {
-                "current": current_value,
-                "previous": previous_value,
-                "delta": delta,
-                "date": None,
-                "source": "DuckDuckGo Search",
-                "label": f"{pmi_type.capitalize()} PMI"
-            }
-        
-        return {"current": None, "previous": None, "delta": None, "date": None, "source": "DuckDuckGo Search", "error": "No PMI found"}
-        
-    except Exception as e:
-        return {"current": None, "previous": None, "delta": None, "date": None, "source": "DuckDuckGo Search", "error": str(e)}
-
-
 def fetch_all_pmi_data() -> dict:
     """
     Recupera tutti i dati PMI per le 7 valute.
-    Priorità: 1) API JSON Investing.com, 2) HTML scraping, 3) DuckDuckGo
     
     Returns:
         dict con struttura:
@@ -2480,58 +1235,20 @@ def fetch_all_pmi_data() -> dict:
         pmi_data[currency] = {}
         
         # Manufacturing PMI
-        # 1) Prova API JSON (più affidabile)
-        result = fetch_pmi_from_investing_json(currency, "manufacturing")
+        pmi_data[currency]["manufacturing"] = fetch_pmi_from_investing(currency, "manufacturing")
         
-        # 2) Se fallisce, prova HTML scraping
-        if result.get("current") is None:
-            time.sleep(1.0)
-            result = fetch_pmi_from_investing(currency, "manufacturing")
-        
-        # 3) Se ancora fallisce, prova DuckDuckGo
-        if result.get("current") is None:
-            time.sleep(0.5)
-            fallback_result = fetch_pmi_via_duckduckgo(currency, "manufacturing")
-            if fallback_result.get("current") is not None:
-                result = fallback_result
-        
-        pmi_data[currency]["manufacturing"] = result
-        
-        # Delay tra richieste
+        # Delay per evitare rate limiting (1.5 secondi tra richieste)
         time.sleep(1.5)
         
         # Services PMI
-        # CHF e CAD hanno solo PMI unico (non separato manufacturing/services)
-        if currency in ["CHF", "CAD"]:
-            # Nessun Services PMI disponibile - non è un errore
-            result = {
-                "current": None, 
-                "previous": None, 
-                "delta": None, 
-                "date": None, 
-                "source": "N/D",  # Non Disponibile (non errore)
-                "not_available": True  # Flag per indicare che è normale
-            }
+        if currency == "CHF":
+            # CHF Services da TradingEconomics
+            pmi_data[currency]["services"] = fetch_chf_services_pmi_tradingeconomics()
         else:
-            # 1) Prova API JSON
-            result = fetch_pmi_from_investing_json(currency, "services")
-            
-            # 2) Se fallisce, prova HTML scraping
-            if result.get("current") is None:
-                time.sleep(1.0)
-                result = fetch_pmi_from_investing(currency, "services")
-            
-            # 3) Se ancora fallisce, prova DuckDuckGo (solo per valute con Services PMI)
-            if result.get("current") is None:
-                time.sleep(0.5)
-                fallback_result = fetch_pmi_via_duckduckgo(currency, "services")
-                if fallback_result.get("current") is not None:
-                    result = fallback_result
+            pmi_data[currency]["services"] = fetch_pmi_from_investing(currency, "services")
         
-        pmi_data[currency]["services"] = result
-        
-        # Delay tra valute (2 secondi)
-        time.sleep(2.0)
+        # Delay tra valute
+        time.sleep(1.0)
     
     return pmi_data
 
@@ -2570,42 +1287,11 @@ def get_pmi_interpretation(manuf_delta: float, services_delta: float) -> tuple:
     return trend_text, interpretation
 
 
-def get_pmi_interpretation_single(pmi_delta: float) -> tuple:
-    """
-    Restituisce interpretazione e trend per valute con PMI unico (CHF, CAD).
-    
-    Returns:
-        (trend_text, interpretation)
-    """
-    if pmi_delta is None:
-        pmi_delta = 0
-    
-    # Trend solo per il PMI unico
-    pmi_trend = "↑" if pmi_delta > 0.1 else "↓" if pmi_delta < -0.1 else "→"
-    
-    # Testo indica che è PMI unico
-    trend_text = f"PMI{pmi_trend}"
-    
-    # Interpretazione basata solo sul PMI unico
-    if pmi_delta > 0.5:
-        interpretation = "Bullish"
-    elif pmi_delta > 0.1:
-        interpretation = "Misto+"
-    elif pmi_delta < -0.5:
-        interpretation = "Bearish"
-    elif pmi_delta < -0.1:
-        interpretation = "Misto-"
-    else:
-        interpretation = "Neutro"
-    
-    return trend_text, interpretation
-
-
 # ============================================================================
 # SYSTEM PROMPT PER ANALISI GLOBALE
 # ============================================================================
 
-SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 7 VALUTE singolarmente.
+SYSTEM_PROMPT_GLOBAL = """Sei un analista macroeconomico forex senior. Devi analizzare 19 coppie forex separatamente.
 
 ## ⚠️ REGOLA CRITICA: USA I DATI FORNITI, NON CONOSCENZE OBSOLETE!
 
@@ -2613,17 +1299,17 @@ Le tue conoscenze potrebbero essere OBSOLETE. Devi:
 1. **LEGGERE ATTENTAMENTE** tutti i dati macro, PMI e notizie web forniti
 2. **BASARTI SOLO** sulle informazioni fornite nel prompt
 3. **NON ASSUMERE** che le banche centrali mantengano politiche passate
+4. **VERIFICARE** sempre nelle notizie web prima di scrivere
 
-## APPROCCIO: ANALISI PER VALUTA
+## REGOLA FONDAMENTALE: CONFRONTO DIRETTO TRA VALUTE
 
-Devi analizzare **7 VALUTE SEPARATAMENTE**: EUR, USD, GBP, JPY, CHF, AUD, CAD
+Devi fare **19 ANALISI INDIPENDENTI**, una per ogni coppia forex.
+Per ogni coppia (es: EUR/USD) devi:
+1. **CONFRONTARE DIRETTAMENTE** le due valute su ogni parametro
+2. Assegnare punteggi basati su **CHI HA IL VANTAGGIO RELATIVO**
+3. I punteggi sono RELATIVI al confronto, NON assoluti
 
-Per ogni valuta assegna un punteggio **ASSOLUTO** su 8 parametri.
-Il sistema calcolerà automaticamente i differenziali per le 19 coppie forex.
-
-**Vantaggi di questo approccio:**
-- Coerenza garantita: se EUR > GBP > CAD, allora EUR/CAD sarà coerente
-- Analisi più precisa e meno soggetta a errori
+⚠️ LA STESSA VALUTA PUÒ AVERE PUNTEGGI DIVERSI IN COPPIE DIVERSE!
 
 ## LINGUA: TUTTO IN ITALIANO
 
@@ -2631,372 +1317,248 @@ Il sistema calcolerà automaticamente i differenziali per le 19 coppie forex.
 Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ## ═══════════════════════════════════════════════════════════════════
-## SISTEMA DI SCORING - 8 PARAMETRI CON CRITERI OGGETTIVI
+## SISTEMA DI SCORING - 7 PARAMETRI CON CRITERI OGGETTIVI
 ## ═══════════════════════════════════════════════════════════════════
 
 ### 1️⃣ TASSI ATTUALI [-1 a +1]
-**Logica:** Tassi più alti attirano capitali (carry trade).
+**Logica:** Il differenziale di tasso (carry) attrae flussi di capitale verso la valuta con rendimento maggiore.
 
-| Tasso BC | Score | Motivo |
-|----------|-------|--------|
-| ≥ 3.5% | +1 | Rendimento attraente, flussi in entrata |
-| 1.5% - 3.49% | 0 | Rendimento medio |
-| < 1.5% | -1 | Rendimento basso, flussi in uscita |
+| Spread (Base - Quote) | Score Base | Score Quote |
+|-----------------------|------------|-------------|
+| ≥ +150 bp             | +1         | -1          |
+| +50 bp a +149 bp      | +1         | 0           |
+| -49 bp a +49 bp       | 0          | 0           |
+| -50 bp a -149 bp      | 0          | +1          |
+| ≤ -150 bp             | -1         | +1          |
+
+**Esempio:** EUR (2.15%) vs USD (3.75%) → Spread = -160bp → EUR: -1, USD: +1
 
 ---
 
 ### 2️⃣ ASPETTATIVE TASSI [-2 a +2] ⭐ PESO DOPPIO
-**Logica:** Il mercato guarda avanti. Le aspettative future contano più del presente.
+**Logica:** Il mercato guarda avanti. Le aspettative sui tassi futuri sono più importanti dei tassi attuali.
 
+**Criteri per singola valuta:**
 | Scenario | Score |
 |----------|-------|
-| BC hawkish, rialzi attesi, inflazione problematica | +2 |
-| BC neutrale con bias hawkish, hold prolungato atteso | +1 |
-| BC neutrale, incertezza elevata | 0 |
-| BC leggermente dovish, tagli probabili entro 3-6 mesi | -1 |
-| BC molto dovish, in ciclo di tagli attivo | -2 |
+| BC hawkish con rialzi attesi O prob. taglio <20% nei prossimi 3 mesi | +2 |
+| BC neutrale/leggermente hawkish O prob. taglio 20-40% | +1 |
+| BC neutrale O incertezza elevata | 0 |
+| BC leggermente dovish O prob. taglio 60-80% | -1 |
+| BC molto dovish con tagli attesi O prob. taglio >80% | -2 |
 
-⚠️ USA SOLO LE NOTIZIE WEB E LO STORICO BC FORNITI per determinare stance!
+**Confronto:** Assegna score a ciascuna valuta, poi il vantaggio relativo determina i punti.
+
+⚠️ USA SOLO LE NOTIZIE WEB FORNITE per determinare stance e probabilità!
 
 ---
 
 ### 3️⃣ INFLAZIONE [-1 a +1]
-**Logica FOREX:** Inflazione alta → BC non può tagliare → tassi alti → valuta forte
+**Logica FOREX:** L'inflazione influenza la POLITICA MONETARIA. Per la VALUTA:
+- Inflazione ALTA → BC non può tagliare i tassi → tassi restano ALTI → VALUTA FORTE
+- Inflazione BASSA → BC può tagliare i tassi → tassi scendono → VALUTA DEBOLE
 
-| Inflazione | Score | Motivo |
-|------------|-------|--------|
-| > 3% | +1 | Pressione hawkish, BC non può tagliare |
-| 2% - 3% | 0 | Al target, BC ha flessibilità |
-| < 2% | -1 | Sotto target, BC può/deve tagliare |
+⚠️ ATTENZIONE: Questo è l'opposto della logica economica tradizionale!
 
----
+| Scenario | Score | Motivo |
+|----------|-------|--------|
+| Inflazione > 3% | +1 | Pressione HAWKISH - BC non può tagliare, valuta forte |
+| Inflazione 2% - 3% | 0 | Al TARGET - BC ha flessibilità, neutro |
+| Inflazione < 2% | -1 | Pressione DOVISH - BC può/deve tagliare, valuta debole |
 
-### 4️⃣ CRESCITA/PIL [-1 a +1]
-**Logica:** Crescita sana attira investimenti e rafforza la valuta.
-
-| PIL YoY | Score | Condizione |
-|---------|-------|------------|
-| > 2% | +1 | Solo se inflazione < 4% (crescita sostenibile) |
-| 1% - 2% | 0 | Crescita moderata |
-| < 1% | -1 | Stagnazione o recessione |
-
-⚠️ PIL alto con inflazione alta = 0 (crescita non sostenibile)
+**Confronto DIRETTO:** 
+- Chi ha inflazione PIÙ ALTA ha vantaggio (pressione per tassi alti)
+- Differenziale >1% = vantaggio significativo
+- Considerare anche le aspettative future dalle news
 
 ---
 
-### 5️⃣ PMI [-1 a +1]
-**Logica:** PMI > 50 = espansione, PMI < 50 = contrazione
+### 4️⃣ CRESCITA/PIL [-1 a +1] - LAGGING INDICATOR
+**Logica:** Il PIL da solo non basta. Va contestualizzato con inflazione e sostenibilità.
 
-**⚠️ NOTA IMPORTANTE PER CHF E CAD:**
-- **CHF** ha solo il **procure.ch PMI** (indice unico, non separato manufacturing/services)
-- **CAD** ha solo l'**Ivey PMI** (indice unico che copre tutta l'economia)
-- Per queste valute, NON fare media pesata ma usa direttamente il PMI unico disponibile
+| Scenario | Score |
+|----------|-------|
+| PIL >2% + inflazione controllata + trend stabile | +1 (crescita sana) |
+| PIL 1%-2% + situazione bilanciata | 0 (crescita moderata) |
+| PIL <1% O trend in forte decelerazione | -1 (rischio recessione) |
+| PIL alto MA inflazione fuori controllo | 0 (NON +1! crescita non sostenibile) |
+| STAGFLAZIONE (PIL basso + inflazione alta) | -1 (scenario peggiore) |
 
-**PESI SETTORIALI per valuta (solo per valute con PMI separati):**
-| Valuta | Peso Manifattura | Peso Servizi | Motivo |
-|--------|------------------|--------------|--------|
-| EUR | 50% | 50% | Economia mista |
-| USD | 30% | 70% | Economia servizi-dominante |
-| GBP | 20% | 80% | Servizi finanziari dominanti |
-| JPY | 60% | 40% | Export manifatturiero |
-| AUD | 50% | 50% | Mining + servizi |
-| **CHF** | 100% | - | **PMI UNICO (procure.ch)** |
-| **CAD** | 100% | - | **PMI UNICO (Ivey)** |
+**Confronto DIRETTO:**
+- Differenziale PIL > 1.5pp → vantaggio netto per chi ha PIL maggiore
+- Differenziale PIL 0.5-1.5pp → vantaggio leggero
+- Differenziale PIL < 0.5pp → situazione simile, considera altri fattori
 
-**Calcolo:** 
-- Per EUR, USD, GBP, JPY, AUD: PMI_pesato = (Manuf × Peso_M) + (Serv × Peso_S)
-- Per CHF, CAD: usa direttamente il valore PMI unico
+---
 
-| PMI (pesato o unico) | Score |
-|----------------------|-------|
-| > 52 | +1 |
-| 48 - 52 | 0 |
-| < 48 | -1 |
+### 5️⃣ PMI [-1 a +1] - LEADING INDICATOR
+**Logica:** PMI anticipa il PIL di 3-6 mesi. Considera livello (>50 = espansione) E direzione (delta).
+
+**⚠️ PESI DIVERSI PER STRUTTURA ECONOMICA:**
+| Valuta | Peso Services | Peso Manufacturing | Motivo |
+|--------|---------------|-------------------|--------|
+| USD    | 70%           | 30%               | Economia basata su servizi |
+| EUR    | 50%           | 50%               | Mista (Germania manifattura + resto servizi) |
+| GBP    | 70%           | 30%               | Finanza e servizi professionali |
+| JPY    | 40%           | 60%               | Export e manifattura (auto, elettronica) |
+| CHF    | 60%           | 40%               | Finanza + pharma |
+| AUD    | 50%           | 50%               | Mining + servizi domestici |
+| CAD    | 50%           | 50%               | Energia + servizi |
+
+**Criteri di valutazione:**
+| Condizione | Valutazione |
+|------------|-------------|
+| PMI ponderato ≥52 + Delta positivo | Forte espansione (+1) |
+| PMI ponderato 50-52 + Delta positivo | Espansione moderata (+1) |
+| PMI ponderato 50-52 + Delta negativo | Rallentamento (0) |
+| PMI ponderato 48-50 + Delta positivo | Contrazione in recupero (0) |
+| PMI ponderato 48-50 + Delta negativo | Contrazione in peggioramento (-1) |
+| PMI ponderato <48 | Contrazione significativa (-1) |
+
+**Confronto DIRETTO:** Chi ha momentum economico migliore considerando i pesi settoriali?
 
 ---
 
 ### 6️⃣ RISK SENTIMENT [-1 a +1]
-**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso cicliche.
+**Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso valute cicliche.
 
 **Classificazione valute:**
 - **Safe-haven:** USD, JPY, CHF
-- **Cicliche:** AUD, CAD, GBP
-- **Semi-ciclica:** EUR
+- **Cicliche/Commodity:** AUD, CAD, GBP
+- **Semi-cicliche:** EUR
 
-**Determina il regime di mercato dalle notizie:**
-- VIX > 25 O tensioni geopolitiche acute → **Risk-OFF**
-- VIX < 18 E sentiment positivo → **Risk-ON**
+**Determinazione regime mercato:**
+- VIX > 25 O equity in forte calo O tensioni geopolitiche acute → **Risk-OFF**
+- VIX < 18 E equity positivo E sentiment ottimista → **Risk-ON**
 - Altrimenti → **Neutro**
 
-| Regime | Safe-Haven | Cicliche | Semi-cicliche |
-|--------|------------|----------|---------------|
-| Risk-OFF | +1 | -1 | 0 |
-| Neutro | 0 | 0 | 0 |
-| Risk-ON | -1 | +1 | 0 |
+**Matrice punteggi in base al TIPO di coppia:**
+| Tipo Coppia | Risk-OFF | Neutro | Risk-ON |
+|-------------|----------|--------|---------|
+| Ciclica vs Safe-haven (es: AUD/JPY) | Ciclica: -1, Safe: +1 | 0, 0 | Ciclica: +1, Safe: -1 |
+| Semi-ciclica vs Safe-haven (es: EUR/USD) | Semi: -1, Safe: +1 | 0, 0 | Semi: +1, Safe: -1 |
+| Entrambe cicliche (es: AUD/CAD) | 0, 0 | 0, 0 | 0, 0 |
+| Entrambe safe-haven (es: USD/JPY) | Analisi specifica | 0, 0 | Analisi specifica |
 
 ---
 
 ### 7️⃣ BILANCIA/FISCALE [-1 a +1]
-**Logica:** Importante nel lungo termine. Peso solo se notizie specifiche.
+**Logica:** Importante nel lungo termine, meno nel breve. Assegnare peso solo se notizie specifiche.
 
 | Scenario | Score |
 |----------|-------|
-| Current Account surplus + debito gestibile | +1 |
-| Situazione nella media O nessuna notizia | 0 |
-| Deficit gemelli O crisi debito in corso | -1 |
+| Current Account surplus >2% PIL + debito gestibile | +1 |
+| Situazione nella media O nessuna notizia rilevante | 0 |
+| Deficit gemelli elevati O crisi debito in corso | -1 |
 
-**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito → 0
-
----
-
-### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
-
-**Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast) che NON sono già valutate in altri parametri.
-
-## 🚨🚨🚨 REGOLA FONDAMENTALE 🚨🚨🚨
-
-**News Catalyst valuta SOLO notizie che NON RIENTRANO negli altri 7 parametri!**
-
-I seguenti temi sono **GIÀ VALUTATI** in altri parametri e **NON POSSONO** essere usati in News Catalyst:
-
-| Tema | Parametro che lo valuta | In News Catalyst = |
-|------|-------------------------|-------------------|
-| Tassi di interesse, carry trade | **Tassi Attuali** | ❌ **0** |
-| BC hawkish/dovish, tagli/rialzi attesi | **Aspettative Tassi** | ❌ **0** |
-| CPI, inflazione, deflazione, prezzi | **Inflazione** | ❌ **0** |
-| PIL, GDP, crescita, recessione | **Crescita/PIL** | ❌ **0** |
-| PMI, manifatturiero, servizi, espansione/contrazione | **PMI** | ❌ **0** |
-| Safe-haven, risk-off/on, tensioni geopolitiche, VIX | **Risk Sentiment** | ❌ **0** |
-| Debito, deficit, bilancia commerciale | **Bilancia/Fiscale** | ❌ **0** |
-
-## ⛔ ESEMPI DI ERRORI DA EVITARE ⛔
-
-❌ **CHF: "PMI manifatturiero crollo -3.9 punti → -2"**
-   → **ERRORE!** Il PMI è già valutato nel parametro PMI! → News Catalyst = **0**
-
-❌ **CAD: "BOC dovish stance pesa negativamente → -2"**  
-   → **ERRORE!** La stance BOC è già in Aspettative Tassi! → News Catalyst = **0**
-
-❌ **JPY: "BOJ hawkish unica nel G7 → +2"**
-   → **ERRORE!** La stance BOJ è già in Aspettative Tassi! → News Catalyst = **0**
-
-❌ **USD: "Inflazione sopra target → +1"**
-   → **ERRORE!** L'inflazione è già nel parametro Inflazione! → News Catalyst = **0**
-
-## ✅ COSA PUÒ ESSERE VALUTATO IN NEWS CATALYST
-
-**SOLO questi tipi di notizie (se avvenute negli ultimi 7 giorni):**
-
-1. **Sorprese su dati SECONDARI** (non coperti da altri parametri):
-   - Retail Sales sorpresa significativa
-   - Trade Balance sorpresa significativa  
-   - Employment Change (non NFP per USD)
-   - Consumer Confidence sorpresa
-   - Industrial Production sorpresa
-
-2. **Eventi geopolitici NUOVI** (<48h, NON già in Risk Sentiment):
-   - Annuncio improvviso di tariffe/sanzioni
-   - Crisi politica nuova
-   - Elezioni con risultato a sorpresa
-
-## ALGORITMO OBBLIGATORIO
-
-```
-STEP 1: La notizia riguarda tassi/inflazione/PIL/PMI/sentiment/bilancia?
-        → SÌ → STOP! News Catalyst = 0 (già in altri parametri)
-        
-STEP 2: È un dato con Actual vs Forecast?
-        → NO → STOP! News Catalyst = 0
-        
-STEP 3: La sorpresa è negli ultimi 7 giorni?
-        → NO → STOP! News Catalyst = 0
-        
-STEP 4: Calcola il punteggio basato sulla sorpresa
-```
-
-## FORMULA
-
-| Sorpresa su dati secondari | Score |
-|----------------------------|-------|
-| Molto positiva (>2 deviazioni std) | +2 |
-| Positiva | +1 |
-| Nessuna sorpresa / temi già coperti | **0** |
-| Negativa | -1 |
-| Molto negativa (>2 deviazioni std) | -2 |
-
-## ESEMPI CORRETTI
-
-✅ "Retail Sales USA +0.8% vs +0.3% atteso, sorpresa significativa → +1"
-✅ "Consumer Confidence crollato a 85 vs 95 atteso → -1"  
-✅ "Nessun dato secondario con sorprese, altri fattori già in parametri dedicati → 0"
-✅ "PMI già valutato in parametro PMI, stance BC già in Aspettative Tassi → 0"
-
-**REGOLA D'ORO: Nel 90% dei casi, News Catalyst dovrebbe essere 0!**
-
----
+**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito, assegnare 0 a entrambe le valute.
 
 ## ═══════════════════════════════════════════════════════════════════
-## RANGE TOTALI PER VALUTA
+## RANGE TOTALI
 ## ═══════════════════════════════════════════════════════════════════
 
 - **Aspettative Tassi**: da -2 a +2 (peso doppio)
-- **News Catalyst**: da -2 a +2 (peso doppio)
 - **Altri 6 parametri**: da -1 a +1
-- **TOTALE per valuta**: da -10 a +10
+- **score_base**: da -8 a +8
+- **score_quote**: da -8 a +8
+- **differenziale**: da -16 a +16
 
 ## ═══════════════════════════════════════════════════════════════════
-## FORMATO OUTPUT JSON
+## MOTIVAZIONI DETTAGLIATE (OBBLIGATORIO!)
 ## ═══════════════════════════════════════════════════════════════════
 
+Le motivazioni devono essere ESPLICATIVE e COMPLETE:
+- Citare i VALORI NUMERICI specifici (tassi %, inflazione %, PIL %, PMI)
+- Citare i DELTA dei PMI e il peso settoriale applicato
+- Citare le ASPETTATIVE delle BC DALLE NOTIZIE WEB
+- Spiegare il RAGIONAMENTO COMPARATIVO dietro il punteggio
+
+ESEMPIO CORRETTO:
+"EUR: PIL 0.7% vs USD: PIL 2.1% - differenziale di 1.4pp favorevole a USD. EUR in stagnazione con rischi recessione in Germania, mentre USA mostra crescita sostenibile con inflazione in calo. Vantaggio netto per USD nel confronto."
+
+ESEMPIO SBAGLIATO:
+"EUR crescita debole, USD crescita forte"
+
+## FORMATO OUTPUT JSON:
 {
     "analysis_date": "YYYY-MM-DD",
-    "market_regime": "risk-on | risk-off | neutral",
-    "market_summary": "Breve riassunto del contesto macro globale in italiano (2-3 frasi)",
-    "currency_analysis": {
-        "EUR": {
-            "total_score": 0,
-            "summary": "Sintesi della situazione EUR con dati numerici",
+    "summary": "Breve riassunto del contesto macro globale in italiano",
+    "pair_analysis": {
+        "EUR/USD": {
+            "bias": "bullish/bearish/neutral",
+            "strength": 1-5,
+            "summary": "Spiegazione del bias basata sul CONFRONTO DIRETTO con riferimenti numerici",
+            "key_drivers": ["driver1", "driver2"],
+            "score_base": 3,
+            "score_quote": -3,
+            "current_price": "1.0850",
+            "price_scenarios": {
+                "base_range": "1.0750 - 1.0950",
+                "base_strong": "1.0950 - 1.1100",
+                "quote_strong": "1.0600 - 1.0750"
+            },
             "scores": {
                 "tassi_attuali": {
-                    "score": 0,
-                    "motivation": "BCE 2.15%, livello medio nel contesto G7"
+                    "base": -1, "quote": 1,
+                    "motivation_base": "EUR tasso BCE 2.15% vs USD Fed 3.75% - spread -160bp sfavorevole per EUR. Carry trade favorisce USD.",
+                    "motivation_quote": "USD tasso Fed 3.75% vs EUR BCE 2.15% - spread +160bp favorevole. Rendimenti più attraenti per capitali."
                 },
                 "aspettative_tassi": {
-                    "score": -1,
-                    "motivation": "BCE neutrale ma mercati prezzano 60% prob taglio entro marzo"
+                    "base": -2, "quote": 2,
+                    "motivation_base": "BCE dovish: taglio a dicembre, mercati prezzano 80% prob. ulteriori tagli. Lagarde conferma stance accomodante.",
+                    "motivation_quote": "Fed hawkish: Powell segnala hold prolungato, solo 25% prob. taglio prossimi 3 mesi. Dot plot indica 2 soli tagli nel 2025."
                 },
                 "inflazione": {
-                    "score": 0,
-                    "motivation": "2.14% vicino al target 2%, situazione controllata"
+                    "base": 1, "quote": 0,
+                    "motivation_base": "Inflazione EUR 2.14% vicina al target 2%, trend stabile. BCE ha margine di manovra.",
+                    "motivation_quote": "Inflazione USA 2.74% sopra target, core PCE sticky. Situazione gestibile ma non ideale."
                 },
                 "crescita_pil": {
-                    "score": -1,
-                    "motivation": "PIL 0.7%, stagnazione con Germania in difficoltà"
+                    "base": -1, "quote": 1,
+                    "motivation_base": "PIL EUR 0.7% vs PIL USA 2.1% - differenziale 1.4pp sfavorevole. Germania in stagnazione, rischi recessione.",
+                    "motivation_quote": "PIL USA 2.1% con inflazione in calo - crescita sana e sostenibile. Mercato lavoro resiliente."
                 },
                 "pmi": {
-                    "score": 0,
-                    "motivation": "PMI pesato 50.6 (Manuf 48.8 × 50% + Serv 52.4 × 50%), neutro"
+                    "base": -1, "quote": 1,
+                    "motivation_base": "PMI EUR pesato (50/50): Manuf 45.1 (Δ-1.2) + Services 51.4 (Δ-0.8) = 48.25. Contrazione manifatturiera, trend negativo.",
+                    "motivation_quote": "PMI USA pesato (30/70): Manuf 49.3 (Δ+1.3) + Services 54.1 (Δ+2.1) = 52.66. Servizi forti, momentum positivo."
                 },
                 "risk_sentiment": {
-                    "score": 0,
-                    "motivation": "EUR semi-ciclica, neutrale in regime attuale"
+                    "base": 0, "quote": 0,
+                    "motivation_base": "Regime neutro (VIX 18-25). EUR semi-ciclica non beneficia né soffre particolarmente.",
+                    "motivation_quote": "Regime neutro. USD safe-haven non attrae flussi risk-off significativi al momento."
                 },
                 "bilancia_fiscale": {
-                    "score": 0,
-                    "motivation": "Nessuna notizia rilevante su crisi fiscale Eurozona"
-                },
-                "news_catalyst": {
-                    "score": 0,
-                    "motivation": "CPI in linea con attese. Nessuna sorpresa significativa"
+                    "base": 0, "quote": 0,
+                    "motivation_base": "Nessuna notizia rilevante su crisi fiscale Eurozona. Situazione stabile.",
+                    "motivation_quote": "Deficit USA elevato ma nessun impatto immediato su mercati. Situazione gestibile."
                 }
             }
-        },
-        "USD": {
-            "total_score": 2,
-            "summary": "Sintesi della situazione USD con dati numerici",
-            "scores": {
-                "tassi_attuali": {
-                    "score": 1,
-                    "motivation": "Fed 3.75%, tra i più alti G7, carry attraente"
-                },
-                "aspettative_tassi": {
-                    "score": -1,
-                    "motivation": "Fed in ciclo tagli (2 consecutivi), stance dovish"
-                },
-                "inflazione": {
-                    "score": 0,
-                    "motivation": "2.74% sopra target ma in calo, situazione gestibile"
-                },
-                "crescita_pil": {
-                    "score": 1,
-                    "motivation": "PIL 2.1% con inflazione in calo, crescita sostenibile"
-                },
-                "pmi": {
-                    "score": 1,
-                    "motivation": "PMI pesato 53.2 (Manuf 49.3 × 30% + Serv 54.8 × 70%), espansione"
-                },
-                "risk_sentiment": {
-                    "score": 0,
-                    "motivation": "USD safe-haven ma regime neutro, nessun flusso risk-off"
-                },
-                "bilancia_fiscale": {
-                    "score": 0,
-                    "motivation": "Deficit elevato ma nessun impatto immediato"
-                },
-                "news_catalyst": {
-                    "score": 0,
-                    "motivation": "NFP in linea con attese. Geopolitica già in risk sentiment"
-                }
-            }
-        },
-        "GBP": { "total_score": 0, "summary": "...", "scores": { ... } },
-        "JPY": { "total_score": 0, "summary": "...", "scores": { ... } },
-        "CHF": { "total_score": 0, "summary": "...", "scores": { ... } },
-        "AUD": { "total_score": 0, "summary": "...", "scores": { ... } },
-        "CAD": { "total_score": 0, "summary": "...", "scores": { ... } }
+        }
     },
-    "weekly_events_warning": "⚠️ Eventi ad alto impatto: Mar 21 Fed Decision, Gio 23 ECB Decision"
+    "rate_outlook": {
+        "USD": {
+            "current_rate": "X.XX%",
+            "next_meeting": "YYYY-MM-DD",
+            "expectation": "hold/cut/hike",
+            "probability": "XX%",
+            "stance": "hawkish/dovish/neutral",
+            "notes": "Spiegazione basata sulle notizie web"
+        }
+    },
+    "risk_sentiment": "risk-on/risk-off/neutral",
+    "events_calendar": []
 }
 
-## ⚠️ REGOLE CRITICHE FINALI
-
-1. **TUTTE LE 7 VALUTE OBBLIGATORIE**: EUR, USD, GBP, JPY, CHF, AUD, CAD
-2. **total_score = SOMMA degli 8 punteggi** (verifica che sia corretto!)
-3. **USA SOLO I DATI FORNITI** - non inventare
-4. **MOTIVAZIONI CON NUMERI**: cita sempre i valori specifici (tassi %, inflazione %, PMI)
-5. **COERENZA**: se dai +1 a USD per tassi alti, non dare +1 anche a EUR che ha tassi più bassi
-
-## ⛔ REGOLA CRITICA NEWS CATALYST ⛔
-
-**News Catalyst richiede SORPRESE CONCRETE (Actual vs Forecast)!**
-
-## 🚨 ALGORITMO OBBLIGATORIO PER NEWS CATALYST 🚨
-
-**STEP 1:** Hai un dato concreto con Actual vs Forecast?
-- NO → **STOP! Score = 0**
-- SÌ → vai a Step 2
-
-**STEP 2:** La sorpresa è negli ultimi 7 giorni?
-- NO → **STOP! Score = 0**
-- SÌ → vai a Step 3
-
-**STEP 3:** Questo fattore è già conteggiato in un altro parametro?
-- SÌ (es: BC hawkish → già in Aspettative Tassi) → **STOP! Score = 0**
-- NO → Calcola il punteggio basato sulla tabella delle sorprese
-
-## 🚫 PAROLE VIETATE NELLE MOTIVAZIONI DI NEWS CATALYST:
-
-**Se la motivazione contiene una di queste parole → Score DEVE essere 0:**
-
-| Categoria | Parole vietate | Motivo |
-|-----------|----------------|--------|
-| **Tassi** | tassi, tasso, interest rate, carry trade | Già in Tassi Attuali |
-| **BC Stance** | dovish, hawkish, easing, tightening, taglio, rialzo | Già in Aspettative Tassi |
-| **Inflazione** | inflazione, CPI, prezzi, deflazione | Già in Inflazione |
-| **Crescita** | PIL, GDP, crescita, recessione, stagnazione | Già in Crescita/PIL |
-| **PMI** | PMI, manifatturiero, manufacturing, servizi, services, espansione, contrazione | Già in PMI |
-| **Sentiment** | safe-haven, risk-off, risk-on, tensioni, geopolitica, VIX | Già in Risk Sentiment |
-| **Fiscale** | debito, deficit, fiscale, bilancia | Già in Bilancia/Fiscale |
-| **Assenza** | nessuna sorpresa, nessun dato, mancanza | Non è una sorpresa! |
-
-## ❌ ERRORI GRAVI DA NON COMMETTERE MAI:
-
-❌ **"PMI crollo -3.9 punti → -2"** → Il PMI è già valutato nel parametro PMI! → **0**
-❌ **"BOC dovish pesa → -2"** → La stance BC è già in Aspettative Tassi! → **0**
-❌ **"Inflazione sopra target → +1"** → L'inflazione è già nel parametro Inflazione! → **0**
-❌ **"Nessuna sorpresa... pesa negativamente → -2"** → Contraddizione! → **0**
-
-## ✅ UNICI CASI IN CUI NEWS CATALYST ≠ 0:
-
-1. **Retail Sales** con sorpresa significativa (Actual vs Forecast)
-2. **Consumer Confidence** con sorpresa significativa
-3. **Employment Change** con sorpresa (non NFP per USD)
-4. **Trade Balance** con sorpresa significativa
-5. **Evento geopolitico NUOVO** (<48h) NON già in Risk Sentiment
-
-**REGOLA D'ORO: Nel 90% dei casi, News Catalyst = 0!**
-
-**Se non hai un dato SECONDARIO con Actual vs Forecast → News Catalyst = 0**
+## REGOLE CRITICHE FINALI:
+- ⚠️ USA SOLO I DATI FORNITI (macro, PMI, notizie web)
+- ⚠️ CONFRONTO DIRETTO tra le due valute su ogni parametro
+- ⚠️ PMI: applica i PESI SETTORIALI corretti per ogni valuta
+- ⚠️ PIL: contestualizza con inflazione (no punti per crescita non sostenibile)
+- ⚠️ RISK SENTIMENT: dipende dal TIPO di coppia (safe-haven vs cicliche)
+- score_base = SOMMA dei 7 punteggi "base"
+- score_quote = SOMMA dei 7 punteggi "quote"
+- differenziale = score_base - score_quote
 """
 
 
@@ -3358,245 +1920,7 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
     return "\n".join(results), structured
 
 
-# ============================================================================
-# FUNZIONE CALCOLO DIFFERENZIALI COPPIE DA VALUTE
-# ============================================================================
-
-SCORE_PARAMETERS = [
-    "tassi_attuali",
-    "aspettative_tassi", 
-    "inflazione",
-    "crescita_pil",
-    "pmi",
-    "risk_sentiment",
-    "bilancia_fiscale",
-    "news_catalyst"
-]
-
-
-def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
-    """
-    Valida e corregge i punteggi delle valute, in particolare news_catalyst.
-    
-    Regole di validazione:
-    1. news_catalyst deve essere nel range [-2, +2]
-    2. Se la motivazione contiene parole vietate E score != 0, forza a 0
-    3. Ricalcola total_score dopo le correzioni
-    
-    Args:
-        currency_analysis: Dict con struttura {"EUR": {"total_score": X, "scores": {...}}, ...}
-    
-    Returns:
-        currency_analysis corretto
-    """
-    # Parole che indicano "nessuna sorpresa" → score deve essere 0
-    forbidden_phrases_zero = [
-        "nessuna sorpresa",
-        "nessun dato",
-        "mancanza di dati",
-        "assenza di sorprese",
-        "dati in linea",
-        "nessuna notizia rilevante",
-        "no significant",
-        "no surprise",
-    ]
-    
-    # Parole che indicano doppio conteggio → score deve essere 0
-    # Questi temi sono GIÀ valutati in altri parametri!
-    double_count_phrases = [
-        # === GIÀ IN TASSI ATTUALI ===
-        "tassi", "tasso", "interest rate", "carry trade",
-        
-        # === GIÀ IN ASPETTATIVE TASSI ===
-        "boc dovish", "boc hawkish", "boj hawkish", "boj dovish", 
-        "boe dovish", "boe hawkish", "fed hawkish", "fed dovish",
-        "bce hawkish", "bce dovish", "ecb hawkish", "ecb dovish",
-        "rba hawkish", "rba dovish", "snb hawkish", "snb dovish",
-        "stance unica", "differenziazione monetaria", "divergenza monetaria",
-        "dovish stance", "hawkish stance", "dovish", "hawkish",
-        "bias easing", "bias tightening", "tightening", "easing",
-        "politica monetaria", "monetary policy", "rate cut", "rate hike",
-        "taglio tassi", "rialzo tassi", "pausa", "hold",
-        
-        # === GIÀ IN INFLAZIONE ===
-        "inflazione", "inflation", "cpi", "prezzi", "prices",
-        "deflazione", "deflation", "disinflazione",
-        
-        # === GIÀ IN CRESCITA/PIL ===
-        "pil", "gdp", "crescita", "growth", "recessione", "recession",
-        "stagnazione", "stagnation", "contrazione economia",
-        
-        # === GIÀ IN PMI ===
-        "pmi", "manifatturiero", "manufacturing", "servizi", "services",
-        "espansione", "contrazione", "expansion", "contraction",
-        "purchasing manager", "business activity",
-        
-        # === GIÀ IN RISK SENTIMENT ===
-        "safe-haven", "safe haven", "risk-off", "risk-on", "risk off", "risk on",
-        "tensioni geopolitiche", "geopolitical", "vix", "volatilità",
-        "flight to safety", "avversione al rischio",
-        
-        # === GIÀ IN BILANCIA/FISCALE ===
-        "debito", "debt", "deficit", "fiscale", "fiscal",
-        "bilancia commerciale", "trade balance", "current account",
-        
-        # === FRASI GENERICHE CHE INDICANO OPINIONE, NON DATI ===
-        "pesa negativamente", "pesa positivamente",
-        "pressione", "pressure", "momentum"
-    ]
-    
-    # Range per ogni parametro
-    score_ranges = {
-        "tassi_attuali": (-1, 1),
-        "aspettative_tassi": (-2, 2),
-        "inflazione": (-1, 1),
-        "crescita_pil": (-1, 1),
-        "pmi": (-1, 1),
-        "risk_sentiment": (-1, 1),
-        "bilancia_fiscale": (-1, 1),
-        "news_catalyst": (-2, 2)
-    }
-    
-    corrections_made = []
-    
-    for currency, data in currency_analysis.items():
-        if not isinstance(data, dict) or "scores" not in data:
-            continue
-        
-        scores = data.get("scores", {})
-        
-        for param, score_data in scores.items():
-            if not isinstance(score_data, dict):
-                continue
-            
-            score = score_data.get("score", 0)
-            motivation = score_data.get("motivation", "").lower()
-            original_score = score
-            
-            # 1. Controlla range
-            if param in score_ranges:
-                min_val, max_val = score_ranges[param]
-                if score < min_val:
-                    score = min_val
-                    corrections_made.append(f"{currency}/{param}: {original_score} → {score} (fuori range)")
-                elif score > max_val:
-                    score = max_val
-                    corrections_made.append(f"{currency}/{param}: {original_score} → {score} (fuori range)")
-            
-            # 2. Controlla parole vietate per news_catalyst
-            if param == "news_catalyst" and score != 0:
-                should_be_zero = False
-                reason = ""
-                
-                # Controlla frasi che indicano nessuna sorpresa
-                for phrase in forbidden_phrases_zero:
-                    if phrase in motivation:
-                        should_be_zero = True
-                        reason = f"contiene '{phrase}'"
-                        break
-                
-                # Controlla frasi che indicano doppio conteggio
-                if not should_be_zero:
-                    for phrase in double_count_phrases:
-                        if phrase in motivation:
-                            should_be_zero = True
-                            reason = f"doppio conteggio: '{phrase}'"
-                            break
-                
-                if should_be_zero:
-                    corrections_made.append(
-                        f"{currency}/news_catalyst: {original_score} → 0 ({reason})"
-                    )
-                    score = 0
-            
-            # Aggiorna il punteggio
-            score_data["score"] = score
-        
-        # 3. Ricalcola total_score
-        new_total = 0
-        for param_name in SCORE_PARAMETERS:
-            if param_name in scores and isinstance(scores[param_name], dict):
-                new_total += scores[param_name].get("score", 0)
-        
-        old_total = data.get("total_score", 0)
-        if old_total != new_total:
-            corrections_made.append(f"{currency}/total_score: {old_total} → {new_total}")
-            data["total_score"] = new_total
-    
-    # Log delle correzioni (opzionale, per debug)
-    if corrections_made:
-        currency_analysis["_corrections"] = corrections_made
-    
-    return currency_analysis
-
-
-def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
-    """
-    Calcola i punteggi per le 19 coppie forex a partire dai punteggi delle 7 valute.
-    
-    Args:
-        currency_analysis: Dict con struttura {
-            "EUR": {"total_score": X, "summary": "...", "scores": {...}},
-            "USD": {...},
-            ...
-        }
-    
-    Returns:
-        pair_analysis: Dict con struttura compatibile con UI esistente
-    """
-    pair_analysis = {}
-    
-    for pair in FOREX_PAIRS:
-        base, quote = pair.split("/")
-        
-        # Verifica che entrambe le valute siano presenti
-        if base not in currency_analysis or quote not in currency_analysis:
-            continue
-        
-        base_data = currency_analysis[base]
-        quote_data = currency_analysis[quote]
-        
-        # Calcola i punteggi per ogni parametro
-        scores = {}
-        for param in SCORE_PARAMETERS:
-            base_score = base_data.get("scores", {}).get(param, {}).get("score", 0)
-            quote_score = quote_data.get("scores", {}).get(param, {}).get("score", 0)
-            base_motivation = base_data.get("scores", {}).get(param, {}).get("motivation", "")
-            quote_motivation = quote_data.get("scores", {}).get(param, {}).get("motivation", "")
-            
-            scores[param] = {
-                "base": base_score,
-                "quote": quote_score,
-                "motivation_base": f"{base}: {base_motivation}",
-                "motivation_quote": f"{quote}: {quote_motivation}"
-            }
-        
-        # Calcola totali
-        score_base = base_data.get("total_score", 0)
-        score_quote = quote_data.get("total_score", 0)
-        differential = score_base - score_quote
-        
-        # Genera summary combinato
-        base_summary = base_data.get("summary", "")
-        quote_summary = quote_data.get("summary", "")
-        combined_summary = f"{base}: {base_summary} | {quote}: {quote_summary}"
-        
-        pair_analysis[pair] = {
-            "summary": combined_summary,
-            "score_base": score_base,
-            "score_quote": score_quote,
-            "differential": differential,
-            "scores": scores,
-            # Manteniamo campi per compatibilità
-            "key_drivers": [],
-            "current_price": "",
-            "price_scenarios": {}
-        }
-    
-    return pair_analysis
-
-
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -3607,11 +1931,10 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         additional_text: Testo delle risorse aggiuntive (opzionale)
         pmi_data: Dati PMI per valuta (opzionale)
         forex_prices: Prezzi forex in tempo reale (opzionale)
-        economic_events: Dati eventi economici recenti per News Catalyst (opzionale)
-        cb_history_data: Storico decisioni banche centrali (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
+    pairs_list = ", ".join(FOREX_PAIRS)
     currencies_info = "\n".join([f"- {k}: {v['name']} ({v['central_bank']}) - Tipo: {v['type']}" 
                                   for k, v in CURRENCIES.items()])
     
@@ -3693,98 +2016,49 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
-    # Sezione Storico Banche Centrali
-    cb_history_section = ""
-    cb_history = cb_history_data if cb_history_data else {}
-    if cb_history:
-        cb_lines = []
-        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
-            data = cb_history.get(curr, {})
-            if data:
-                line = f"**{data.get('bank_short', curr)}** ({curr}): {data.get('meeting_1', 'N/A')}, {data.get('meeting_2', 'N/A')} → Trend: {data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
-                stance_hint = data.get('stance_hint')
-                if stance_hint:
-                    line += f" [Stance hint: {stance_hint}]"
-                cb_lines.append(line)
-        
-        cb_history_section = f"""
-## 📜 STORICO DECISIONI BANCHE CENTRALI (ultimi 2 meeting):
-{chr(10).join(cb_lines)}
-
-⚠️ **REGOLE IMPORTANTI PER LA STANCE:**
-- Se trend = "Hiking" (2 rialzi consecutivi) → La stance NON PUÒ essere "Dovish"
-- Se trend = "Cutting" (2 tagli consecutivi) → La stance NON PUÒ essere "Hawkish"
-- Considera anche il "dissent" (🕊️ = membri volevano tagliare, 🦅 = membri volevano alzare)
-- Il trend storico deve essere COERENTE con la stance finale
-- Le aspettative OIS sono importanti ma non possono contraddire il trend storico recente
-
----
-"""
-    
-    # Sezione Dati Economici Recenti per News Catalyst
-    economic_events_section = ""
-    if economic_events:
-        economic_events_section = format_economic_events_for_claude(economic_events)
-        economic_events_section = f"""
-{economic_events_section}
-
----
-"""
-    
     today = get_italy_now()
     
-    currencies_list = ", ".join(CURRENCIES.keys())
-    
     user_prompt = f"""
-## ⛔ REQUISITO CRITICO: ANALIZZA TUTTE LE 7 VALUTE! ⛔
-Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna valuta!
+Analizza TUTTE queste coppie forex: {pairs_list}
 
-**Lista completa delle 7 valute (TUTTE obbligatorie):**
-{currencies_list}
+## ⚠️ DATA ODIERNA: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})
 
-⚠️ Se l'output JSON non contiene tutte le 7 valute in "currency_analysis", l'analisi sarà INCOMPLETA!
-
-## 📅 DATA ODIERNA: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})
-
-**Dettagli valute:**
+**Valute da analizzare:**
 {currencies_info}
 
 ---
 
 {macro_section}
 {pmi_section}
-{cb_history_section}
-{economic_events_section}
 {prices_section}
 {news_section}
 {additional_section}
 
 ## ⭐ ISTRUZIONI:
 
-1. **ANALIZZA LE 7 VALUTE SINGOLARMENTE** - il sistema calcolerà i differenziali per le 19 coppie
-2. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il punteggio
-3. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
-4. **PMI sono LEADING indicators**: anticipano la crescita futura
-5. **PIL è LAGGING indicator**: conferma la crescita passata
-6. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
-7. Ogni **summary** deve spiegare la situazione della valuta con DATI NUMERICI
-8. **total_score** = somma degli 8 punteggi parametro (verifica sia corretto!)
+1. **USA TUTTE LE INFORMAZIONI DISPONIBILI** per determinare il bias
+2. **ASPETTATIVE > TASSI ATTUALI**: il mercato guarda AVANTI
+3. **PMI sono LEADING indicators**: anticipano la crescita futura
+4. **PIL è LAGGING indicator**: conferma la crescita passata
+5. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
+6. **events_calendar** = []
+7. Ogni **summary** deve spiegare PERCHÉ quel bias
+8. Se presenti risorse aggiuntive, considerale con priorità ma INTEGRA con altri dati
+9. **USA I PREZZI FOREX REALI** forniti per current_price e price_scenarios
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
 """
     
     try:
-        # Usa streaming per evitare timeout su richieste lunghe
-        response_text = ""
-        with client.messages.stream(
+        message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=12000,  # Ridotto: ora analizziamo 7 valute invece di 19 coppie
+            max_tokens=20000,
             messages=[{"role": "user", "content": user_prompt}],
             system=SYSTEM_PROMPT_GLOBAL
-        ) as stream:
-            for text in stream.text_stream:
-                response_text += text
+        )
+        
+        response_text = message.content[0].text
         
         # Pulisci JSON da markdown
         if "```json" in response_text:
@@ -3875,18 +2149,14 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
                         if attempt > 0:
                             time.sleep(20)  # Aspetta 20 secondi tra tentativi
                         
-                        # Usa streaming anche per il fix
-                        fixed_text = ""
-                        with client.messages.stream(
+                        fix_message = client.messages.create(
                             model="claude-sonnet-4-20250514",
                             max_tokens=25000,
                             messages=[{"role": "user", "content": fix_prompt}],
                             system="Sei un correttore di JSON. Restituisci SOLO il JSON corretto, nient'altro."
-                        ) as stream:
-                            for text in stream.text_stream:
-                                fixed_text += text
+                        )
                         
-                        fixed_text = fixed_text.strip()
+                        fixed_text = fix_message.content[0].text.strip()
                         
                         # Pulisci
                         if "```json" in fixed_text:
@@ -3918,27 +2188,6 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
         analysis["pairs_analyzed"] = FOREX_PAIRS
         analysis["currencies"] = list(CURRENCIES.keys())
         
-        # ===== NUOVO: Calcola pair_analysis da currency_analysis =====
-        if "currency_analysis" in analysis and "pair_analysis" not in analysis:
-            currency_analysis = analysis["currency_analysis"]
-            
-            # ===== VALIDAZIONE E CORREZIONE PUNTEGGI =====
-            currency_analysis = validate_and_fix_currency_scores(currency_analysis)
-            analysis["currency_analysis"] = currency_analysis
-            
-            # Log correzioni se presenti
-            if "_corrections" in currency_analysis:
-                analysis["score_corrections"] = currency_analysis.pop("_corrections")
-            
-            # Verifica che tutte le 7 valute siano presenti
-            missing_currencies = set(CURRENCIES.keys()) - set(currency_analysis.keys())
-            if missing_currencies:
-                analysis["warning"] = f"Valute mancanti: {', '.join(missing_currencies)}"
-            
-            # Calcola i differenziali per le 19 coppie
-            pair_analysis = calculate_pair_from_currencies(currency_analysis)
-            analysis["pair_analysis"] = pair_analysis
-        
         return analysis
         
     except json.JSONDecodeError as e:
@@ -3952,7 +2201,7 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # ============================================================================
 
 def display_forex_prices(forex_prices: dict):
-    """Mostra la tabella dei prezzi forex recuperati"""
+    """Mostra la tabella dei prezzi forex recuperati in un expander"""
     
     if not forex_prices:
         st.warning("⚠️ Nessun dato prezzi disponibile")
@@ -3974,56 +2223,59 @@ def display_forex_prices(forex_prices: dict):
                     st.text(f"• {err}")
         return
     
-    # Header con fonte
+    # Header con fonte (sempre visibile)
     if "Yahoo" in source or "yfinance" in source:
-        st.success(f"✅ Fonte: **{source}** ({found}/{total})")
+        st.success(f"✅ Prezzi Forex: **{source}** ({found}/{total})")
     else:
-        st.warning(f"⚠️ Fonte: **{source}** ({found}/{total})")
+        st.warning(f"⚠️ Prezzi Forex: **{source}** ({found}/{total})")
     
-    # Warning se non real-time
+    # Warning se non real-time (sempre visibile)
     if warning:
         st.warning(warning)
     
-    # Tabella prezzi (sempre visibile)
-    pairs_order = [
-        "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
-        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
-        "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
-    ]
-    
-    # Dividi in 3 colonne
-    col1, col2, col3 = st.columns(3)
-    
-    for idx, pair in enumerate(pairs_order):
-        price = prices.get(pair)
+    # Tabella dentro expander (chiuso di default)
+    with st.expander("💱 Mostra/Nascondi Tabella Prezzi", expanded=False):
+        pairs_order = [
+            "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+            "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CHF", "GBP/CHF",
+            "AUD/CHF", "CAD/JPY", "AUD/CAD", "EUR/CAD", "EUR/AUD", "GBP/AUD", "GBP/CAD"
+        ]
         
-        if price is not None:
-            if "JPY" in pair:
-                price_str = f"{price:.3f}"
+        # Dividi in 3 colonne
+        col1, col2, col3 = st.columns(3)
+        
+        for idx, pair in enumerate(pairs_order):
+            price = prices.get(pair)
+            
+            if price is not None:
+                if "JPY" in pair:
+                    price_str = f"{price:.3f}"
+                else:
+                    price_str = f"{price:.5f}"
+                display_text = f"**{pair}**: {price_str} ✅"
             else:
-                price_str = f"{price:.5f}"
-            display_text = f"**{pair}**: {price_str} ✅"
-        else:
-            display_text = f"**{pair}**: N/A ❌"
+                display_text = f"**{pair}**: N/A ❌"
+            
+            # Distribuisci nelle colonne
+            if idx < 7:
+                col1.markdown(display_text)
+            elif idx < 13:
+                col2.markdown(display_text)
+            else:
+                col3.markdown(display_text)
         
-        # Distribuisci nelle colonne
-        if idx < 7:
-            col1.markdown(display_text)
-        elif idx < 13:
-            col2.markdown(display_text)
-        else:
-            col3.markdown(display_text)
-    
-    # Mostra errori se presenti
-    if forex_prices.get("errors"):
-        st.divider()
-        st.caption("⚠️ Alcuni errori durante il recupero:")
-        for err in forex_prices.get("errors", [])[:5]:
-            st.text(f"• {err}")
+        # Mostra errori se presenti
+        if forex_prices.get("errors"):
+            st.divider()
+            st.caption("⚠️ Alcuni errori durante il recupero:")
+            for err in forex_prices.get("errors", [])[:5]:
+                st.text(f"• {err}")
 
 
 def display_news_summary(news_structured: dict, links_structured: list = None):
     """Mostra il riepilogo delle notizie trovate con link"""
+    
+    st.markdown("### 📰 Notizie Web")
     
     # Conteggio fonti trovate
     sources_found = []
@@ -4045,7 +2297,7 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     
     # ForexFactory News (via DuckDuckGo News Search)
     if news_structured.get("forexfactory_direct"):
-        with st.expander(f"🔴 FOREX NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=False):
+        with st.expander(f"🔴 FOREX NEWS LIVE ({len(news_structured['forexfactory_direct'])} news)", expanded=True):
             for item in news_structured["forexfactory_direct"][:12]:
                 title = item.get('title', '')
                 url = item.get('url', '')
@@ -4132,7 +2384,7 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
     
     # Link aggiuntivi processati
     if links_structured:
-        with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=False):
+        with st.expander(f"📎 LINK AGGIUNTIVI ({len(links_structured)} URL processati)", expanded=True):
             for item in links_structured:
                 status_icon = "✅" if item['status'] == 'success' else "❌"
                 st.markdown(f"{status_icon} **[{item['title'][:50]}]({item['url']})**")
@@ -4154,6 +2406,8 @@ def display_news_summary(news_structured: dict, links_structured: list = None):
 
 def display_macro_data(macro_data: dict):
     """Mostra i dati macro in formato tabella"""
+    st.markdown("### 📊 Dati Macroeconomici")
+    
     if macro_data:
         table_rows = []
         for curr, data in macro_data.items():
@@ -4189,6 +2443,8 @@ def display_pmi_table(pmi_data: dict):
     |--------|----------|------|---|-------------|------|---|---------|
     | USD    | 47.9     | 48.2 |-0.3| 54.4       | 52.6 |+1.8| 🏭↓ 🏢↑ |
     """
+    st.markdown("### 📈 Dati PMI (Manufacturing & Services)")
+    
     if not pmi_data:
         st.warning("⚠️ Nessun dato PMI disponibile")
         return
@@ -4219,7 +2475,6 @@ def display_pmi_table(pmi_data: dict):
         services_previous = services.get("previous")
         services_delta = services.get("delta")
         services_label = services.get("label", "Services")
-        services_not_available = services.get("not_available", False)
         
         # Formatta valori con label per USD (ISM)
         if curr == "USD":
@@ -4227,49 +2482,29 @@ def display_pmi_table(pmi_data: dict):
             services_display = f"{services_current} (ISM)" if services_current else "N/A"
         else:
             manuf_display = str(manuf_current) if manuf_current else "N/A"
-            # Per CHF e CAD, mostra "-" (non disponibile) invece di "N/A" (errore)
-            if services_not_available:
-                services_display = "-"
-            else:
-                services_display = str(services_current) if services_current else "N/A"
+            services_display = str(services_current) if services_current else "N/A"
         
         # Formatta delta con segno
-        def format_delta(delta, not_available=False):
-            if not_available:
-                return "-"
-            elif delta is None:
+        def format_delta(delta):
+            if delta is None:
                 return "N/A"
             elif delta > 0:
                 return f"+{delta}"
             else:
                 return str(delta)
         
-        # Formatta previous
-        def format_previous(prev, not_available=False):
-            if not_available:
-                return "-"
-            elif prev is None:
-                return "N/A"
-            else:
-                return str(prev)
+        # Calcola interpretazione
+        trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
         
-        # Calcola interpretazione (per CHF/CAD usa solo manufacturing)
-        if services_not_available:
-            # Per valute con solo PMI unico, valuta solo manufacturing
-            trend_text, interpretation = get_pmi_interpretation_single(manuf_delta)
-        else:
-            trend_text, interpretation = get_pmi_interpretation(manuf_delta, services_delta)
-        
-        # Traccia dati mancanti (NON includere CHF/CAD services perché non è un errore)
+        # Traccia dati mancanti (controlla sia current che previous)
         if manuf_current is None:
             missing_data.append(f"{curr}-Manuf")
         elif manuf_previous is None:
             missing_data.append(f"{curr}-Manuf(Prev)")
-        if not services_not_available:  # Solo se services dovrebbe esistere
-            if services_current is None:
-                missing_data.append(f"{curr}-Serv")
-            elif services_previous is None:
-                missing_data.append(f"{curr}-Serv(Prev)")
+        if services_current is None:
+            missing_data.append(f"{curr}-Serv")
+        elif services_previous is None:
+            missing_data.append(f"{curr}-Serv(Prev)")
         
         row = {
             "Valuta": curr,
@@ -4277,8 +2512,8 @@ def display_pmi_table(pmi_data: dict):
             "Prev": str(manuf_previous) if manuf_previous else "N/A",
             "Δ Manuf": format_delta(manuf_delta),
             "🏢 Services": services_display,
-            "Prev ": format_previous(services_previous, services_not_available),  # Spazio per evitare duplicato colonna
-            "Δ Serv": format_delta(services_delta, services_not_available),
+            "Prev ": str(services_previous) if services_previous else "N/A",  # Spazio per evitare duplicato colonna
+            "Δ Serv": format_delta(services_delta),
             "Trend": trend_text,  # Es: "M↑ S↓"
             "Outlook": interpretation  # Es: "Bullish", "Bearish", "Misto+", etc.
         }
@@ -4372,388 +2607,6 @@ def display_pmi_table(pmi_data: dict):
         st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
-def display_central_bank_history(history_data: dict = None):
-    """
-    Mostra la tabella storico decisioni delle banche centrali.
-    Con colori: verde = hike, rosso = cut
-    
-    Args:
-        history_data: Dati storico già recuperati (opzionale). Se None, usa sessione o recupera.
-    """
-    # Usa dati passati, dalla sessione, o recupera nuovi
-    if history_data:
-        history = history_data
-    elif 'last_cb_history' in st.session_state and st.session_state['last_cb_history']:
-        history = st.session_state['last_cb_history']
-    else:
-        history = get_central_bank_history_summary()
-    
-    # Mappa valuta -> banca
-    currency_to_bank = {
-        "USD": "Fed", "EUR": "ECB", "GBP": "BOE", "JPY": "BOJ",
-        "CHF": "SNB", "AUD": "RBA", "CAD": "BOC"
-    }
-    
-    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
-    
-    table_rows = []
-    for currency in currency_order:
-        data = history.get(currency, {})
-        if data:
-            bank = data.get('bank_short', currency_to_bank.get(currency, currency))
-            rate = data.get("current_rate", "N/A")
-            meeting_2 = data.get("meeting_2", "N/A")  # Prima (più vecchio)
-            meeting_1 = data.get("meeting_1", "N/A")  # Dopo (più recente)
-            trend = f"{data.get('trend_emoji', '')} {data.get('trend_label', 'N/A')}"
-            
-            row = {
-                "Valuta": currency,
-                "Banca": bank,
-                "Tasso Attuale": rate,
-                "Meeting -2": meeting_2,
-                "Meeting -1": meeting_1,
-                "Trend": trend
-            }
-            table_rows.append(row)
-    
-    if table_rows:
-        df = pd.DataFrame(table_rows)
-        
-        def color_decision(val):
-            """Colora la decisione: verde hike, rosso cut"""
-            if not isinstance(val, str):
-                return ''
-            if '+25bp' in val or '+50bp' in val or '+75bp' in val:
-                return 'color: #28a745; font-weight: bold'
-            elif '-25bp' in val or '-50bp' in val or '-75bp' in val:
-                return 'color: #dc3545; font-weight: bold'
-            return ''
-        
-        # Applica stile alle colonne dei meeting
-        styled_df = df.style.applymap(
-            color_decision, 
-            subset=['Meeting -2', 'Meeting -1']
-        )
-        
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
-        
-        # Legenda
-        st.caption("🟢 Hike (+bp) | 🔴 Cut (-bp) | ⚫ Hold (0bp)")
-
-
-def generate_summary_with_bias(summary: str, differential: int) -> str:
-    """
-    Genera il summary con il prefisso bias corretto basato SOLO sul differenziale.
-    
-    Regole:
-    - diff >= 7  → "Strong bullish: ..."
-    - diff 1-6   → "Bullish moderato: ..."
-    - diff = 0   → "Bias neutrale: ..."
-    - diff -1/-6 → "Bearish moderato: ..."
-    - diff <= -7 → "Strong bearish: ..."
-    
-    Claude ora genera summary senza prefisso bias, quindi lo aggiungiamo noi.
-    """
-    if not summary:
-        return summary
-    
-    # Rimuovi eventuali prefissi bias già presenti (per sicurezza)
-    summary_clean = summary
-    prefixes_to_remove = [
-        "Strong bullish bias:", "Strong bullish:", 
-        "Strong bearish bias:", "Strong bearish:",
-        "Bullish moderato:", "Bearish moderato:",
-        "Bias neutrale:", "Neutral:",
-        "Bullish:", "Bearish:"
-    ]
-    for prefix in prefixes_to_remove:
-        if summary_clean.lower().startswith(prefix.lower()):
-            summary_clean = summary_clean[len(prefix):].strip()
-            break
-    
-    # Determina il prefisso corretto dal differenziale
-    if differential >= 7:
-        prefix = "Strong bullish"
-    elif differential > 0:
-        prefix = "Bullish moderato"
-    elif differential <= -7:
-        prefix = "Strong bearish"
-    elif differential < 0:
-        prefix = "Bearish moderato"
-    else:
-        prefix = "Bias neutrale"
-    
-    return f"{prefix}: {summary_clean}"
-
-
-# ============================================================================
-# FUNZIONI LAYOUT NUOVO (Dati Input + Calendario)
-# ============================================================================
-
-def render_data_section(
-    title: str,
-    icon: str,
-    data_type: str,
-    data: dict | list | None,
-    timestamp: datetime | None,
-    user_id: str,
-    display_func: callable,
-    fetch_func: callable,
-    extra_content: callable = None
-) -> bool:
-    """
-    Renderizza una sezione dati con header, stato freshness e bottone aggiorna.
-    
-    Returns:
-        True se l'utente ha cliccato "Aggiorna"
-    """
-    # Calcola stato freshness
-    freshness = check_data_freshness(data_type, timestamp)
-    
-    # Header con titolo e bottone
-    col_title, col_status, col_btn = st.columns([3, 2, 1])
-    
-    with col_title:
-        st.markdown(f"### {icon} {title}")
-    
-    with col_status:
-        if timestamp:
-            ts_str = timestamp.strftime("%d/%m %H:%M") if hasattr(timestamp, 'strftime') else str(timestamp)
-            st.caption(f"📅 {ts_str} - {freshness['status']} {freshness['message']}")
-        else:
-            st.caption(f"📅 Mai aggiornato - {freshness['status']}")
-    
-    with col_btn:
-        update_clicked = st.button(f"🔄", key=f"update_{data_type}", help=f"Aggiorna {title}")
-    
-    # Se cliccato aggiorna, esegui il fetch
-    if update_clicked:
-        with st.spinner(f"Aggiornamento {title}..."):
-            try:
-                new_data = fetch_func()
-                st.session_state[f'last_{data_type}_data'] = new_data
-                save_data_timestamp(data_type, user_id)
-                st.success(f"✅ {title} aggiornati!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Errore: {str(e)[:100]}")
-        return True
-    
-    # Mostra contenuto
-    if data:
-        display_func(data)
-    else:
-        st.info(f"ℹ️ Nessun dato disponibile. Clicca 🔄 per aggiornare.")
-    
-    # Contenuto extra (es. link aggiuntivi per la sezione news)
-    if extra_content:
-        extra_content()
-    
-    st.markdown("---")
-    return False
-
-
-def render_calendar_sidebar(user_id: str, analyses_list: list) -> dict | None:
-    """
-    Renderizza il calendario nella sidebar con le date delle analisi evidenziate.
-    
-    Returns:
-        L'analisi selezionata se l'utente clicca su una data, None altrimenti
-    """
-    st.markdown("### 📂 Storico Analisi")
-    
-    # Costruisci mappa date -> analisi
-    analyses_by_date = {}
-    for analysis in analyses_list:
-        dt_str = analysis.get("analysis_datetime", "")
-        if not dt_str:
-            data_obj = analysis.get("data", {})
-            if isinstance(data_obj, dict):
-                dt_str = data_obj.get("analysis_datetime", "")
-        
-        if dt_str:
-            try:
-                # Formato: 2025-01-21_14-30-00
-                date_part = dt_str.split("_")[0]
-                if date_part not in analyses_by_date:
-                    analyses_by_date[date_part] = []
-                analyses_by_date[date_part].append(analysis)
-            except:
-                pass
-    
-    # Ottieni mese/anno corrente o selezionato
-    now = get_italy_now()
-    
-    if 'calendar_year' not in st.session_state:
-        st.session_state['calendar_year'] = now.year
-    if 'calendar_month' not in st.session_state:
-        st.session_state['calendar_month'] = now.month
-    
-    year = st.session_state['calendar_year']
-    month = st.session_state['calendar_month']
-    
-    # Navigazione mese
-    col_prev, col_month, col_next = st.columns([1, 2, 1])
-    
-    with col_prev:
-        if st.button("◀", key="cal_prev"):
-            if month == 1:
-                st.session_state['calendar_month'] = 12
-                st.session_state['calendar_year'] = year - 1
-            else:
-                st.session_state['calendar_month'] = month - 1
-            st.rerun()
-    
-    with col_month:
-        month_names = ["", "Gen", "Feb", "Mar", "Apr", "Mag", "Giu", 
-                       "Lug", "Ago", "Set", "Ott", "Nov", "Dic"]
-        st.markdown(f"**{month_names[month]} {year}**")
-    
-    with col_next:
-        if st.button("▶", key="cal_next"):
-            if month == 12:
-                st.session_state['calendar_month'] = 1
-                st.session_state['calendar_year'] = year + 1
-            else:
-                st.session_state['calendar_month'] = month + 1
-            st.rerun()
-    
-    # Genera calendario
-    cal = calendar.Calendar(firstweekday=0)  # Lunedì = 0
-    month_days = cal.monthdayscalendar(year, month)
-    
-    # Costruisci calendario come HTML per evitare deformazioni
-    calendar_html = """
-    <style>
-    .cal-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    .cal-table th { padding: 4px; text-align: center; color: #6b7280; font-weight: normal; }
-    .cal-table td { padding: 6px 4px; text-align: center; }
-    .cal-day { color: #9ca3af; }
-    .cal-day-analysis { color: #10b981; font-weight: bold; }
-    .cal-day-today { color: #3b82f6; font-weight: bold; }
-    .cal-day-today-analysis { color: #10b981; font-weight: bold; text-decoration: underline; }
-    </style>
-    <table class="cal-table">
-    <tr><th>Lu</th><th>Ma</th><th>Me</th><th>Gi</th><th>Ve</th><th>Sa</th><th>Do</th></tr>
-    """
-    
-    dates_with_analysis = []
-    
-    for week in month_days:
-        calendar_html += "<tr>"
-        for day in week:
-            if day == 0:
-                calendar_html += "<td></td>"
-            else:
-                date_str = f"{year}-{month:02d}-{day:02d}"
-                is_today = (day == now.day and month == now.month and year == now.year)
-                has_analysis = date_str in analyses_by_date
-                
-                if has_analysis:
-                    dates_with_analysis.append(date_str)
-                
-                if has_analysis and is_today:
-                    css_class = "cal-day-today-analysis"
-                elif has_analysis:
-                    css_class = "cal-day-analysis"
-                elif is_today:
-                    css_class = "cal-day-today"
-                else:
-                    css_class = "cal-day"
-                
-                calendar_html += f'<td class="{css_class}">{day}</td>'
-        calendar_html += "</tr>"
-    
-    calendar_html += "</table>"
-    
-    st.markdown(calendar_html, unsafe_allow_html=True)
-    
-    # Legenda
-    st.caption("🟢 Analisi salvata | 🔵 Oggi")
-    
-    st.markdown("---")
-    
-    # Selectbox per scegliere data con analisi
-    selected_analysis = None
-    
-    if dates_with_analysis:
-        # Ordina date in ordine decrescente (più recenti prima)
-        dates_with_analysis.sort(reverse=True)
-        
-        # Crea opzioni leggibili
-        date_options = ["-- Seleziona data --"] + [
-            datetime.strptime(d, "%Y-%m-%d").strftime("%d/%m/%Y") 
-            for d in dates_with_analysis
-        ]
-        
-        selected_date_display = st.selectbox(
-            "📅 Carica analisi:",
-            date_options,
-            key="calendar_date_select"
-        )
-        
-        if selected_date_display != "-- Seleziona data --":
-            # Converti in formato originale
-            selected_date = datetime.strptime(selected_date_display, "%d/%m/%Y").strftime("%Y-%m-%d")
-            
-            if st.button("📂 Carica", use_container_width=True, key="load_analysis_btn"):
-                if selected_date in analyses_by_date:
-                    selected_analysis = analyses_by_date[selected_date][0]
-    else:
-        st.caption("Nessuna analisi in questo mese")
-    
-    # Pulsante per tornare a oggi
-    st.markdown("---")
-    if st.button("📅 Vai a Oggi", use_container_width=True):
-        st.session_state['calendar_year'] = now.year
-        st.session_state['calendar_month'] = now.month
-        st.rerun()
-    
-    return selected_analysis
-
-
-def render_additional_links_section(user_id: str) -> tuple[str, list]:
-    """
-    Renderizza la sezione link aggiuntivi dentro la sezione news.
-    
-    Returns:
-        (additional_text, links_structured)
-    """
-    additional_text = ""
-    links_structured = []
-    
-    with st.expander("📎 Link Aggiuntivi (opzionale)", expanded=False):
-        urls = st.text_area(
-            "Inserisci URL (uno per riga)",
-            height=80,
-            placeholder="https://federalreserve.gov/...\nhttps://reuters.com/...",
-            help="Max 10 URL",
-            key="additional_urls_input"
-        )
-        
-        if urls.strip():
-            url_list = [u.strip() for u in urls.split('\n') if u.strip().startswith('http')]
-            st.info(f"📌 {len(url_list)} URL inseriti")
-            
-            if st.button("🔄 Processa Link", key="process_links"):
-                with st.spinner("Elaborazione link..."):
-                    try:
-                        additional_text, links_structured = fetch_additional_resources(url_list)
-                        st.session_state['last_links_text'] = additional_text
-                        st.session_state['last_links_structured'] = links_structured
-                        st.success(f"✅ {len(links_structured)} link processati")
-                    except Exception as e:
-                        st.error(f"❌ Errore: {str(e)[:100]}")
-        
-        # Mostra link già processati
-        if 'last_links_structured' in st.session_state and st.session_state['last_links_structured']:
-            st.caption(f"📎 {len(st.session_state['last_links_structured'])} link già processati")
-            links_structured = st.session_state['last_links_structured']
-            additional_text = st.session_state.get('last_links_text', '')
-    
-    return additional_text, links_structured
-
-
 def display_analysis_matrix(analysis: dict):
     """Mostra la matrice delle analisi forex - LAYOUT OTTIMIZZATO"""
     
@@ -4772,93 +2625,48 @@ def display_analysis_matrix(analysis: dict):
             st.caption(f"📅 Data analisi: {analysis['analysis_date']}")
     
     with col_sentiment:
-        # Supporta sia "risk_sentiment" che "market_regime"
-        sentiment = analysis.get("market_regime") or analysis.get("risk_sentiment")
-        if sentiment:
+        if "risk_sentiment" in analysis:
+            sentiment = analysis["risk_sentiment"]
             emoji = "🟢" if sentiment == "risk-on" else "🔴" if sentiment == "risk-off" else "🟡"
             st.markdown(f"**Risk Sentiment:** {emoji} {sentiment.upper()}")
     
-    # Summary (supporta sia "summary" che "market_summary")
-    summary_text = analysis.get("market_summary") or analysis.get("summary")
-    if summary_text:
-        st.info(f"📋 **Contesto:** {summary_text}")
-    
-    # Weekly Events Warning
-    if "weekly_events_warning" in analysis:
-        st.warning(f"📅 {analysis['weekly_events_warning']}")
+    # Summary
+    if "summary" in analysis:
+        st.info(f"📋 **Contesto:** {analysis['summary']}")
     
     st.markdown("---")
     
-    # ===== SEZIONE ANALISI VALUTE =====
-    currency_analysis = analysis.get("currency_analysis", {})
-    
-    if currency_analysis:
-        st.markdown("### 💱 Analisi per Valuta")
-        st.caption("Punteggi assoluti per ogni valuta. I differenziali delle coppie sono calcolati automaticamente.")
+    # ===== OUTLOOK TASSI (subito dopo summary) =====
+    rate_outlook = analysis.get("rate_outlook", {})
+    if rate_outlook:
+        st.markdown("### 🏦 Outlook Tassi di Interesse")
         
-        # Ordina valute per score (dalla più forte alla più debole)
-        currencies_sorted = sorted(
-            currency_analysis.items(),
-            key=lambda x: x[1].get("total_score", 0),
-            reverse=True
-        )
-        
-        # Crea tabella valute
-        currency_rows = []
-        for curr, data in currencies_sorted:
-            score = data.get("total_score", 0)
-            summary = data.get("summary", "")  # Non troncare più
+        rate_rows = []
+        for curr, data in rate_outlook.items():
+            expectation = data.get("expectation", "hold")
+            exp_emoji = "📈" if expectation == "hike" else "📉" if expectation == "cut" else "➡️"
             
-            # Colore basato sullo score
-            if score >= 3:
-                indicator = "🟢🟢"
-                strength = "Forte"
-            elif score > 0:
-                indicator = "🟢"
-                strength = "Positivo"
-            elif score <= -3:
-                indicator = "🔴🔴"
-                strength = "Debole"
-            elif score < 0:
-                indicator = "🔴"
-                strength = "Negativo"
-            else:
-                indicator = "🟡"
-                strength = "Neutro"
+            stance = data.get("stance", "neutral")
+            stance_emoji = "🦅" if stance == "hawkish" else "🕊️" if stance == "dovish" else "➖"
             
-            currency_rows.append({
+            rate_rows.append({
                 "Valuta": curr,
-                "Score": f"{indicator} {score:+d}",
-                "Forza": strength,
-                "Sintesi": summary
+                "Tasso Attuale": data.get("current_rate", "N/A"),
+                "Prossimo Meeting": data.get("next_meeting", "N/A"),
+                "Aspettativa": f"{exp_emoji} {expectation.upper()}",
+                "Stance": f"{stance_emoji} {stance.capitalize()}",
+                "Probabilità": data.get("probability", "N/A")
             })
         
-        # Mostra tabella con column_config per espandere la sintesi
-        import pandas as pd
-        df_currencies = pd.DataFrame(currency_rows)
+        df_rates = pd.DataFrame(rate_rows)
+        st.dataframe(df_rates, use_container_width=True, hide_index=True)
         
-        currency_column_config = {
-            "Valuta": st.column_config.TextColumn("Valuta", width="small"),
-            "Score": st.column_config.TextColumn("Score", width="small"),
-            "Forza": st.column_config.TextColumn("Forza", width="small"),
-            "Sintesi": st.column_config.TextColumn("Sintesi", width="large"),
-        }
-        
-        st.dataframe(
-            df_currencies, 
-            use_container_width=True, 
-            hide_index=True,
-            column_config=currency_column_config
-        )
-        
-        # Expander per vedere le sintesi complete
-        with st.expander("📝 Vedi sintesi complete per valuta"):
-            for curr, data in currencies_sorted:
-                score = data.get("total_score", 0)
-                summary = data.get("summary", "N/A")
-                indicator = "🟢🟢" if score >= 3 else "🟢" if score > 0 else "🔴🔴" if score <= -3 else "🔴" if score < 0 else "🟡"
-                st.markdown(f"**{curr}** {indicator} ({score:+d}): {summary}")
-                st.markdown("---")
+        # Mostra note dettagliate in expander
+        with st.expander("📝 Note dettagliate sulle aspettative tassi"):
+            for curr, data in rate_outlook.items():
+                notes = data.get("notes", "")
+                if notes:
+                    st.markdown(f"**{curr}:** {notes}")
         
         st.markdown("---")
     
@@ -4869,19 +2677,9 @@ def display_analysis_matrix(analysis: dict):
         # Calcola differenziale per ogni coppia e ordina
         pairs_with_diff = []
         for p, d in pair_analysis.items():
-            # Prima prova a usare valori pre-calcolati (nuovo formato)
-            if "differential" in d:
-                diff = d["differential"]
-            else:
-                # Fallback: calcola dalla somma dei singoli punteggi (vecchio formato)
-                scores = d.get("scores", {})
-                score_base = 0
-                score_quote = 0
-                for param_key, param_scores in scores.items():
-                    if isinstance(param_scores, dict):
-                        score_base += param_scores.get("base", 0)
-                        score_quote += param_scores.get("quote", 0)
-                diff = score_base - score_quote
+            score_base = d.get("score_base", 0)
+            score_quote = d.get("score_quote", 0)
+            diff = score_base - score_quote
             pairs_with_diff.append((p, d, diff))
         
         # Ordina per differenziale
@@ -4912,31 +2710,6 @@ def display_analysis_matrix(analysis: dict):
         
         st.markdown("---")
         
-        # ===== CONTROLLO VALUTE/COPPIE MANCANTI =====
-        # Controlla valute mancanti
-        if currency_analysis:
-            analyzed_currencies = set(currency_analysis.keys())
-            expected_currencies = set(CURRENCIES.keys())
-            missing_currencies = expected_currencies - analyzed_currencies
-            if missing_currencies:
-                st.warning(f"⚠️ **Valute mancanti nell'analisi:** {', '.join(sorted(missing_currencies))} ({len(missing_currencies)} su 7)")
-        
-        # ===== MOSTRA CORREZIONI PUNTEGGI =====
-        if "score_corrections" in analysis:
-            corrections = analysis["score_corrections"]
-            with st.expander(f"🔧 Correzioni punteggi automatiche ({len(corrections)})", expanded=False):
-                st.warning("I seguenti punteggi sono stati corretti automaticamente per violazione delle regole:")
-                for correction in corrections:
-                    st.markdown(f"- {correction}")
-        
-        # Controlla coppie mancanti
-        analyzed_pairs = set(pair_analysis.keys())
-        expected_pairs = set(FOREX_PAIRS)
-        missing_pairs = expected_pairs - analyzed_pairs
-        
-        if missing_pairs:
-            st.warning(f"⚠️ **Coppie mancanti:** {', '.join(sorted(missing_pairs))} ({len(missing_pairs)} su 19)")
-        
         # ===== TABELLA TUTTE LE COPPIE CON SELEZIONE SINGOLA =====
         st.markdown("### 📋 Tutte le Coppie")
         st.caption("👆 **Seleziona una riga** per vedere la sintesi completa e tutti i dettagli sotto la tabella")
@@ -4944,34 +2717,17 @@ def display_analysis_matrix(analysis: dict):
         # Crea lista con dati e ordina per differenziale (dal più bullish al più bearish)
         rows_data = []
         for pair, data in pair_analysis.items():
+            bias = data.get("bias", "neutral")
             summary = data.get("summary", "")
+            score_base = data.get("score_base", 0)
+            score_quote = data.get("score_quote", 0)
+            differential = score_base - score_quote
             
-            # Prima prova a usare valori pre-calcolati (nuovo formato)
-            if "differential" in data:
-                differential = data["differential"]
-            else:
-                # Fallback: calcola dalla somma dei singoli punteggi (vecchio formato)
-                scores = data.get("scores", {})
-                score_base = 0
-                score_quote = 0
-                for param_key, param_scores in scores.items():
-                    if isinstance(param_scores, dict):
-                        score_base += param_scores.get("base", 0)
-                        score_quote += param_scores.get("quote", 0)
-                differential = score_base - score_quote
-            
-            # Genera il summary con prefisso bias corretto basato sul differenziale
-            summary_with_bias = generate_summary_with_bias(summary, differential)
-            
-            # Pallini colorati basati SOLO sul DIFFERENZIALE (ignoriamo bias di Claude)
-            if differential >= 7:
-                bias_combined = "🟢🟢 BULLISH"
-            elif differential > 0:
-                bias_combined = "🟢 BULLISH"
-            elif differential <= -7:
-                bias_combined = "🔴🔴 BEARISH"
-            elif differential < 0:
-                bias_combined = "🔴 BEARISH"
+            # Pallini colorati basati sul DIFFERENZIALE (>=7 o <=-7 = forte)
+            if bias == "bullish" or differential > 0:
+                bias_combined = "🟢🟢 BULLISH" if differential >= 7 else "🟢 BULLISH"
+            elif bias == "bearish" or differential < 0:
+                bias_combined = "🔴🔴 BEARISH" if differential <= -7 else "🔴 BEARISH"
             else:
                 bias_combined = "🟡 NEUTRAL"
             
@@ -4980,7 +2736,7 @@ def display_analysis_matrix(analysis: dict):
                 "Coppia": pair,
                 "Bias": bias_combined,
                 "Diff": differential,
-                "Sintesi": summary_with_bias  # Bias determinato dal differenziale
+                "Sintesi": summary  # Testo completo - il dettaglio sotto mostra tutto
             })
         
         # Ordina per differenziale decrescente (bullish in alto, bearish in basso)
@@ -5032,52 +2788,29 @@ def display_analysis_matrix(analysis: dict):
             
             pair_data = pair_analysis[selected_pair]
             
+            bias = pair_data.get("bias", "neutral")
             summary = pair_data.get("summary", "")
+            score_base = pair_data.get("score_base", 0)
+            score_quote = pair_data.get("score_quote", 0)
+            differential = score_base - score_quote
             scores = pair_data.get("scores", {})
-            
-            # Usa valori pre-calcolati se disponibili (nuovo formato)
-            if "differential" in pair_data:
-                score_base = pair_data.get("score_base", 0)
-                score_quote = pair_data.get("score_quote", 0)
-                differential = pair_data["differential"]
-            else:
-                # Fallback: calcola dalla somma (vecchio formato)
-                score_base = 0
-                score_quote = 0
-                for param_key, param_scores in scores.items():
-                    if isinstance(param_scores, dict):
-                        score_base += param_scores.get("base", 0)
-                        score_quote += param_scores.get("quote", 0)
-                differential = score_base - score_quote
             
             # Estrai valute dalla coppia
             base_curr, quote_curr = selected_pair.split("/")
             
-            # Determina tipo bias basato SOLO sul DIFFERENZIALE (ignoriamo bias di Claude)
-            if differential >= 7:
+            # Determina tipo bias basato su DIFFERENZIALE
+            if bias == "bullish" or differential > 0:
                 bias_type = "RIALZISTA" 
-                bias_strength = "(STRONG)"
+                bias_strength = "(STRONG)" if differential >= 7 else "(MODERATE)"
                 header_color = "#d4edda"
                 header_border = "#28a745"
-                header_emoji = "🟢🟢"
-            elif differential > 0:
-                bias_type = "RIALZISTA" 
-                bias_strength = "(MODERATE)"
-                header_color = "#d4edda"
-                header_border = "#28a745"
-                header_emoji = "🟢"
-            elif differential <= -7:
+                header_emoji = "🟢🟢" if differential >= 7 else "🟢"
+            elif bias == "bearish" or differential < 0:
                 bias_type = "RIBASSISTA"
-                bias_strength = "(STRONG)"
+                bias_strength = "(STRONG)" if differential <= -7 else "(MODERATE)"
                 header_color = "#f8d7da"
                 header_border = "#dc3545"
-                header_emoji = "🔴🔴"
-            elif differential < 0:
-                bias_type = "RIBASSISTA"
-                bias_strength = "(MODERATE)"
-                header_color = "#f8d7da"
-                header_border = "#dc3545"
-                header_emoji = "🔴"
+                header_emoji = "🔴🔴" if differential <= -7 else "🔴"
             else:
                 bias_type = "NEUTRALE"
                 bias_strength = ""
@@ -5124,8 +2857,7 @@ def display_analysis_matrix(analysis: dict):
             
             # === SINTESI ===
             st.markdown("")
-            summary_with_bias = generate_summary_with_bias(summary, differential)
-            st.markdown(f"**Sintesi:** {summary_with_bias}")
+            st.markdown(f"**Sintesi:** {summary}")
             
             st.markdown("---")
             
@@ -5148,8 +2880,7 @@ def display_analysis_matrix(analysis: dict):
                 "crescita_pil": "Crescita/PIL [-1/+1]",
                 "pmi": "PMI [-1/+1]",
                 "risk_sentiment": "Risk Sentiment [-1/+1]",
-                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]",
-                "news_catalyst": "⚡ News Catalyst [-2/+2]"
+                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]"
             }
             
             with col_base:
@@ -5184,7 +2915,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_base.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
+                            "Motivazione": motivation  # Testo completo, nessun troncamento
                         })
                 
                 if score_rows_base:
@@ -5228,7 +2959,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_quote.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
+                            "Motivazione": motivation  # Testo completo, nessun troncamento
                         })
                 
                 if score_rows_quote:
@@ -5240,85 +2971,102 @@ def display_analysis_matrix(analysis: dict):
                 total_emoji = "🟢" if score_quote > 0 else "🔴" if score_quote < 0 else "⚪"
                 st.markdown(f"### {total_emoji} TOTALE: {'+' if score_quote > 0 else ''}{score_quote}")
             
-            # === EVIDENCE NEWS CATALYST ===
-            if "news_catalyst" in scores and "evidence" in scores.get("news_catalyst", {}):
-                evidence = scores["news_catalyst"]["evidence"]
-                with st.expander("📊 Dettagli calcolo News Catalyst (verifica dati)", expanded=False):
-                    col_ev_base, col_ev_quote = st.columns(2)
-                    
-                    with col_ev_base:
-                        st.markdown(f"**{base_curr} - Dati usati:**")
-                        base_data = evidence.get("base_data", [])
-                        if base_data:
-                            for item in base_data:
-                                event = item.get("event", "N/A")
-                                if item.get("actual"):
-                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
-                                else:
-                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
-                        calc_base = evidence.get("calculation_base", "")
-                        if calc_base:
-                            st.markdown(f"**Calcolo:** {calc_base}")
-                    
-                    with col_ev_quote:
-                        st.markdown(f"**{quote_curr} - Dati usati:**")
-                        quote_data = evidence.get("quote_data", [])
-                        if quote_data:
-                            for item in quote_data:
-                                event = item.get("event", "N/A")
-                                if item.get("actual"):
-                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
-                                else:
-                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
-                        calc_quote = evidence.get("calculation_quote", "")
-                        if calc_quote:
-                            st.markdown(f"**Calcolo:** {calc_quote}")
-            
             st.markdown("---")
             
-            # === SCENARI DI PREZZO ===
-            price_scenarios = pair_data.get("price_scenarios", {})
-            current_price = pair_data.get("current_price", "N/A")
+            # === SCENARI DI PREZZO CON PROBABILITÀ ===
+            # Ottieni prezzo attuale dai dati forex
+            forex_prices = st.session_state.get("last_forex_prices", {}).get("prices", {})
+            actual_price = forex_prices.get(selected_pair, {}).get("price")
+            
+            # Calcola differenziale
+            differential = score_base - score_quote
+            
+            # Calcola scenari di prezzo
+            if actual_price and actual_price > 0:
+                price_scenarios = calculate_price_scenarios(selected_pair, actual_price, differential)
+            else:
+                price_scenarios = None
+            
             key_drivers = pair_data.get("key_drivers", [])
             
-            if price_scenarios or current_price != "N/A":
+            if price_scenarios:
                 st.markdown("### 📊 Scenari di Prezzo")
                 
-                # Box prezzo attuale
+                # Box prezzo attuale con differenziale
+                diff_text = f"+{differential}" if differential > 0 else str(differential)
+                diff_color = "#28a745" if differential > 0 else "#dc3545" if differential < 0 else "#6c757d"
+                
                 st.markdown(f"""
                 <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
+                    <p style="margin: 0;">
+                        <strong>Prezzo attuale:</strong> {price_scenarios['current_price']} 
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        <strong>Differenziale:</strong> <span style="color: {diff_color}; font-weight: bold;">{diff_text}</span>
+                    </p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                if price_scenarios:
-                    col_base_range, col_base_strong, col_quote_strong = st.columns(3)
-                    
-                    with col_base_range:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <p style="margin: 0;">🟡 <strong>Base</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_range', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_base_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px;">
-                            <p style="margin: 0;">🟢 <strong>{base_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_quote_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px;">
-                            <p style="margin: 0;">🔴 <strong>{quote_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('quote_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                # Tre scenari con probabilità
+                col_base_strong, col_range, col_quote_strong = st.columns(3)
+                
+                # Determina quale scenario è più probabile
+                probs = [
+                    price_scenarios['prob_base_strong'],
+                    price_scenarios['prob_range'],
+                    price_scenarios['prob_quote_strong']
+                ]
+                max_prob = max(probs)
+                
+                with col_base_strong:
+                    is_most_likely = price_scenarios['prob_base_strong'] == max_prob
+                    border_style = "border: 3px solid #28a745;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🟢 <strong>{base_curr} Forte</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_strong']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #155724;">
+                            {star}{price_scenarios['prob_base_strong']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_range:
+                    is_most_likely = price_scenarios['prob_range'] == max_prob
+                    border_style = "border: 3px solid #856404;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #fff3cd; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🟡 <strong>Range</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_range']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #856404;">
+                            {star}{price_scenarios['prob_range']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_quote_strong:
+                    is_most_likely = price_scenarios['prob_quote_strong'] == max_prob
+                    border_style = "border: 3px solid #721c24;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🔴 <strong>{quote_curr} Forte</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['quote_strong']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #721c24;">
+                            {star}{price_scenarios['prob_quote_strong']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 st.markdown("")
+            elif actual_price:
+                st.markdown("### 📊 Scenari di Prezzo")
+                st.markdown(f"""
+                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px;">
+                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> {actual_price}</p>
+                </div>
+                """, unsafe_allow_html=True)
             
             # === DRIVER CHIAVE ===
             if key_drivers:
@@ -5330,6 +3078,25 @@ def display_analysis_matrix(analysis: dict):
             # Nessuna coppia selezionata
             st.markdown("### 🔍 Dettaglio Coppia Selezionata")
             st.info("👆 Seleziona una coppia dalla tabella sopra per vedere l'analisi dettagliata")
+        
+        st.markdown("---")
+        
+        # === CALENDARIO ECONOMICO (sempre visibile) ===
+        st.markdown("### 📅 Calendario Economico")
+        
+        st.info("📊 Consulta i calendari economici per gli eventi della settimana")
+        
+        col_te, col_ff = st.columns(2)
+        
+        with col_te:
+            st.markdown("🔗 [TradingEconomics Calendar](https://tradingeconomics.com/calendar)")
+        
+        with col_ff:
+            st.markdown("🔗 [ForexFactory Calendar](https://www.forexfactory.com/calendar)")
+        
+        st.caption("💡 Filtra per impatto 2-3 stelle e per le valute che ti interessano")
+        
+        st.markdown("---")
 
 
 def display_analysis_history(analyses: list, user_id: str):
@@ -5467,394 +3234,470 @@ def main():
         if st.button("🚪 Logout", type="secondary"):
             logout()
     
-    # ===== CARICA DATI E TIMESTAMPS =====
-    
-    # Carica dati esistenti dalla sessione o dall'ultima analisi
-    cached_data = {}
-    
-    # Se non abbiamo dati in sessione, carica dall'ultima analisi
-    if not st.session_state.get('last_macro_data'):
-        cached_data = get_latest_analysis_data(user_id)
-        
-        # Se abbiamo trovato dati in cache, salvali in session_state
-        if cached_data:
-            if cached_data.get('macro_data'):
-                st.session_state['last_macro_data'] = cached_data['macro_data']
-            if cached_data.get('pmi_data'):
-                st.session_state['last_pmi_data'] = cached_data['pmi_data']
-            if cached_data.get('cb_history_data'):
-                st.session_state['last_cb_history'] = cached_data['cb_history_data']
-            if cached_data.get('forex_prices'):
-                st.session_state['last_forex_prices'] = cached_data['forex_prices']
-            if cached_data.get('news_structured'):
-                st.session_state['last_news_structured'] = cached_data['news_structured']
-            
-            # Imposta anche i timestamps dalla data dell'analisi
-            if cached_data.get('cached_datetime'):
-                try:
-                    cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
-                    if ITALY_TZ:
-                        cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
-                    
-                    # Imposta timestamp per ogni tipo di dato presente
-                    if cached_data.get('macro_data'):
-                        st.session_state['timestamp_macro'] = cached_dt
-                    if cached_data.get('cb_history_data'):
-                        st.session_state['timestamp_cb_history'] = cached_dt
-                    if cached_data.get('pmi_data'):
-                        st.session_state['timestamp_pmi'] = cached_dt
-                    if cached_data.get('forex_prices'):
-                        st.session_state['timestamp_prices'] = cached_dt
-                    if cached_data.get('news_structured'):
-                        st.session_state['timestamp_news'] = cached_dt
-                except:
-                    pass
-    
-    # Ora recupera i dati dalla sessione
-    macro_data = st.session_state.get('last_macro_data')
-    pmi_data = st.session_state.get('last_pmi_data')
-    cb_history_data = st.session_state.get('last_cb_history')
-    forex_prices = st.session_state.get('last_forex_prices')
-    news_structured = st.session_state.get('last_news_structured', {})
-    
-    # Carica timestamps e calcola freshness
-    timestamps = load_data_timestamps(user_id)
-    all_fresh, freshness_details = get_all_data_freshness(timestamps)
-    
-    # --- SIDEBAR (Solo calendario) ---
+    # --- SIDEBAR ---
     with st.sidebar:
-        # Status compatto
-        st.markdown(f"### 👤 {username}")
+        st.header("⚙️ Configurazione")
         
+        # Status
         if API_KEY_LOADED:
-            st.caption("✅ API Claude OK")
+            st.success("✅ API Claude configurata")
         else:
-            st.caption("❌ API Key mancante")
+            st.error("❌ API Key mancante")
+        
+        if SUPABASE_ENABLED:
+            st.success("☁️ Database Supabase attivo")
+        else:
+            st.warning("💾 Modalità locale")
         
         st.markdown("---")
         
-        # Calendario analisi
-        user_analyses = get_user_analyses(user_id, limit=60)
-        selected_from_calendar = render_calendar_sidebar(user_id, user_analyses)
+        # ===== OPZIONI ANALISI =====
+        st.markdown("### 🎛️ Opzioni Analisi")
         
-        # Se selezionata un'analisi dal calendario, caricala
-        if selected_from_calendar:
-            st.session_state['current_analysis'] = selected_from_calendar
-            st.session_state['analysis_source'] = 'loaded'
-            st.session_state['viewing_historical'] = True
-            st.rerun()
-    
-    # ===== BANNER SE VISUALIZZANDO ANALISI STORICA =====
-    if st.session_state.get('viewing_historical'):
-        analysis = st.session_state.get('current_analysis', {})
-        dt_str = analysis.get('analysis_datetime', analysis.get('data', {}).get('analysis_datetime', ''))
+        st.caption("Seleziona cosa includere nell'analisi:")
         
-        col_banner, col_close = st.columns([5, 1])
-        with col_banner:
-            st.warning(f"📂 **Visualizzando analisi storica del {format_datetime_display(dt_str)}**")
-        with col_close:
-            if st.button("✕ Chiudi", type="secondary"):
-                st.session_state['viewing_historical'] = False
-                if 'current_analysis' in st.session_state:
-                    del st.session_state['current_analysis']
-                st.rerun()
+        opt_macro = st.checkbox(
+            "📊 Aggiorna Dati Macro",
+            value=True,
+            help="Recupera tassi, inflazione, PIL, disoccupazione (GRATIS)"
+        )
         
-        # Mostra i dati dell'analisi storica
-        data_container = analysis.get('data', analysis)
+        opt_pmi = st.checkbox(
+            "📈 Aggiorna Dati PMI",
+            value=True,
+            help="Recupera PMI Manufacturing e Services da Investing.com (GRATIS)"
+        )
         
-        st.markdown("## 📊 Dati dell'analisi storica")
+        opt_prices = st.checkbox(
+            "💱 Recupera Prezzi Forex",
+            value=True,
+            help="Recupera prezzi attuali delle 19 coppie forex da Yahoo Finance (GRATIS)"
+        )
         
-        # Macro
-        if data_container.get('macro_data'):
-            st.markdown("### 📊 Dati Macro")
-            display_macro_data(data_container['macro_data'])
+        opt_news = st.checkbox(
+            "📰 Ricerca Notizie Web",
+            value=True,
+            help="Cerca su Forex Factory, outlook BC, geopolitica (GRATIS)"
+        )
         
-        # CB History
-        if data_container.get('cb_history_data'):
-            st.markdown("### 🏦 Storico Banche Centrali")
-            display_central_bank_history(data_container['cb_history_data'])
+        opt_links = st.checkbox(
+            "📎 Processa Link Aggiuntivi",
+            value=False,
+            help="Analizza gli URL inseriti sotto (GRATIS)"
+        )
         
-        # PMI
-        if data_container.get('pmi_data'):
-            st.markdown("### 📈 Dati PMI")
-            display_pmi_table(data_container['pmi_data'])
-        
-        # Prezzi
-        if data_container.get('forex_prices'):
-            st.markdown("### 💱 Prezzi Forex")
-            display_forex_prices(data_container['forex_prices'])
-        
-        # News
-        if data_container.get('news_structured'):
-            st.markdown("### 📰 Notizie")
-            display_news_summary(data_container['news_structured'], data_container.get('links_structured'))
+        # Textarea per link (visibile solo se opzione attiva)
+        additional_urls = ""
+        if opt_links:
+            additional_urls = st.text_area(
+                "URL (uno per riga)",
+                height=100,
+                placeholder="https://federalreserve.gov/...\nhttps://reuters.com/...",
+                help="Max 10 URL",
+                key="additional_urls"
+            )
+            
+            if additional_urls.strip():
+                url_count = len([u for u in additional_urls.split('\n') if u.strip().startswith('http')])
+                st.info(f"📌 {url_count} URL da processare")
         
         st.markdown("---")
         
-        # Analisi Claude storica
-        if data_container.get('claude_analysis'):
-            display_analysis_matrix(data_container['claude_analysis'])
+        opt_claude = st.checkbox(
+            "🤖 Analisi Claude AI",
+            value=True,
+            help="Genera analisi completa forex ($$$ - costa token)"
+        )
         
-        return  # Stop qui se visualizzando analisi storica
-    
-    # ===== MAIN AREA - DATI INPUT =====
-    st.markdown("## 📊 Dati di Input")
-    
-    # --- SEZIONE 1: DATI MACRO ---
-    col_title1, col_status1, col_btn1 = st.columns([3, 3, 1])
-    with col_title1:
-        st.markdown("### 📊 Dati Macro")
-    with col_status1:
-        f = freshness_details.get('macro', {})
-        ts = timestamps.get('macro')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn1:
-        if st.button("🔄", key="upd_macro", help="Aggiorna Dati Macro"):
-            with st.spinner("Aggiornamento..."):
-                new_data = fetch_macro_data()
-                st.session_state['last_macro_data'] = new_data
-                st.session_state['timestamp_macro'] = get_italy_now()
-                save_data_timestamp('macro', user_id)
-                st.rerun()
-    
-    if macro_data:
-        display_macro_data(macro_data)
-    else:
-        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
-    st.markdown("---")
-    
-    # --- SEZIONE 2: STORICO BC ---
-    col_title2, col_status2, col_btn2 = st.columns([3, 3, 1])
-    with col_title2:
-        st.markdown("### 🏦 Storico Banche Centrali")
-    with col_status2:
-        f = freshness_details.get('cb_history', {})
-        ts = timestamps.get('cb_history')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn2:
-        if st.button("🔄", key="upd_cb", help="Aggiorna Storico BC"):
-            with st.spinner("Aggiornamento..."):
-                new_data = get_central_bank_history_summary()
-                st.session_state['last_cb_history'] = new_data
-                st.session_state['timestamp_cb_history'] = get_italy_now()
-                save_data_timestamp('cb_history', user_id)
-                st.rerun()
-    
-    if cb_history_data:
-        display_central_bank_history(cb_history_data)
-    else:
-        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
-    st.markdown("---")
-    
-    # --- SEZIONE 3: PMI ---
-    col_title3, col_status3, col_btn3 = st.columns([3, 3, 1])
-    with col_title3:
-        st.markdown("### 📈 Dati PMI")
-    with col_status3:
-        f = freshness_details.get('pmi', {})
-        ts = timestamps.get('pmi')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn3:
-        if st.button("🔄", key="upd_pmi", help="Aggiorna PMI"):
-            with st.spinner("Aggiornamento..."):
-                new_data = fetch_all_pmi_data()
-                st.session_state['last_pmi_data'] = new_data
-                st.session_state['timestamp_pmi'] = get_italy_now()
-                save_data_timestamp('pmi', user_id)
-                st.rerun()
-    
-    if pmi_data:
-        display_pmi_table(pmi_data)
-    else:
-        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
-    st.markdown("---")
-    
-    # --- SEZIONE 4: PREZZI FOREX ---
-    col_title4, col_status4, col_btn4 = st.columns([3, 3, 1])
-    with col_title4:
-        st.markdown("### 💱 Prezzi Forex")
-    with col_status4:
-        f = freshness_details.get('prices', {})
-        ts = timestamps.get('prices')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn4:
-        if st.button("🔄", key="upd_prices", help="Aggiorna Prezzi"):
-            with st.spinner("Aggiornamento..."):
-                new_data = fetch_forex_prices()
-                st.session_state['last_forex_prices'] = new_data
-                st.session_state['timestamp_prices'] = get_italy_now()
-                save_data_timestamp('prices', user_id)
-                st.rerun()
-    
-    if forex_prices:
-        display_forex_prices(forex_prices)
-    else:
-        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
-    st.markdown("---")
-    
-    # --- SEZIONE 5: NOTIZIE ---
-    col_title5, col_status5, col_btn5 = st.columns([3, 3, 1])
-    with col_title5:
-        st.markdown("### 📰 Notizie")
-    with col_status5:
-        f = freshness_details.get('news', {})
-        ts = timestamps.get('news')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn5:
-        if st.button("🔄", key="upd_news", help="Aggiorna Notizie"):
-            with st.spinner("Aggiornamento notizie..."):
-                news_text, new_structured = search_web_news()
+        if opt_claude:
+            st.warning("⚠️ L'analisi Claude consuma token API")
+        
+        # Validazione: almeno un'opzione dati se Claude attivo
+        if opt_claude and not (opt_macro or opt_pmi or opt_news or opt_links):
+            st.error("⚠️ Seleziona almeno una fonte dati per Claude!")
+        
+        st.markdown("---")
+        
+        # ===== BOTTONE ANALISI =====
+        can_analyze = API_KEY_LOADED and (opt_macro or opt_pmi or opt_prices or opt_news or opt_links)
+        
+        analyze_btn = st.button(
+            "🚀 AVVIA ANALISI",
+            disabled=not can_analyze,
+            use_container_width=True,
+            type="primary"
+        )
+        
+        # Calcola tipo analisi
+        analysis_type = "custom"
+        if opt_macro and opt_pmi and opt_news and opt_claude and not opt_links:
+            analysis_type = "full"
+        elif opt_macro and not opt_news and not opt_links:
+            analysis_type = "macro_only"
+        elif opt_news and not opt_macro and not opt_links:
+            analysis_type = "news_only"
+        elif opt_links and not opt_macro and not opt_news:
+            analysis_type = "links_only"
+        
+        st.caption(f"📋 Tipo: {get_analysis_type_label(analysis_type)}")
+        
+        st.markdown("---")
+        st.markdown(f"**Coppie:** {len(FOREX_PAIRS)}")
+        st.markdown(f"**Valute:** {', '.join(CURRENCIES.keys())}")
+        
+        st.markdown("---")
+        
+        # ===== STORICO ANALISI (menu a tendina) =====
+        user_analyses = get_user_analyses(user_id, limit=30)
+        
+        if user_analyses:
+            st.markdown("### 📁 Analisi Salvate")
+            
+            # Crea lista opzioni per selectbox
+            analysis_options = []
+            for analysis_record in user_analyses:
+                datetime_str = analysis_record.get("analysis_datetime", "")
+                if not datetime_str:
+                    data_obj = analysis_record.get("data", {})
+                    if isinstance(data_obj, dict):
+                        datetime_str = data_obj.get("analysis_datetime", "")
                 
-                # Aggiungi ForexFactory news
-                ff_news = fetch_forexfactory_news()
-                if ff_news.get("success") and ff_news.get("news"):
-                    new_structured["forexfactory_direct"] = ff_news["news"]
+                analysis_type = analysis_record.get("analysis_type") or "full"
+                date_display = format_datetime_display(datetime_str) if datetime_str else "Data sconosciuta"
+                type_label = get_analysis_type_label(analysis_type)
                 
-                st.session_state['last_news_text'] = news_text
-                st.session_state['last_news_structured'] = new_structured
-                st.session_state['timestamp_news'] = get_italy_now()
-                save_data_timestamp('news', user_id)
-                st.rerun()
+                analysis_options.append({
+                    "label": f"{date_display} - {type_label}",
+                    "datetime": datetime_str,
+                    "record": analysis_record
+                })
+            
+            # Selectbox
+            selected_idx = st.selectbox(
+                "Seleziona analisi:",
+                range(len(analysis_options)),
+                format_func=lambda x: analysis_options[x]["label"],
+                key="analysis_selector"
+            )
+            
+            selected_analysis = analysis_options[selected_idx]
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📂 Carica", use_container_width=True):
+                    st.session_state['current_analysis'] = selected_analysis["record"]
+                    st.session_state['analysis_source'] = 'loaded'
+                    st.rerun()
+            
+            with col2:
+                if st.button("🗑️ Elimina", use_container_width=True, type="secondary"):
+                    st.session_state['confirm_delete'] = selected_analysis["datetime"]
+            
+            # Conferma eliminazione
+            if 'confirm_delete' in st.session_state and st.session_state['confirm_delete'] == selected_analysis["datetime"]:
+                st.warning(f"⚠️ Eliminare questa analisi?")
+                col_yes, col_no = st.columns(2)
+                with col_yes:
+                    if st.button("✅ Sì", use_container_width=True):
+                        del_user_id = selected_analysis["record"].get("user_id") or user_id
+                        if delete_analysis(selected_analysis["datetime"], del_user_id):
+                            st.success("Eliminata!")
+                            del st.session_state['confirm_delete']
+                            st.rerun()
+                with col_no:
+                    if st.button("❌ No", use_container_width=True):
+                        del st.session_state['confirm_delete']
+                        st.rerun()
+        else:
+            st.info("📁 Nessuna analisi salvata")
     
-    if news_structured:
-        display_news_summary(news_structured, st.session_state.get('last_links_structured'))
-    else:
-        st.info("ℹ️ Nessuna notizia. Clicca 🔄 per aggiornare.")
+    # --- MAIN AREA ---
     
-    # Link aggiuntivi (dentro sezione news)
-    additional_text, links_structured = render_additional_links_section(user_id)
-    
-    st.markdown("---")
-    
-    # ===== SEZIONE ANALISI CLAUDE =====
-    st.markdown("## 🤖 Analisi Claude AI")
-    
-    # Ricalcola freshness (potrebbe essere cambiata dopo aggiornamenti)
-    timestamps = load_data_timestamps(user_id)
-    all_fresh, freshness_details = get_all_data_freshness(timestamps)
-    
-    # Conta dati mancanti o non freschi
-    not_fresh = [k for k, v in freshness_details.items() if not v.get('is_fresh', False)]
-    
-    if not_fresh:
-        st.warning(f"⚠️ **Alcuni dati non sono aggiornati:** {', '.join(not_fresh).upper()}")
-        st.caption("Aggiorna tutti i dati prima di lanciare una nuova analisi, oppure carica una vecchia analisi dal calendario.")
-        can_analyze = False
-    else:
-        st.success("✅ Tutti i dati sono aggiornati!")
-        can_analyze = API_KEY_LOADED
-    
-    # Bottone analisi
-    if st.button(
-        "🤖 AVVIA ANALISI CLAUDE",
-        disabled=not can_analyze,
-        use_container_width=True,
-        type="primary"
-    ):
+    # ===== ESECUZIONE ANALISI =====
+    if analyze_btn:
         progress = st.progress(0, text="Inizializzazione...")
         
-        try:
-            # Recupera dati economici per News Catalyst
-            progress.progress(10, text="📊 Recupero dati economici...")
-            economic_events = {}
-            try:
-                economic_events = fetch_all_economic_events()
-                st.session_state['last_economic_events'] = economic_events
-            except Exception as e:
-                st.warning(f"⚠️ Errore dati economici: {str(e)[:50]}")
-                economic_events = st.session_state.get('last_economic_events', {})
+        # Variabili per raccogliere i dati
+        macro_data = None
+        pmi_data = None
+        news_text = ""
+        news_structured = {}
+        additional_text = ""
+        links_structured = []
+        claude_analysis = None
+        
+        options_selected = {
+            "macro": opt_macro,
+            "pmi": opt_pmi,
+            "prices": opt_prices,
+            "news": opt_news,
+            "links": opt_links,
+            "claude": opt_claude
+        }
+        
+        step = 0
+        total_steps = sum([opt_macro, opt_pmi, opt_prices, opt_news, opt_links, opt_claude])
+        if total_steps == 0:
+            total_steps = 1  # Evita divisione per zero
+        
+        # FASE 1: Dati Macro
+        if opt_macro:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📊 Recupero dati macro...")
+            macro_data = fetch_macro_data()
+            st.session_state['last_macro_data'] = macro_data
+        else:
+            # Usa dati macro dalla sessione o dall'ultima analisi salvata
+            if 'last_macro_data' in st.session_state and st.session_state['last_macro_data']:
+                macro_data = st.session_state['last_macro_data']
+            else:
+                # Prova a caricare dall'ultima analisi salvata
+                try:
+                    recent = list_analyses(user_id, limit=1)
+                    if recent and len(recent) > 0:
+                        datetime_key = recent[0].get("analysis_datetime") or recent[0].get("data", {}).get("analysis_datetime")
+                        if datetime_key:
+                            last_analysis = load_analysis(datetime_key, user_id)
+                            if last_analysis:
+                                # I dati sono dentro 'data' per Supabase
+                                data_container = last_analysis.get('data', last_analysis)
+                                if data_container and 'macro_data' in data_container:
+                                    macro_data = data_container['macro_data']
+                                    st.session_state['last_macro_data'] = macro_data
+                except Exception as e:
+                    # Se fallisce il caricamento, continua senza dati macro
+                    pass
+        
+        # FASE 2: Dati PMI
+        if opt_pmi:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📈 Recupero dati PMI...")
+            pmi_data = fetch_all_pmi_data()
+            st.session_state['last_pmi_data'] = pmi_data
+        else:
+            # Usa dati PMI dalla sessione
+            if 'last_pmi_data' in st.session_state and st.session_state['last_pmi_data']:
+                pmi_data = st.session_state['last_pmi_data']
+        
+        # FASE 2.5: Prezzi Forex
+        forex_prices = {}
+        if opt_prices:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="💱 Recupero prezzi forex...")
+            forex_prices = fetch_forex_prices()
+            st.session_state['last_forex_prices'] = forex_prices
+        else:
+            # Usa prezzi dalla sessione se disponibili
+            if 'last_forex_prices' in st.session_state:
+                forex_prices = st.session_state['last_forex_prices']
+        
+        # FASE 3: Notizie Web
+        if opt_news:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📰 Ricerca notizie web...")
+            news_text, news_structured = search_web_news()
             
-            # Recupera news text per Claude
-            news_text = st.session_state.get('last_news_text', '')
-            if not news_text and news_structured:
-                # Ricostruisci news_text dalle news structured
-                news_text = ""
-                for source, items in news_structured.items():
-                    if isinstance(items, list):
-                        for item in items[:10]:
-                            if isinstance(item, dict):
-                                news_text += f"• {item.get('title', '')}\n"
+            # Aggiungi news dirette da ForexFactory
+            progress.progress(int(step/total_steps*80), text="📰 Recupero ForexFactory news...")
+            ff_news = fetch_forexfactory_news()
+            if ff_news.get("success") and ff_news.get("news"):
+                # Aggiungi alle news structured
+                news_structured["forexfactory_direct"] = ff_news["news"]
+                # Aggiungi al testo per Claude
+                ff_text = "\n\n=== FOREX FACTORY NEWS (ULTIME) ===\n"
+                for item in ff_news["news"][:15]:
+                    ff_text += f"• {item['title']}"
+                    if item.get('currency'):
+                        ff_text += f" [{item['currency']}]"
+                    if item.get('time'):
+                        ff_text += f" ({item['time']})"
+                    ff_text += "\n"
+                news_text += ff_text
             
-            # Link aggiuntivi
-            add_text = st.session_state.get('last_links_text', '')
+            st.session_state['last_news_text'] = news_text
+            st.session_state['last_news_structured'] = news_structured
+        
+        # FASE 4: Link Aggiuntivi
+        if opt_links and additional_urls.strip():
+            step += 1
+            progress.progress(int(step/total_steps*80), text="📎 Processamento link...")
+            url_list = [u.strip() for u in additional_urls.split('\n') if u.strip().startswith('http')]
+            additional_text, links_structured = fetch_additional_resources(url_list)
+            st.session_state['last_links_text'] = additional_text
+            st.session_state['last_links_structured'] = links_structured
+        
+        # FASE 5: Analisi Claude
+        if opt_claude:
+            step += 1
+            progress.progress(int(step/total_steps*80), text="🤖 Claude sta analizzando...")
             
-            # Analisi Claude
-            progress.progress(30, text="🤖 Claude sta analizzando...")
+            # Usa dati dalla sessione se non aggiornati ora
+            if not opt_news and 'last_news_text' in st.session_state:
+                news_text = st.session_state['last_news_text']
+            if not opt_links and 'last_links_text' in st.session_state:
+                additional_text = st.session_state['last_links_text']
+            if not opt_pmi and 'last_pmi_data' in st.session_state:
+                pmi_data = st.session_state['last_pmi_data']
+            
+            # Recupera prezzi forex dalla sessione
+            forex_prices = st.session_state.get('last_forex_prices', {})
             
             claude_analysis = analyze_with_claude(
                 ANTHROPIC_API_KEY,
                 macro_data,
                 news_text,
-                add_text,
+                additional_text,
                 pmi_data,
-                forex_prices,
-                economic_events,
-                cb_history_data
+                forex_prices
             )
-            
-            # Salva risultato
-            progress.progress(80, text="💾 Salvataggio...")
-            
-            analysis_result = {
-                "macro_data": macro_data,
-                "pmi_data": pmi_data,
-                "cb_history_data": cb_history_data,
-                "forex_prices": forex_prices,
-                "economic_events": economic_events,
-                "news_structured": news_structured,
-                "links_structured": links_structured,
-                "claude_analysis": claude_analysis,
-                "options_selected": {"full": True}
-            }
-            
-            if save_analysis(analysis_result, user_id, "full", {"full": True}):
-                st.session_state['current_analysis'] = analysis_result
-                st.session_state['analysis_source'] = 'new'
-                progress.progress(100, text="✅ Completato!")
-                st.rerun()
-            else:
-                progress.progress(100, text="❌ Errore salvataggio")
-                
-        except Exception as e:
-            st.error(f"❌ Errore analisi: {str(e)}")
+        
+        # ===== SALVATAGGIO =====
+        progress.progress(90, text="💾 Salvataggio...")
+        
+        analysis_result = {
+            "macro_data": macro_data,
+            "pmi_data": pmi_data,
+            "forex_prices": forex_prices,
+            "news_structured": news_structured,
+            "links_structured": links_structured,
+            "claude_analysis": claude_analysis,
+            "options_selected": options_selected
+        }
+        
+        if save_analysis(analysis_result, user_id, analysis_type, options_selected):
+            st.session_state['current_analysis'] = analysis_result
+            st.session_state['analysis_source'] = 'new'
+            progress.progress(100, text="✅ Completato!")
+            st.rerun()
+        else:
+            progress.progress(100, text="❌ Errore")
+            # L'errore dettagliato è già mostrato da save_analysis
     
-    # ===== MOSTRA ULTIMA ANALISI (se dati freschi) =====
-    if all_fresh and 'current_analysis' in st.session_state:
+    # ===== VISUALIZZAZIONE RISULTATI =====
+    if 'current_analysis' in st.session_state:
         analysis = st.session_state['current_analysis']
         source = st.session_state.get('analysis_source', 'unknown')
         
-        # Estrai claude_analysis dal container
-        data_container = analysis.get('data', analysis)
-        claude_analysis = data_container.get('claude_analysis')
+        if source == 'new':
+            st.success("✅ Nuova analisi completata!")
+        elif source == 'loaded':
+            st.info("📂 Analisi caricata da archivio")
         
+        # DEBUG: mostra struttura (rimuovere dopo test)
+        # with st.expander("🔍 Debug struttura dati"):
+        #     st.json(analysis)
+        
+        # Estrai dati - gestisci multipli formati
+        # Formato Supabase: { "data": {...}, "analysis_datetime": "...", ... }
+        # Formato v3: data contiene { "macro_data": ..., "claude_analysis": ... }
+        # Formato legacy: data contiene direttamente { "pair_analysis": ..., "market_summary": ... }
+        
+        data_container = analysis.get('data', analysis)
+        
+        # Se data_container è una stringa (JSON serializzato), deserializza
+        if isinstance(data_container, str):
+            try:
+                data_container = json.loads(data_container)
+            except:
+                data_container = {}
+        
+        # Inizializza variabili
+        macro_data = None
+        pmi_data = None
+        news_structured = {}
+        links_structured = []
+        claude_analysis = None
+        
+        # Rileva formato e estrai dati
+        if 'claude_analysis' in data_container:
+            # Formato v3 nuovo
+            macro_data = data_container.get('macro_data')
+            pmi_data = data_container.get('pmi_data')
+            news_structured = data_container.get('news_structured', {})
+            links_structured = data_container.get('links_structured', [])
+            claude_analysis = data_container.get('claude_analysis')
+        elif 'pair_analysis' in data_container:
+            # Formato legacy - data_container È l'analisi Claude
+            claude_analysis = data_container
+        elif 'macro_data' in data_container:
+            # Formato v3 senza Claude
+            macro_data = data_container.get('macro_data')
+            pmi_data = data_container.get('pmi_data')
+            news_structured = data_container.get('news_structured', {})
+            links_structured = data_container.get('links_structured', [])
+        
+        # Salva in session_state per visualizzazione tabella PMI
+        if pmi_data:
+            st.session_state['last_pmi_data'] = pmi_data
+        
+        # Verifica se c'è qualcosa da mostrare
+        has_content = macro_data or pmi_data or news_structured or links_structured or claude_analysis
+        
+        if not has_content:
+            st.warning("⚠️ Questa analisi non contiene dati visualizzabili")
+            with st.expander("🔍 Dettagli struttura"):
+                st.json(analysis)
+        
+        # === ORDINE VISUALIZZAZIONE ===
+        # 1. Dati Macro
+        # 2. Dati PMI
+        # 3. Analisi Claude (outlook tassi, top bullish/bearish, coppie, valute)
+        # 4. Notizie Web (alla fine)
+        
+        if macro_data:
+            display_macro_data(macro_data)
+            st.markdown("---")
+        
+        if pmi_data:
+            display_pmi_table(pmi_data)
+            st.markdown("---")
+        
+        # 1️⃣ Mostra tabella prezzi forex se disponibili
+        forex_prices = analysis.get("forex_prices", {})
+        if not forex_prices and 'last_forex_prices' in st.session_state:
+            forex_prices = st.session_state['last_forex_prices']
+        
+        if forex_prices and forex_prices.get("prices"):
+            display_forex_prices(forex_prices)
+            st.markdown("---")
+        
+        # 2️⃣ Notizie e Calendario (subito dopo prezzi)
+        if news_structured or links_structured:
+            display_news_summary(news_structured, links_structured)
+            st.markdown("---")
+        
+        # 3️⃣ Analisi Claude (alla fine, dopo tutti i dati)
         if claude_analysis:
-            if source == 'new':
-                st.success("✅ Nuova analisi completata!")
-            
-            # Mostra data analisi
-            dt_str = analysis.get('analysis_datetime', data_container.get('analysis_datetime', ''))
-            if dt_str:
-                st.caption(f"📅 Analisi del {format_datetime_display(dt_str)}")
-            
             display_analysis_matrix(claude_analysis)
     
-    elif not all_fresh:
-        # Messaggio quando dati non freschi
-        st.info("💡 Aggiorna i dati per visualizzare/creare un'analisi, oppure carica un'analisi storica dal calendario nella sidebar.")
+    else:
+        # Stato iniziale
+        st.markdown("""
+        ### 👋 Benvenuto!
+        
+        Seleziona le opzioni nella sidebar e clicca **🚀 AVVIA ANALISI**.
+        
+        **Opzioni disponibili:**
+        - 📊 **Dati Macro** - Tassi, inflazione, PIL (gratis)
+        - 📈 **Dati PMI** - Manufacturing & Services PMI (gratis)
+        - 💱 **Prezzi Forex** - Prezzi attuali delle 19 coppie (gratis)
+        - 📰 **Notizie Web** - Forex Factory, outlook BC (gratis)
+        - 📎 **Link Aggiuntivi** - Analizza URL custom (gratis)
+        - 🤖 **Claude AI** - Analisi completa forex (a pagamento)
+        
+        💡 **Suggerimento:** Puoi aggiornare solo le notizie senza richiamare Claude per risparmiare!
+        """)
     
-    # ===== FOOTER =====
+    # --- FOOTER ---
     st.markdown("---")
     st.markdown("""
     <div style="text-align: center; color: #6b7280; font-size: 0.8rem;">
-        📊 Forex Macro Analyst v4.0 | Powered by Claude AI<br>
+        📊 Forex Macro Analyst v3.0 | Powered by Claude AI<br>
         ⚠️ Non costituisce consiglio di investimento
     </div>
     """, unsafe_allow_html=True)
+
 
 # ============================================================================
 # RUN
