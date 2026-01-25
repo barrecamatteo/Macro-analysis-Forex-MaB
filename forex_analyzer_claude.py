@@ -5383,17 +5383,33 @@ def display_analysis_matrix(analysis: dict):
             st.markdown("---")
             
             # === SCENARI DI PREZZO CON PROBABILITÀ ===
-            # Ottieni prezzo attuale dai dati forex
-            forex_prices_data = st.session_state.get("last_forex_prices")
-            forex_prices = {}
-            if forex_prices_data and isinstance(forex_prices_data, dict):
-                forex_prices = forex_prices_data.get("prices", {}) or {}
-            
+            # Ottieni prezzo attuale dai dati forex (più fonti possibili)
             actual_price = None
-            if forex_prices and selected_pair in forex_prices:
-                pair_price_data = forex_prices.get(selected_pair)
-                if pair_price_data and isinstance(pair_price_data, dict):
-                    actual_price = pair_price_data.get("price")
+            
+            # 1. Prima prova session_state (dati più recenti)
+            forex_prices_data = st.session_state.get("last_forex_prices")
+            if forex_prices_data and isinstance(forex_prices_data, dict):
+                prices_dict = forex_prices_data.get("prices", {})
+                if prices_dict and selected_pair in prices_dict:
+                    price_val = prices_dict.get(selected_pair)
+                    # Il prezzo può essere un float diretto o un dict con chiave "price"
+                    if isinstance(price_val, (int, float)):
+                        actual_price = float(price_val)
+                    elif isinstance(price_val, dict):
+                        actual_price = price_val.get("price")
+            
+            # 2. Fallback: prova dai dati dell'analisi corrente
+            if not actual_price:
+                current_analysis = st.session_state.get('current_analysis', {})
+                analysis_forex = current_analysis.get('forex_prices') or current_analysis.get('data', {}).get('forex_prices')
+                if analysis_forex and isinstance(analysis_forex, dict):
+                    prices_dict = analysis_forex.get("prices", analysis_forex)
+                    if prices_dict and selected_pair in prices_dict:
+                        price_val = prices_dict.get(selected_pair)
+                        if isinstance(price_val, (int, float)):
+                            actual_price = float(price_val)
+                        elif isinstance(price_val, dict):
+                            actual_price = price_val.get("price")
             
             # Calcola differenziale
             differential = score_base - score_quote
