@@ -2975,8 +2975,16 @@ def display_analysis_matrix(analysis: dict):
             
             # === SCENARI DI PREZZO CON PROBABILITÀ ===
             # Ottieni prezzo attuale dai dati forex
-            forex_prices = st.session_state.get("last_forex_prices", {}).get("prices", {})
-            actual_price = forex_prices.get(selected_pair, {}).get("price")
+            forex_prices_data = st.session_state.get("last_forex_prices")
+            forex_prices = {}
+            if forex_prices_data and isinstance(forex_prices_data, dict):
+                forex_prices = forex_prices_data.get("prices", {}) or {}
+            
+            actual_price = None
+            if forex_prices and selected_pair in forex_prices:
+                pair_price_data = forex_prices.get(selected_pair)
+                if pair_price_data and isinstance(pair_price_data, dict):
+                    actual_price = pair_price_data.get("price")
             
             # Calcola differenziale
             differential = score_base - score_quote
