@@ -1125,6 +1125,112 @@ FOREX_PAIRS = [
     "AUD/CHF", "EUR/USD", "EUR/GBP", "GBP/USD",
 ]
 
+# Volatilità tipica giornaliera per coppia (in % del prezzo)
+# Usata per calcolare gli scenari di prezzo
+PAIR_VOLATILITY = {
+    # Major pairs - volatilità più bassa
+    "EUR/USD": 0.50,
+    "GBP/USD": 0.65,
+    "USD/JPY": 0.55,
+    "USD/CHF": 0.55,
+    "AUD/USD": 0.60,
+    "USD/CAD": 0.55,
+    # Cross pairs - volatilità media/alta
+    "EUR/GBP": 0.45,
+    "EUR/JPY": 0.70,
+    "GBP/JPY": 0.90,  # Molto volatile
+    "EUR/CHF": 0.40,
+    "GBP/CHF": 0.70,
+    "AUD/JPY": 0.75,
+    "CAD/JPY": 0.70,
+    "EUR/AUD": 0.70,
+    "GBP/AUD": 0.85,
+    "EUR/CAD": 0.60,
+    "GBP/CAD": 0.75,
+    "AUD/CAD": 0.55,
+    "AUD/CHF": 0.60,
+    "CAD/CHF": 0.55,
+}
+
+
+def calculate_price_scenarios(pair: str, current_price: float, differential: int) -> dict:
+    """
+    Calcola scenari di prezzo con probabilità basate sul differenziale.
+    
+    Args:
+        pair: Coppia forex (es. "EUR/USD")
+        current_price: Prezzo attuale
+        differential: Differenziale score_base - score_quote
+    
+    Returns:
+        dict con scenari e probabilità
+    """
+    if current_price is None or current_price <= 0:
+        return None
+    
+    # Ottieni volatilità della coppia (default 0.6% se non trovata)
+    volatility_pct = PAIR_VOLATILITY.get(pair, 0.60)
+    
+    # Calcola range in punti
+    base_range = current_price * (volatility_pct / 100)
+    extended_range = current_price * (volatility_pct * 1.5 / 100)
+    
+    # Determina decimali in base alla coppia
+    if "JPY" in pair:
+        decimals = 2
+    else:
+        decimals = 4
+    
+    # Calcola livelli di prezzo
+    range_low = round(current_price - base_range, decimals)
+    range_high = round(current_price + base_range, decimals)
+    
+    base_strong_low = round(current_price + base_range, decimals)
+    base_strong_high = round(current_price + extended_range, decimals)
+    
+    quote_strong_low = round(current_price - extended_range, decimals)
+    quote_strong_high = round(current_price - base_range, decimals)
+    
+    # Calcola probabilità basate sul differenziale
+    if differential >= 7:
+        prob_base_strong = 65
+        prob_range = 25
+        prob_quote_strong = 10
+    elif differential >= 4:
+        prob_base_strong = 55
+        prob_range = 30
+        prob_quote_strong = 15
+    elif differential >= 1:
+        prob_base_strong = 45
+        prob_range = 35
+        prob_quote_strong = 20
+    elif differential == 0:
+        prob_base_strong = 33
+        prob_range = 34
+        prob_quote_strong = 33
+    elif differential >= -3:
+        prob_base_strong = 20
+        prob_range = 35
+        prob_quote_strong = 45
+    elif differential >= -6:
+        prob_base_strong = 15
+        prob_range = 30
+        prob_quote_strong = 55
+    else:  # <= -7
+        prob_base_strong = 10
+        prob_range = 25
+        prob_quote_strong = 65
+    
+    return {
+        "base_range": f"{range_low} - {range_high}",
+        "base_strong": f"{base_strong_low} - {base_strong_high}",
+        "quote_strong": f"{quote_strong_low} - {quote_strong_high}",
+        "prob_base_strong": prob_base_strong,
+        "prob_range": prob_range,
+        "prob_quote_strong": prob_quote_strong,
+        "current_price": round(current_price, decimals)
+    }
+
 
 # ============================================================================
 # CONFIGURAZIONE BANCHE CENTRALI - Per scraping automatico storico decisioni
@@ -5184,7 +5290,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_base.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
+                            "Motivazione": motivation  # Testo completo
                         })
                 
                 if score_rows_base:
@@ -5228,7 +5334,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_quote.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
+                            "Motivazione": motivation  # Testo completo
                         })
                 
                 if score_rows_quote:
@@ -5276,49 +5382,108 @@ def display_analysis_matrix(analysis: dict):
             
             st.markdown("---")
             
-            # === SCENARI DI PREZZO ===
-            price_scenarios = pair_data.get("price_scenarios", {})
-            current_price = pair_data.get("current_price", "N/A")
+            # === SCENARI DI PREZZO CON PROBABILITÀ ===
+            # Ottieni prezzo attuale dai dati forex
+            forex_prices_data = st.session_state.get("last_forex_prices")
+            forex_prices = {}
+            if forex_prices_data and isinstance(forex_prices_data, dict):
+                forex_prices = forex_prices_data.get("prices", {}) or {}
+            
+            actual_price = None
+            if forex_prices and selected_pair in forex_prices:
+                pair_price_data = forex_prices.get(selected_pair)
+                if pair_price_data and isinstance(pair_price_data, dict):
+                    actual_price = pair_price_data.get("price")
+            
+            # Calcola differenziale
+            differential = score_base - score_quote
+            
+            # Calcola scenari di prezzo
+            if actual_price and actual_price > 0:
+                price_scenarios = calculate_price_scenarios(selected_pair, actual_price, differential)
+            else:
+                price_scenarios = None
+            
             key_drivers = pair_data.get("key_drivers", [])
             
-            if price_scenarios or current_price != "N/A":
+            if price_scenarios:
                 st.markdown("### 📊 Scenari di Prezzo")
                 
-                # Box prezzo attuale
+                # Box prezzo attuale con differenziale
+                diff_text = f"+{differential}" if differential > 0 else str(differential)
+                diff_color = "#28a745" if differential > 0 else "#dc3545" if differential < 0 else "#6c757d"
+                
                 st.markdown(f"""
                 <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
+                    <p style="margin: 0;">
+                        <strong>Prezzo attuale:</strong> {price_scenarios['current_price']} 
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        <strong>Differenziale:</strong> <span style="color: {diff_color}; font-weight: bold;">{diff_text}</span>
+                    </p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                if price_scenarios:
-                    col_base_range, col_base_strong, col_quote_strong = st.columns(3)
-                    
-                    with col_base_range:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <p style="margin: 0;">🟡 <strong>Base</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_range', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_base_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px;">
-                            <p style="margin: 0;">🟢 <strong>{base_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_quote_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px;">
-                            <p style="margin: 0;">🔴 <strong>{quote_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('quote_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                # Tre scenari con probabilità
+                col_base_strong, col_range, col_quote_strong = st.columns(3)
+                
+                # Determina quale scenario è più probabile
+                probs = [
+                    price_scenarios['prob_base_strong'],
+                    price_scenarios['prob_range'],
+                    price_scenarios['prob_quote_strong']
+                ]
+                max_prob = max(probs)
+                
+                with col_base_strong:
+                    is_most_likely = price_scenarios['prob_base_strong'] == max_prob
+                    border_style = "border: 3px solid #28a745;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🟢 <strong>{base_curr} Forte</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_strong']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #155724;">
+                            {star}{price_scenarios['prob_base_strong']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_range:
+                    is_most_likely = price_scenarios['prob_range'] == max_prob
+                    border_style = "border: 3px solid #856404;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #fff3cd; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🟡 <strong>Range</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_range']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #856404;">
+                            {star}{price_scenarios['prob_range']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with col_quote_strong:
+                    is_most_likely = price_scenarios['prob_quote_strong'] == max_prob
+                    border_style = "border: 3px solid #721c24;" if is_most_likely else ""
+                    star = "⭐ " if is_most_likely else ""
+                    st.markdown(f"""
+                    <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px; {border_style}">
+                        <p style="margin: 0; font-size: 1.2em;">🔴 <strong>{quote_curr} Forte</strong></p>
+                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['quote_strong']}</p>
+                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #721c24;">
+                            {star}{price_scenarios['prob_quote_strong']}%
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 st.markdown("")
+            elif actual_price:
+                st.markdown("### 📊 Scenari di Prezzo")
+                st.markdown(f"""
+                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px;">
+                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> {actual_price}</p>
+                </div>
+                """, unsafe_allow_html=True)
             
             # === DRIVER CHIAVE ===
             if key_drivers:
