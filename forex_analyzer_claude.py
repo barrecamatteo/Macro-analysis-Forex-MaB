@@ -319,7 +319,25 @@ def load_data_timestamps(user_id: str) -> dict:
     if len(timestamps) < len(data_types):
         try:
             cached = get_latest_analysis_data(user_id)
-            if cached.get("cached_datetime"):
+            
+            # *** PRIORITÀ: Usa data_timestamps salvati (timestamp REALI) ***
+            if cached.get("data_timestamps"):
+                saved_timestamps = cached["data_timestamps"]
+                for dt in data_types:
+                    if dt not in timestamps and dt in saved_timestamps:
+                        try:
+                            ts_str = saved_timestamps[dt]
+                            ts_dt = datetime.strptime(ts_str, "%Y-%m-%d_%H-%M-%S")
+                            if ITALY_TZ:
+                                ts_dt = ts_dt.replace(tzinfo=ITALY_TZ)
+                            timestamps[dt] = ts_dt
+                            st.session_state[f"timestamp_{dt}"] = ts_dt
+                        except:
+                            pass
+            
+            # *** FALLBACK: Solo se non ci sono data_timestamps (analisi vecchie) ***
+            # usa cached_datetime come approssimazione
+            elif cached.get("cached_datetime"):
                 cached_dt = datetime.strptime(cached["cached_datetime"], "%Y-%m-%d_%H-%M-%S")
                 if ITALY_TZ:
                     cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
@@ -991,6 +1009,10 @@ def get_latest_analysis_data(user_id: str) -> dict:
         
         # Aggiungi anche il datetime per mostrare quanto sono vecchi i dati
         cached_data['cached_datetime'] = datetime_key
+        
+        # *** IMPORTANTE: Aggiungi i timestamp REALI dei dati (se salvati) ***
+        if 'data_timestamps' in data_container:
+            cached_data['data_timestamps'] = data_container['data_timestamps']
         
     except Exception as e:
         # Se fallisce, ritorna dict vuoto
@@ -5670,23 +5692,44 @@ def main():
             if cached_data.get('news_structured'):
                 st.session_state['last_news_structured'] = cached_data['news_structured']
             
-            # Imposta anche i timestamps dalla data dell'analisi
-            if cached_data.get('cached_datetime'):
+            # *** PRIORITÀ: Usa data_timestamps (timestamp REALI di aggiornamento dati) ***
+            if cached_data.get('data_timestamps'):
+                saved_timestamps = cached_data['data_timestamps']
+                data_type_map = {
+                    'macro': 'macro_data',
+                    'cb_history': 'cb_history_data',
+                    'pmi': 'pmi_data',
+                    'prices': 'forex_prices',
+                    'news': 'news_structured'
+                }
+                for ts_key, data_key in data_type_map.items():
+                    if ts_key in saved_timestamps and cached_data.get(data_key):
+                        try:
+                            ts_str = saved_timestamps[ts_key]
+                            ts_dt = datetime.strptime(ts_str, "%Y-%m-%d_%H-%M-%S")
+                            if ITALY_TZ:
+                                ts_dt = ts_dt.replace(tzinfo=ITALY_TZ)
+                            st.session_state[f'timestamp_{ts_key}'] = ts_dt
+                        except:
+                            pass
+            
+            # *** FALLBACK: Solo se non ci sono data_timestamps (analisi vecchie) ***
+            elif cached_data.get('cached_datetime'):
                 try:
                     cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
                     if ITALY_TZ:
                         cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
                     
-                    # Imposta timestamp per ogni tipo di dato presente
-                    if cached_data.get('macro_data'):
+                    # Imposta timestamp per ogni tipo di dato presente (fallback)
+                    if cached_data.get('macro_data') and 'timestamp_macro' not in st.session_state:
                         st.session_state['timestamp_macro'] = cached_dt
-                    if cached_data.get('cb_history_data'):
+                    if cached_data.get('cb_history_data') and 'timestamp_cb_history' not in st.session_state:
                         st.session_state['timestamp_cb_history'] = cached_dt
-                    if cached_data.get('pmi_data'):
+                    if cached_data.get('pmi_data') and 'timestamp_pmi' not in st.session_state:
                         st.session_state['timestamp_pmi'] = cached_dt
-                    if cached_data.get('forex_prices'):
+                    if cached_data.get('forex_prices') and 'timestamp_prices' not in st.session_state:
                         st.session_state['timestamp_prices'] = cached_dt
-                    if cached_data.get('news_structured'):
+                    if cached_data.get('news_structured') and 'timestamp_news' not in st.session_state:
                         st.session_state['timestamp_news'] = cached_dt
                 except:
                     pass
@@ -5981,6 +6024,14 @@ def main():
             # Salva risultato
             progress.progress(80, text="💾 Salvataggio...")
             
+            # Salva i timestamp REALI di quando i dati sono stati aggiornati
+            data_timestamps = {}
+            for dt in ["macro", "cb_history", "pmi", "prices", "news"]:
+                ts = st.session_state.get(f'timestamp_{dt}')
+                if ts:
+                    # Converti datetime in stringa per JSON
+                    data_timestamps[dt] = ts.strftime("%Y-%m-%d_%H-%M-%S") if hasattr(ts, 'strftime') else str(ts)
+            
             analysis_result = {
                 "macro_data": macro_data,
                 "pmi_data": pmi_data,
@@ -5990,7 +6041,8 @@ def main():
                 "news_structured": news_structured,
                 "links_structured": links_structured,
                 "claude_analysis": claude_analysis,
-                "options_selected": {"full": True}
+                "options_selected": {"full": True},
+                "data_timestamps": data_timestamps  # Timestamp REALI dei dati
             }
             
             if save_analysis(analysis_result, user_id, "full", {"full": True}):
