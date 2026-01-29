@@ -3586,7 +3586,7 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
     return currency_analysis
 
 
-def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
+def calculate_pair_from_currencies(currency_analysis: dict, forex_prices: dict = None, existing_pair_analysis: dict = None) -> dict:
     """
     Calcola i punteggi per le 19 coppie forex a partire dai punteggi delle 7 valute.
     
@@ -3596,6 +3596,8 @@ def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
             "USD": {...},
             ...
         }
+        forex_prices: Dict con prezzi forex (opzionale)
+        existing_pair_analysis: pair_analysis esistente da cui preservare current_price e price_scenarios (opzionale)
     
     Returns:
         pair_analysis: Dict con struttura compatibile con UI esistente
@@ -3637,16 +3639,34 @@ def calculate_pair_from_currencies(currency_analysis: dict) -> dict:
         quote_summary = quote_data.get("summary", "")
         combined_summary = f"{base}: {base_summary} | {quote}: {quote_summary}"
         
+        # Recupera current_price e price_scenarios da fonti esistenti
+        current_price = ""
+        price_scenarios = {}
+        
+        # Prima prova da existing_pair_analysis (preserva dati Claude)
+        if existing_pair_analysis and pair in existing_pair_analysis:
+            current_price = existing_pair_analysis[pair].get("current_price", "")
+            price_scenarios = existing_pair_analysis[pair].get("price_scenarios", {})
+        
+        # Se non ci sono, prova da forex_prices
+        if not current_price and forex_prices:
+            prices_dict = forex_prices.get("prices", {}) if isinstance(forex_prices, dict) else {}
+            if pair in prices_dict:
+                price_val = prices_dict[pair]
+                if isinstance(price_val, dict):
+                    current_price = str(price_val.get("price", price_val.get("value", "")))
+                else:
+                    current_price = str(price_val)
+        
         pair_analysis[pair] = {
             "summary": combined_summary,
             "score_base": score_base,
             "score_quote": score_quote,
             "differential": differential,
             "scores": scores,
-            # Manteniamo campi per compatibilità
             "key_drivers": [],
-            "current_price": "",
-            "price_scenarios": {}
+            "current_price": current_price,
+            "price_scenarios": price_scenarios
         }
     
     return pair_analysis
@@ -3992,7 +4012,7 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
                 analysis["warning"] = f"Valute mancanti: {', '.join(missing_currencies)}"
             
             # Calcola i differenziali per le 19 coppie
-            pair_analysis = calculate_pair_from_currencies(currency_analysis)
+            pair_analysis = calculate_pair_from_currencies(currency_analysis, forex_prices)
             analysis["pair_analysis"] = pair_analysis
         
         return analysis
@@ -5426,16 +5446,16 @@ def display_analysis_matrix(analysis: dict):
             
             col_base, col_quote = st.columns(2)
             
-            # Mappa nomi parametri con range
+            # Mappa nomi parametri con range (ORDINE IMPORTANTE!)
             param_names = {
                 "tassi_attuali": "Tassi Attuali [-1/+1]",
+                "regime_economico": "🎯 Regime Economico [-2/+2]",
                 "aspettative_tassi": "Aspettative Tassi [-2/+2]",
                 "inflazione": "Inflazione [-1/+1]",
                 "crescita_pil": "Crescita/PIL [-1/+1]",
                 "risk_sentiment": "Risk Sentiment [-1/+1]",
                 "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]",
-                "news_catalyst": "⚡ News Catalyst [-2/+2]",
-                "regime_economico": "🎯 Regime Economico [-2/+2]"
+                "news_catalyst": "⚡ News Catalyst [-2/+2]"
             }
             
             with col_base:
@@ -5564,18 +5584,23 @@ def display_analysis_matrix(analysis: dict):
             
             # === SCENARI DI PREZZO ===
             price_scenarios = pair_data.get("price_scenarios", {})
-            current_price = pair_data.get("current_price", "N/A")
+            current_price = pair_data.get("current_price", "")
             key_drivers = pair_data.get("key_drivers", [])
             
-            if price_scenarios or current_price != "N/A":
+            # Mostra solo se abbiamo dati validi
+            has_valid_price = current_price and current_price not in ["", "N/A", "None"]
+            has_scenarios = price_scenarios and any(price_scenarios.values())
+            
+            if has_valid_price or has_scenarios:
                 st.markdown("### 📊 Scenari di Prezzo")
                 
-                # Box prezzo attuale
-                st.markdown(f"""
-                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                # Box prezzo attuale (solo se valido)
+                if has_valid_price:
+                    st.markdown(f"""
+                    <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
                 if price_scenarios:
                     col_base_range, col_base_strong, col_quote_strong = st.columns(3)
@@ -6158,9 +6183,12 @@ def main():
                                 "motivation": "Dati regime non disponibili"
                             }
                 
-                # Ricalcola pair_analysis con i nuovi punteggi
+                # Ricalcola pair_analysis con i nuovi punteggi (preserva prezzi)
+                existing_pair_analysis = claude_analysis.get("pair_analysis", {})
                 claude_analysis["pair_analysis"] = calculate_pair_from_currencies(
-                    claude_analysis["currency_analysis"]
+                    claude_analysis["currency_analysis"],
+                    forex_prices,
+                    existing_pair_analysis
                 )
             
             # Salva risultato
