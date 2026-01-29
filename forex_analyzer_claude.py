@@ -2736,38 +2736,7 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ---
 
-### 5️⃣ PMI [-1 a +1]
-**Logica:** PMI > 50 = espansione, PMI < 50 = contrazione
-
-**⚠️ NOTA IMPORTANTE PER CHF E CAD:**
-- **CHF** ha solo il **procure.ch PMI** (indice unico, non separato manufacturing/services)
-- **CAD** ha solo l'**Ivey PMI** (indice unico che copre tutta l'economia)
-- Per queste valute, NON fare media pesata ma usa direttamente il PMI unico disponibile
-
-**PESI SETTORIALI per valuta (solo per valute con PMI separati):**
-| Valuta | Peso Manifattura | Peso Servizi | Motivo |
-|--------|------------------|--------------|--------|
-| EUR | 50% | 50% | Economia mista |
-| USD | 30% | 70% | Economia servizi-dominante |
-| GBP | 20% | 80% | Servizi finanziari dominanti |
-| JPY | 60% | 40% | Export manifatturiero |
-| AUD | 50% | 50% | Mining + servizi |
-| **CHF** | 100% | - | **PMI UNICO (procure.ch)** |
-| **CAD** | 100% | - | **PMI UNICO (Ivey)** |
-
-**Calcolo:** 
-- Per EUR, USD, GBP, JPY, AUD: PMI_pesato = (Manuf × Peso_M) + (Serv × Peso_S)
-- Per CHF, CAD: usa direttamente il valore PMI unico
-
-| PMI (pesato o unico) | Score |
-|----------------------|-------|
-| > 52 | +1 |
-| 48 - 52 | 0 |
-| < 48 | -1 |
-
----
-
-### 6️⃣ RISK SENTIMENT [-1 a +1]
+### 5️⃣ RISK SENTIMENT [-1 a +1]
 **Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso cicliche.
 
 **Classificazione valute:**
@@ -2788,7 +2757,7 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ---
 
-### 7️⃣ BILANCIA/FISCALE [-1 a +1]
+### 6️⃣ BILANCIA/FISCALE [-1 a +1]
 **Logica:** Importante nel lungo termine. Peso solo se notizie specifiche.
 
 | Scenario | Score |
@@ -2801,7 +2770,7 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ---
 
-### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
+### 7️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
 
 **Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast) che NON sono già valutate in altri parametri.
 
@@ -2817,14 +2786,14 @@ I seguenti temi sono **GIÀ VALUTATI** in altri parametri e **NON POSSONO** esse
 | BC hawkish/dovish, tagli/rialzi attesi | **Aspettative Tassi** | ❌ **0** |
 | CPI, inflazione, deflazione, prezzi | **Inflazione** | ❌ **0** |
 | PIL, GDP, crescita, recessione | **Crescita/PIL** | ❌ **0** |
-| PMI, manifatturiero, servizi, espansione/contrazione | **PMI** | ❌ **0** |
+| PMI, manifatturiero, servizi, espansione/contrazione | **Regime Economico** | ❌ **0** |
 | Safe-haven, risk-off/on, tensioni geopolitiche, VIX | **Risk Sentiment** | ❌ **0** |
 | Debito, deficit, bilancia commerciale | **Bilancia/Fiscale** | ❌ **0** |
 
 ## ⛔ ESEMPI DI ERRORI DA EVITARE ⛔
 
 ❌ **CHF: "PMI manifatturiero crollo -3.9 punti → -2"**
-   → **ERRORE!** Il PMI è già valutato nel parametro PMI! → News Catalyst = **0**
+   → **ERRORE!** Il PMI è già considerato nel Regime Economico! → News Catalyst = **0**
 
 ❌ **CAD: "BOC dovish stance pesa negativamente → -2"**  
    → **ERRORE!** La stance BOC è già in Aspettative Tassi! → News Catalyst = **0**
@@ -2925,10 +2894,6 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                     "score": -1,
                     "motivation": "PIL 0.7%, stagnazione con Germania in difficoltà"
                 },
-                "pmi": {
-                    "score": 0,
-                    "motivation": "PMI pesato 50.6 (Manuf 48.8 × 50% + Serv 52.4 × 50%), neutro"
-                },
                 "risk_sentiment": {
                     "score": 0,
                     "motivation": "EUR semi-ciclica, neutrale in regime attuale"
@@ -2962,10 +2927,6 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 "crescita_pil": {
                     "score": 1,
                     "motivation": "PIL 2.1% con inflazione in calo, crescita sostenibile"
-                },
-                "pmi": {
-                    "score": 1,
-                    "motivation": "PMI pesato 53.2 (Manuf 49.3 × 30% + Serv 54.8 × 70%), espansione"
                 },
                 "risk_sentiment": {
                     "score": 0,
@@ -3026,14 +2987,14 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
 | **BC Stance** | dovish, hawkish, easing, tightening, taglio, rialzo | Già in Aspettative Tassi |
 | **Inflazione** | inflazione, CPI, prezzi, deflazione | Già in Inflazione |
 | **Crescita** | PIL, GDP, crescita, recessione, stagnazione | Già in Crescita/PIL |
-| **PMI** | PMI, manifatturiero, manufacturing, servizi, services, espansione, contrazione | Già in PMI |
+| **PMI** | PMI, manifatturiero, manufacturing, servizi, services, espansione, contrazione | Già in Regime Economico |
 | **Sentiment** | safe-haven, risk-off, risk-on, tensioni, geopolitica, VIX | Già in Risk Sentiment |
 | **Fiscale** | debito, deficit, fiscale, bilancia | Già in Bilancia/Fiscale |
 | **Assenza** | nessuna sorpresa, nessun dato, mancanza | Non è una sorpresa! |
 
 ## ❌ ERRORI GRAVI DA NON COMMETTERE MAI:
 
-❌ **"PMI crollo -3.9 punti → -2"** → Il PMI è già valutato nel parametro PMI! → **0**
+❌ **"PMI crollo -3.9 punti → -2"** → Il PMI è già nel Regime Economico! → **0**
 ❌ **"BOC dovish pesa → -2"** → La stance BC è già in Aspettative Tassi! → **0**
 ❌ **"Inflazione sopra target → +1"** → L'inflazione è già nel parametro Inflazione! → **0**
 ❌ **"Nessuna sorpresa... pesa negativamente → -2"** → Contraddizione! → **0**
@@ -3416,14 +3377,13 @@ def fetch_additional_resources(urls: list) -> tuple[str, list]:
 
 SCORE_PARAMETERS = [
     "tassi_attuali",
+    "regime_economico",
     "aspettative_tassi", 
     "inflazione",
     "crescita_pil",
-    "pmi",
     "risk_sentiment",
     "bilancia_fiscale",
-    "news_catalyst",
-    "regime_economico"
+    "news_catalyst"
 ]
 
 
@@ -3522,7 +3482,7 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         "pil", "gdp", "crescita", "growth", "recessione", "recession",
         "stagnazione", "stagnation", "contrazione economia",
         
-        # === GIÀ IN PMI ===
+        # === GIÀ IN REGIME ECONOMICO ===
         "pmi", "manifatturiero", "manufacturing", "servizi", "services",
         "espansione", "contrazione", "expansion", "contraction",
         "purchasing manager", "business activity",
@@ -3547,11 +3507,10 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         "aspettative_tassi": (-2, 2),
         "inflazione": (-1, 1),
         "crescita_pil": (-1, 1),
-        "pmi": (-1, 1),
         "risk_sentiment": (-1, 1),
         "bilancia_fiscale": (-1, 1),
         "news_catalyst": (-2, 2),
-        "regime_economico": (-1, 1)
+        "regime_economico": (-2, 2)
     }
     
     corrections_made = []
@@ -4531,7 +4490,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #d97706; margin: 0;">🟡 Reflazione</h4>
             <p style="color: #92400e; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↑</p>
             <p style="color: #b45309; font-weight: bold; font-size: 18px;">{', '.join(refl_currencies) if refl_currencies else 'Nessuna'}</p>
-            <p style="color: #92400e; font-size: 11px;">📈 Forex: +1 (BC alza tassi)</p>
+            <p style="color: #92400e; font-size: 11px;">📈 Forex: +2 (BC alza tassi)</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -4542,7 +4501,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #dc2626; margin: 0;">🔴 Stagflazione</h4>
             <p style="color: #991b1b; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↑</p>
             <p style="color: #b91c1c; font-weight: bold; font-size: 18px;">{', '.join(stag_currencies) if stag_currencies else 'Nessuna'}</p>
-            <p style="color: #991b1b; font-size: 11px;">📉 Forex: -1 (BC paralizzata)</p>
+            <p style="color: #991b1b; font-size: 11px;">📉 Forex: -2 (BC paralizzata)</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4645,8 +4604,8 @@ def display_economic_regimes(regimes_data: dict):
         
         Regimi e Punteggi Forex:
         - Espansione:   Δ PMI > 0  E  Δ Inflazione < 0  → +1 (economia cresce)
-        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0  → +1 (BC alza tassi)
-        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0  → -1 (BC paralizzata)
+        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0  → +2 (BC alza tassi)
+        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0  → -2 (BC paralizzata)
         - Deflazione:   Δ PMI < 0  E  Δ Inflazione < 0  → -1 (BC taglia tassi)
         ```
         """)
@@ -5473,10 +5432,10 @@ def display_analysis_matrix(analysis: dict):
                 "aspettative_tassi": "Aspettative Tassi [-2/+2]",
                 "inflazione": "Inflazione [-1/+1]",
                 "crescita_pil": "Crescita/PIL [-1/+1]",
-                "pmi": "PMI [-1/+1]",
                 "risk_sentiment": "Risk Sentiment [-1/+1]",
                 "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]",
-                "news_catalyst": "⚡ News Catalyst [-2/+2]"
+                "news_catalyst": "⚡ News Catalyst [-2/+2]",
+                "regime_economico": "🎯 Regime Economico [-2/+2]"
             }
             
             with col_base:
@@ -5955,7 +5914,84 @@ def main():
         st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
     st.markdown("---")
     
-    # --- SEZIONE 2: STORICO BC ---
+    # --- SEZIONE 2: REGIMI ECONOMICI (con PMI integrato) ---
+    if REGIMES_MODULE_LOADED:
+        # Carica regimi da Supabase se non presenti in session_state
+        if 'last_regimes_data' not in st.session_state and SUPABASE_ENABLED:
+            try:
+                cached_regimes, cached_ts = get_all_current_regimes(supabase_request)
+                if cached_regimes:
+                    st.session_state['last_regimes_data'] = cached_regimes
+                    if cached_ts:
+                        # Converti a timezone Italy se necessario
+                        if cached_ts.tzinfo is not None and ITALY_TZ:
+                            cached_ts = cached_ts.astimezone(ITALY_TZ)
+                        st.session_state['timestamp_regimes'] = cached_ts
+            except:
+                pass
+        
+        # Calcola freshness regimi
+        ts_regime = st.session_state.get('timestamp_regimes')
+        regimes_freshness = check_data_freshness("regimes", ts_regime)
+        
+        # Header con status e bottone aggiorna
+        col_title_reg, col_status_reg, col_btn_reg = st.columns([3, 3, 1])
+        with col_title_reg:
+            st.markdown("### 🎯 Regimi Economici")
+        with col_status_reg:
+            status_emoji = regimes_freshness["status"]
+            ts_str = regimes_freshness["message"] if ts_regime else "Mai aggiornato"
+            st.caption(f"{status_emoji} {ts_str}")
+            if regimes_freshness.get("reason"):
+                st.caption(f"⚠️ {regimes_freshness['reason']}")
+        with col_btn_reg:
+            if st.button("🔄", key="upd_regimes", help="Aggiorna Regimi Economici (recupera PMI e CPI)"):
+                with st.spinner("Analisi regimi economici..."):
+                    # Prima aggiorna i PMI
+                    new_pmi_data = fetch_all_pmi_data()
+                    st.session_state['last_pmi_data'] = new_pmi_data
+                    st.session_state['timestamp_pmi'] = get_italy_now()
+                    save_data_timestamp('pmi', user_id)
+                    
+                    # Prepara dati PMI per l'analisi regimi
+                    pmi_for_regimes = {}
+                    for curr, data in new_pmi_data.items():
+                        pmi_for_regimes[curr] = {
+                            "manufacturing": data.get("manufacturing", {}).get("current"),
+                            "services": data.get("services", {}).get("current")
+                        }
+                    
+                    # Analizza regimi
+                    regimes_result = analyze_all_regimes(pmi_for_regimes)
+                    
+                    # Salva su Supabase se disponibile
+                    if SUPABASE_ENABLED:
+                        for currency, regime_data in regimes_result.items():
+                            if not regime_data.get("error"):
+                                save_regime_to_supabase(supabase_request, currency, regime_data)
+                    
+                    st.session_state['last_regimes_data'] = regimes_result
+                    st.session_state['timestamp_regimes'] = get_italy_now()
+                    st.rerun()
+        
+        # Mostra regimi
+        regimes_data = st.session_state.get('last_regimes_data')
+        if regimes_data:
+            display_economic_regimes(regimes_data)
+            
+            # Toggle per vedere i dati PMI grezzi
+            with st.expander("📈 Visualizza Dati PMI Grezzi", expanded=False):
+                pmi_data_display = st.session_state.get('last_pmi_data')
+                if pmi_data_display:
+                    display_pmi_table(pmi_data_display)
+                else:
+                    st.info("ℹ️ Nessun dato PMI. Aggiorna i regimi per recuperare i dati.")
+        else:
+            st.info("ℹ️ Nessun dato regime. Clicca 🔄 per analizzare.")
+        
+        st.markdown("---")
+    
+    # --- SEZIONE 3: STORICO BC ---
     col_title2, col_status2, col_btn2 = st.columns([3, 3, 1])
     with col_title2:
         st.markdown("### 🏦 Storico Banche Centrali")
@@ -5975,30 +6011,6 @@ def main():
     
     if cb_history_data:
         display_central_bank_history(cb_history_data)
-    else:
-        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
-    st.markdown("---")
-    
-    # --- SEZIONE 3: PMI ---
-    col_title3, col_status3, col_btn3 = st.columns([3, 3, 1])
-    with col_title3:
-        st.markdown("### 📈 Dati PMI")
-    with col_status3:
-        f = freshness_details.get('pmi', {})
-        ts = timestamps.get('pmi')
-        ts_str = ts.strftime("%d/%m %H:%M") if ts else "Mai"
-        st.caption(f"📅 {ts_str} - {f.get('status', '🟠')} {f.get('message', 'N/A')}")
-    with col_btn3:
-        if st.button("🔄", key="upd_pmi", help="Aggiorna PMI"):
-            with st.spinner("Aggiornamento..."):
-                new_data = fetch_all_pmi_data()
-                st.session_state['last_pmi_data'] = new_data
-                st.session_state['timestamp_pmi'] = get_italy_now()
-                save_data_timestamp('pmi', user_id)
-                st.rerun()
-    
-    if pmi_data:
-        display_pmi_table(pmi_data)
     else:
         st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
     st.markdown("---")
@@ -6061,68 +6073,6 @@ def main():
     additional_text, links_structured = render_additional_links_section(user_id)
     
     st.markdown("---")
-    
-    # --- SEZIONE 6: REGIMI ECONOMICI ---
-    if REGIMES_MODULE_LOADED:
-        # Carica regimi da Supabase se non presenti in session_state
-        if 'last_regimes_data' not in st.session_state and SUPABASE_ENABLED:
-            try:
-                cached_regimes, cached_ts = get_all_current_regimes(supabase_request)
-                if cached_regimes:
-                    st.session_state['last_regimes_data'] = cached_regimes
-                    if cached_ts:
-                        # Converti a timezone Italy se necessario
-                        if cached_ts.tzinfo is not None and ITALY_TZ:
-                            cached_ts = cached_ts.astimezone(ITALY_TZ)
-                        st.session_state['timestamp_regimes'] = cached_ts
-            except:
-                pass
-        
-        # Calcola freshness
-        ts_regime = st.session_state.get('timestamp_regimes')
-        regimes_freshness = check_data_freshness("regimes", ts_regime)
-        
-        col_title6, col_status6, col_btn6 = st.columns([3, 3, 1])
-        with col_title6:
-            st.markdown("### 🎯 Regimi Economici")
-        with col_status6:
-            status_emoji = regimes_freshness["status"]
-            ts_str = regimes_freshness["message"] if ts_regime else "Mai aggiornato"
-            st.caption(f"{status_emoji} {ts_str}")
-            if regimes_freshness.get("reason"):
-                st.caption(f"⚠️ {regimes_freshness['reason']}")
-        with col_btn6:
-            if st.button("🔄", key="upd_regimes", help="Aggiorna Regimi Economici"):
-                with st.spinner("Analisi regimi economici..."):
-                    # Prepara dati PMI per l'analisi regimi
-                    pmi_for_regimes = {}
-                    if pmi_data:
-                        for curr, data in pmi_data.items():
-                            pmi_for_regimes[curr] = {
-                                "manufacturing": data.get("manufacturing", {}).get("current"),
-                                "services": data.get("services", {}).get("current")
-                            }
-                    
-                    # Analizza regimi
-                    regimes_result = analyze_all_regimes(pmi_for_regimes)
-                    
-                    # Salva su Supabase se disponibile
-                    if SUPABASE_ENABLED:
-                        for currency, regime_data in regimes_result.items():
-                            if not regime_data.get("error"):
-                                save_regime_to_supabase(supabase_request, currency, regime_data)
-                    
-                    st.session_state['last_regimes_data'] = regimes_result
-                    st.session_state['timestamp_regimes'] = get_italy_now()
-                    st.rerun()
-        
-        regimes_data = st.session_state.get('last_regimes_data')
-        if regimes_data:
-            display_economic_regimes(regimes_data)
-        else:
-            st.info("ℹ️ Nessun dato regime. Clicca 🔄 per analizzare (richiede PMI aggiornati).")
-        
-        st.markdown("---")
     
     # ===== SEZIONE ANALISI CLAUDE =====
     st.markdown("## 🤖 Analisi Claude AI")
