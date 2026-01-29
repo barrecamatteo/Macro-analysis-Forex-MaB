@@ -16,7 +16,8 @@ try:
     from economic_regimes import (
         CPI_CONFIG, PMI_WEIGHTS, REGIME_DEFINITIONS,
         analyze_currency_regime, analyze_all_regimes,
-        save_regime_to_supabase, get_regime_history, get_all_current_regimes
+        save_regime_to_supabase, get_regime_history, get_all_current_regimes,
+        get_regime_forex_score
     )
     REGIMES_MODULE_LOADED = True
 except ImportError:
@@ -264,6 +265,46 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             "is_fresh": True,
             "status": "🟢",
             "message": f"Aggiornati {age_days}gg fa",
+            "reason": ""
+        }
+    
+    # ===== REGIMI ECONOMICI =====
+    if data_type == "regimes":
+        # I regimi si basano su PMI (esce ~1° del mese) e CPI (esce ~10-15 del mese)
+        # Considera "vecchi" se:
+        # 1. È passato il 1° del mese corrente E l'ultimo update era del mese precedente
+        # 2. È passato il 15° del mese corrente E l'ultimo update era prima del 15°
+        
+        current_month = now.month
+        current_year = now.year
+        last_update_month = last_updated.month
+        last_update_year = last_updated.year
+        
+        # Se l'update è di un mese/anno precedente
+        is_old_month = (last_update_year < current_year) or (last_update_year == current_year and last_update_month < current_month)
+        
+        # Dopo il 1° del mese, i PMI del mese precedente sono usciti
+        if day_of_month >= 1 and is_old_month:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornati {last_updated.strftime('%d/%m')}",
+                "reason": "Nuovi PMI disponibili (inizio mese)"
+            }
+        
+        # Dopo il 15 del mese, i CPI del mese precedente sono usciti
+        if day_of_month >= 15 and last_updated.day < 15 and last_update_month == current_month:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Aggiornati il {last_updated.day}/{last_updated.month}",
+                "reason": "Nuovi CPI disponibili (metà mese)"
+            }
+        
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornati {last_updated.strftime('%d/%m %H:%M')}",
             "reason": ""
         }
     
@@ -3381,8 +3422,52 @@ SCORE_PARAMETERS = [
     "pmi",
     "risk_sentiment",
     "bilancia_fiscale",
-    "news_catalyst"
+    "news_catalyst",
+    "regime_economico"
 ]
+
+
+def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -> dict:
+    """
+    Aggiunge il punteggio del regime economico ai punteggi delle valute.
+    
+    Args:
+        currency_analysis: Dict con punteggi delle valute da Claude
+        regimes_data: Dict con dati dei regimi da economic_regimes module
+    
+    Returns:
+        currency_analysis aggiornato con regime_economico
+    """
+    if not REGIMES_MODULE_LOADED:
+        return currency_analysis
+    
+    for currency, data in currency_analysis.items():
+        if not isinstance(data, dict) or "scores" not in data:
+            continue
+        
+        regime_info = regimes_data.get(currency, {})
+        regime = regime_info.get("regime")
+        
+        if regime:
+            forex_score = get_regime_forex_score(regime)
+            regime_name = REGIME_DEFINITIONS.get(regime, {}).get("name", regime)
+            
+            # Aggiungi il punteggio regime_economico
+            data["scores"]["regime_economico"] = {
+                "score": forex_score,
+                "motivation": f"Regime: {regime_name} ({'+' if forex_score > 0 else ''}{forex_score})"
+            }
+            
+            # Aggiorna total_score
+            data["total_score"] = data.get("total_score", 0) + forex_score
+        else:
+            # Nessun dato regime disponibile
+            data["scores"]["regime_economico"] = {
+                "score": 0,
+                "motivation": "Regime non disponibile"
+            }
+    
+    return currency_analysis
 
 
 def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
@@ -3465,7 +3550,8 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         "pmi": (-1, 1),
         "risk_sentiment": (-1, 1),
         "bilancia_fiscale": (-1, 1),
-        "news_catalyst": (-2, 2)
+        "news_catalyst": (-2, 2),
+        "regime_economico": (-1, 1)
     }
     
     corrections_made = []
@@ -4404,8 +4490,8 @@ def display_economic_regimes(regimes_data: dict):
     # === MATRICE 2x2 DEI REGIMI ===
     st.markdown("#### 📊 Matrice Regimi Economici")
     
-    # Conta valute per ogni regime
-    regime_counts = {"goldilocks": [], "reflation": [], "stagflation": [], "deflation": []}
+    # Conta valute per ogni regime (nuovi nomi)
+    regime_counts = {"espansione": [], "reflazione": [], "stagflazione": [], "deflazione": []}
     for currency, data in regimes_data.items():
         regime = data.get("regime")
         if regime and regime in regime_counts:
@@ -4415,48 +4501,48 @@ def display_economic_regimes(regimes_data: dict):
     col1, col2 = st.columns(2)
     
     with col1:
-        # Goldilocks (PMI ↑, Inflazione ↓)
-        gold_currencies = regime_counts.get("goldilocks", [])
+        # Espansione (PMI ↑, Inflazione ↓)
+        exp_currencies = regime_counts.get("espansione", [])
         st.markdown(f"""
         <div style="background-color: #d1fae5; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
-            <h4 style="color: #059669; margin: 0;">🟢 Goldilocks</h4>
+            <h4 style="color: #059669; margin: 0;">🟢 Espansione</h4>
             <p style="color: #065f46; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↓</p>
-            <p style="color: #047857; font-weight: bold; font-size: 18px;">{', '.join(gold_currencies) if gold_currencies else 'Nessuna'}</p>
-            <p style="color: #065f46; font-size: 11px;">Bullish valute forti</p>
+            <p style="color: #047857; font-weight: bold; font-size: 18px;">{', '.join(exp_currencies) if exp_currencies else 'Nessuna'}</p>
+            <p style="color: #065f46; font-size: 11px;">📈 Forex: +1 (economia attrattiva)</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Deflation (PMI ↓, Inflazione ↓)
-        defl_currencies = regime_counts.get("deflation", [])
+        # Deflazione (PMI ↓, Inflazione ↓)
+        defl_currencies = regime_counts.get("deflazione", [])
         st.markdown(f"""
         <div style="background-color: #e0e7ff; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
-            <h4 style="color: #4f46e5; margin: 0;">🛡️ Deflazione</h4>
+            <h4 style="color: #4f46e5; margin: 0;">🔵 Deflazione</h4>
             <p style="color: #3730a3; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↓</p>
             <p style="color: #4338ca; font-weight: bold; font-size: 18px;">{', '.join(defl_currencies) if defl_currencies else 'Nessuna'}</p>
-            <p style="color: #3730a3; font-size: 11px;">Risk-off, safe haven</p>
+            <p style="color: #3730a3; font-size: 11px;">📉 Forex: -1 (BC taglia tassi)</p>
         </div>
         """, unsafe_allow_html=True)
     
     with col2:
-        # Reflation (PMI ↑, Inflazione ↑)
-        refl_currencies = regime_counts.get("reflation", [])
+        # Reflazione (PMI ↑, Inflazione ↑)
+        refl_currencies = regime_counts.get("reflazione", [])
         st.markdown(f"""
         <div style="background-color: #fef3c7; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
-            <h4 style="color: #d97706; margin: 0;">🚀 Reflazione</h4>
+            <h4 style="color: #d97706; margin: 0;">🟡 Reflazione</h4>
             <p style="color: #92400e; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↑</p>
             <p style="color: #b45309; font-weight: bold; font-size: 18px;">{', '.join(refl_currencies) if refl_currencies else 'Nessuna'}</p>
-            <p style="color: #92400e; font-size: 11px;">Strong bullish commodity</p>
+            <p style="color: #92400e; font-size: 11px;">📈 Forex: +1 (BC alza tassi)</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Stagflation (PMI ↓, Inflazione ↑)
-        stag_currencies = regime_counts.get("stagflation", [])
+        # Stagflazione (PMI ↓, Inflazione ↑)
+        stag_currencies = regime_counts.get("stagflazione", [])
         st.markdown(f"""
         <div style="background-color: #fee2e2; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
             <h4 style="color: #dc2626; margin: 0;">🔴 Stagflazione</h4>
             <p style="color: #991b1b; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↑</p>
             <p style="color: #b91c1c; font-weight: bold; font-size: 18px;">{', '.join(stag_currencies) if stag_currencies else 'Nessuna'}</p>
-            <p style="color: #991b1b; font-size: 11px;">Bearish, alta volatilità</p>
+            <p style="color: #991b1b; font-size: 11px;">📉 Forex: -1 (BC paralizzata)</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4520,7 +4606,7 @@ def display_economic_regimes(regimes_data: dict):
             styles = [''] * len(row)
             regime_cell = row["Regime"]
             
-            if "Goldilocks" in regime_cell:
+            if "Espansione" in regime_cell:
                 styles[1] = 'background-color: #d1fae5; color: #059669; font-weight: bold'
             elif "Reflazione" in regime_cell:
                 styles[1] = 'background-color: #fef3c7; color: #d97706; font-weight: bold'
@@ -4557,11 +4643,11 @@ def display_economic_regimes(regimes_data: dict):
         Indice Inflazione = (CPI Core × 0.7) + (CPI Headline × 0.3)
         (se Core non disponibile, usa solo Headline)
         
-        Regimi:
-        - Goldilocks:   Δ PMI > 0  E  Δ Inflazione < 0
-        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0
-        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0
-        - Deflazione:   Δ PMI < 0  E  Δ Inflazione < 0
+        Regimi e Punteggi Forex:
+        - Espansione:   Δ PMI > 0  E  Δ Inflazione < 0  → +1 (economia cresce)
+        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0  → +1 (BC alza tassi)
+        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0  → -1 (BC paralizzata)
+        - Deflazione:   Δ PMI < 0  E  Δ Inflazione < 0  → -1 (BC taglia tassi)
         ```
         """)
         
@@ -5729,6 +5815,8 @@ def main():
                 st.session_state['last_forex_prices'] = cached_data['forex_prices']
             if cached_data.get('news_structured'):
                 st.session_state['last_news_structured'] = cached_data['news_structured']
+            if cached_data.get('regimes_data'):
+                st.session_state['last_regimes_data'] = cached_data['regimes_data']
             
             # Imposta anche i timestamps dalla data dell'analisi
             if cached_data.get('cached_datetime'):
@@ -5748,6 +5836,8 @@ def main():
                         st.session_state['timestamp_prices'] = cached_dt
                     if cached_data.get('news_structured'):
                         st.session_state['timestamp_news'] = cached_dt
+                    if cached_data.get('regimes_data'):
+                        st.session_state['timestamp_regimes'] = cached_dt
                 except:
                     pass
     
@@ -5974,13 +6064,33 @@ def main():
     
     # --- SEZIONE 6: REGIMI ECONOMICI ---
     if REGIMES_MODULE_LOADED:
+        # Carica regimi da Supabase se non presenti in session_state
+        if 'last_regimes_data' not in st.session_state and SUPABASE_ENABLED:
+            try:
+                cached_regimes, cached_ts = get_all_current_regimes(supabase_request)
+                if cached_regimes:
+                    st.session_state['last_regimes_data'] = cached_regimes
+                    if cached_ts:
+                        # Converti a timezone Italy se necessario
+                        if cached_ts.tzinfo is not None and ITALY_TZ:
+                            cached_ts = cached_ts.astimezone(ITALY_TZ)
+                        st.session_state['timestamp_regimes'] = cached_ts
+            except:
+                pass
+        
+        # Calcola freshness
+        ts_regime = st.session_state.get('timestamp_regimes')
+        regimes_freshness = check_data_freshness("regimes", ts_regime)
+        
         col_title6, col_status6, col_btn6 = st.columns([3, 3, 1])
         with col_title6:
             st.markdown("### 🎯 Regimi Economici")
         with col_status6:
-            ts_regime = st.session_state.get('timestamp_regimes')
-            ts_str = ts_regime.strftime("%d/%m %H:%M") if ts_regime else "Mai"
-            st.caption(f"📅 {ts_str}")
+            status_emoji = regimes_freshness["status"]
+            ts_str = regimes_freshness["message"] if ts_regime else "Mai aggiornato"
+            st.caption(f"{status_emoji} {ts_str}")
+            if regimes_freshness.get("reason"):
+                st.caption(f"⚠️ {regimes_freshness['reason']}")
         with col_btn6:
             if st.button("🔄", key="upd_regimes", help="Aggiorna Regimi Economici"):
                 with st.spinner("Analisi regimi economici..."):
@@ -6080,8 +6190,34 @@ def main():
                 cb_history_data
             )
             
+            # ===== INTEGRA REGIMI ECONOMICI NEI PUNTEGGI =====
+            if REGIMES_MODULE_LOADED and "currency_analysis" in claude_analysis:
+                regimes_data = st.session_state.get('last_regimes_data', {})
+                
+                if regimes_data:
+                    claude_analysis["currency_analysis"] = add_regime_scores_to_analysis(
+                        claude_analysis["currency_analysis"],
+                        regimes_data
+                    )
+                else:
+                    # Nessun dato regime disponibile - aggiungi score 0 per tutte le valute
+                    for currency, data in claude_analysis["currency_analysis"].items():
+                        if isinstance(data, dict) and "scores" in data:
+                            data["scores"]["regime_economico"] = {
+                                "score": 0,
+                                "motivation": "Dati regime non disponibili"
+                            }
+                
+                # Ricalcola pair_analysis con i nuovi punteggi
+                claude_analysis["pair_analysis"] = calculate_pair_from_currencies(
+                    claude_analysis["currency_analysis"]
+                )
+            
             # Salva risultato
             progress.progress(80, text="💾 Salvataggio...")
+            
+            # Includi regimi se disponibili
+            regimes_for_save = st.session_state.get('last_regimes_data', {})
             
             analysis_result = {
                 "macro_data": macro_data,
@@ -6091,6 +6227,7 @@ def main():
                 "economic_events": economic_events,
                 "news_structured": news_structured,
                 "links_structured": links_structured,
+                "regimes_data": regimes_for_save,  # Aggiungi regimi
                 "claude_analysis": claude_analysis,
                 "options_selected": {"full": True}
             }
