@@ -73,7 +73,7 @@ REGIME_DEFINITIONS = {
         "description": "Crescita forte, inflazione in aumento",
         "sentiment": "BC alzerà tassi - valuta attrattiva per carry trade",
         "condition": "PMI ↑ + Inflazione ↑",
-        "forex_score": 1
+        "forex_score": 2
     },
     "stagflazione": {
         "name": "Stagflazione",
@@ -82,7 +82,7 @@ REGIME_DEFINITIONS = {
         "description": "Crescita debole, inflazione alta",
         "sentiment": "BC paralizzata - investitori fuggono",
         "condition": "PMI ↓ + Inflazione ↑",
-        "forex_score": -1
+        "forex_score": -2
     },
     "deflazione": {
         "name": "Deflazione",
