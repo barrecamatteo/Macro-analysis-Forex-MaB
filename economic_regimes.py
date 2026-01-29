@@ -423,6 +423,32 @@ def get_all_current_regimes(supabase_request_func) -> dict:
 # FUNZIONE PRINCIPALE ANALISI REGIME
 # ============================================================================
 
+def fetch_pmi_history(currency: str) -> list:
+    """
+    Recupera lo storico PMI da Investing.com per una valuta.
+    Usa il PMI Manufacturing come riferimento principale.
+    
+    Returns:
+        Lista di dict con storico PMI
+    """
+    # ID PMI Manufacturing per ogni valuta (evita import circolare)
+    PMI_MANUFACTURING_IDS = {
+        "USD": 173,  # ISM Manufacturing
+        "EUR": 201,  # Eurozone Manufacturing PMI
+        "GBP": 204,  # UK Manufacturing PMI
+        "JPY": 202,  # Japan Manufacturing PMI
+        "CHF": 278,  # procure.ch PMI
+        "AUD": 1838, # Australia Manufacturing PMI
+        "CAD": 185   # Ivey PMI
+    }
+    
+    event_id = PMI_MANUFACTURING_IDS.get(currency)
+    if not event_id:
+        return []
+    
+    return fetch_investing_event_data(event_id, max_results=6)
+
+
 def analyze_currency_regime(currency: str, pmi_data: dict) -> dict:
     """
     Analizza il regime economico per una valuta.
@@ -441,11 +467,15 @@ def analyze_currency_regime(currency: str, pmi_data: dict) -> dict:
         "pmi_manufacturing": None,
         "pmi_services": None,
         "pmi_composite": None,
+        "pmi_history": None,
         "cpi_headline": None,
         "cpi_core": None,
+        "cpi_history": None,
         "inflation_index": None,
         "delta_pmi": None,
         "delta_inflation": None,
+        "pmi_avg_3m": None,
+        "inflation_avg_3m": None,
         "momentum_pmi": None,
         "momentum_inflation": None,
         "divergence": None,
@@ -468,7 +498,11 @@ def analyze_currency_regime(currency: str, pmi_data: dict) -> dict:
         pmi_composite = calculate_pmi_composite(pmi_manuf, pmi_serv, currency)
         result["pmi_composite"] = pmi_composite
         
-        # 3. Fetch CPI
+        # 3. Fetch storico PMI per calcolo delta
+        pmi_history = fetch_pmi_history(currency)
+        result["pmi_history"] = pmi_history
+        
+        # 4. Fetch CPI
         cpi_data = fetch_cpi_data(currency)
         
         if not cpi_data.get("headline") or cpi_data["headline"].get("current") is None:
@@ -477,41 +511,57 @@ def analyze_currency_regime(currency: str, pmi_data: dict) -> dict:
         
         cpi_headline = cpi_data["headline"]["current"]
         cpi_core = cpi_data["core"]["current"] if cpi_data.get("core") else None
+        cpi_history = cpi_data["headline"].get("history", [])
         
         result["cpi_headline"] = cpi_headline
         result["cpi_core"] = cpi_core
+        result["cpi_history"] = cpi_history
         
-        # 4. Calcola indice inflazione
+        # 5. Calcola indice inflazione
         inflation_index = calculate_inflation_index(cpi_headline, cpi_core)
         result["inflation_index"] = inflation_index
         
-        # 5. Calcola delta (vs media 3 mesi)
-        # Per PMI usiamo un valore di riferimento 50 come "neutro"
-        delta_pmi = pmi_composite - 50  # Semplificato: distanza da 50
+        # 6. Calcola delta PMI (vs media ultimi 3 mesi)
+        if pmi_history and len(pmi_history) >= 3:
+            # Prendi i 3 valori precedenti (escluso l'attuale se presente)
+            historical_pmi = [h["actual"] for h in pmi_history[1:4] if h.get("actual") is not None]
+            if historical_pmi:
+                pmi_avg_3m = sum(historical_pmi) / len(historical_pmi)
+                delta_pmi = pmi_composite - pmi_avg_3m
+                result["pmi_avg_3m"] = round(pmi_avg_3m, 1)
+            else:
+                delta_pmi = 0
+        else:
+            # Fallback: usa distanza da 50 se non abbiamo storico
+            delta_pmi = pmi_composite - 50
+            result["pmi_avg_3m"] = 50.0  # Indica che è il fallback
         
-        # Per inflazione, calcoliamo delta rispetto allo storico
-        if cpi_data["headline"].get("history"):
-            delta_inflation = calculate_delta(
-                inflation_index, 
-                cpi_data["headline"]["history"], 
-                months=3
-            )
+        # 7. Calcola delta Inflazione (vs media ultimi 3 mesi)
+        if cpi_history and len(cpi_history) >= 3:
+            historical_infl = [h["actual"] for h in cpi_history[1:4] if h.get("actual") is not None]
+            if historical_infl:
+                infl_avg_3m = sum(historical_infl) / len(historical_infl)
+                delta_inflation = inflation_index - infl_avg_3m
+                result["inflation_avg_3m"] = round(infl_avg_3m, 1)
+            else:
+                delta_inflation = 0
         else:
             delta_inflation = 0
+            result["inflation_avg_3m"] = None
         
-        result["delta_pmi"] = delta_pmi
-        result["delta_inflation"] = delta_inflation
+        result["delta_pmi"] = round(delta_pmi, 2)
+        result["delta_inflation"] = round(delta_inflation, 2)
         
-        # 6. Identifica regime
+        # 8. Identifica regime
         regime = identify_regime(delta_pmi, delta_inflation)
         result["regime"] = regime
         result["regime_info"] = REGIME_DEFINITIONS.get(regime)
         
-        # 7. Calcola momentum
+        # 9. Calcola momentum
         result["momentum_pmi"] = calculate_momentum(delta_pmi)
         result["momentum_inflation"] = calculate_momentum(delta_inflation)
         
-        # 8. Rileva divergenza CPI
+        # 10. Rileva divergenza CPI
         result["divergence"] = detect_cpi_divergence(cpi_headline, cpi_core)
         
     except Exception as e:
