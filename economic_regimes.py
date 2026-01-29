@@ -57,37 +57,41 @@ PMI_WEIGHTS = {
 
 # Definizione regimi economici
 REGIME_DEFINITIONS = {
-    "goldilocks": {
-        "name": "Goldilocks",
+    "espansione": {
+        "name": "Espansione",
         "emoji": "🟢",
         "color": "#10B981",
         "description": "Crescita solida, inflazione in calo",
-        "sentiment": "Bullish per valute forti (USD, EUR, GBP)",
-        "condition": "PMI ↑ + Inflazione ↓"
+        "sentiment": "Risk-On - economia sana, attrattiva per investimenti",
+        "condition": "PMI ↑ + Inflazione ↓",
+        "forex_score": 1
     },
-    "reflation": {
-        "name": "Reflazione",
-        "emoji": "🚀",
+    "surriscaldamento": {
+        "name": "Surriscaldamento",
+        "emoji": "🟡",
         "color": "#F59E0B",
         "description": "Crescita forte, inflazione in aumento",
-        "sentiment": "Strong bullish commodity currencies (AUD, CAD)",
-        "condition": "PMI ↑ + Inflazione ↑"
+        "sentiment": "BC alzerà tassi - valuta attrattiva per carry trade",
+        "condition": "PMI ↑ + Inflazione ↑",
+        "forex_score": 1
     },
-    "stagflation": {
+    "stagflazione": {
         "name": "Stagflazione",
         "emoji": "🔴",
         "color": "#EF4444",
         "description": "Crescita debole, inflazione alta",
-        "sentiment": "Bearish, alta volatilità, risk-off",
-        "condition": "PMI ↓ + Inflazione ↑"
+        "sentiment": "BC paralizzata - investitori fuggono",
+        "condition": "PMI ↓ + Inflazione ↑",
+        "forex_score": -1
     },
-    "deflation": {
-        "name": "Deflazione",
-        "emoji": "🛡️",
+    "recessione": {
+        "name": "Recessione",
+        "emoji": "🔵",
         "color": "#6366F1",
         "description": "Crescita debole, inflazione in calo",
-        "sentiment": "Risk-off, bullish safe haven (CHF, JPY)",
-        "condition": "PMI ↓ + Inflazione ↓"
+        "sentiment": "BC taglierà tassi - valuta meno attrattiva",
+        "condition": "PMI ↓ + Inflazione ↓",
+        "forex_score": -1
     }
 }
 
@@ -245,7 +249,7 @@ def identify_regime(delta_pmi: float, delta_inflation: float) -> str:
     Identifica il regime economico basato sui delta.
     
     Returns:
-        Chiave del regime: "goldilocks", "reflation", "stagflation", "deflation"
+        Chiave del regime: "espansione", "surriscaldamento", "stagflazione", "recessione"
     """
     # Soglia per considerare un cambiamento significativo
     threshold = 0.1
@@ -257,19 +261,19 @@ def identify_regime(delta_pmi: float, delta_inflation: float) -> str:
     
     # Matrice dei regimi
     if pmi_up and inflation_down:
-        return "goldilocks"
+        return "espansione"
     elif pmi_up and inflation_up:
-        return "reflation"
+        return "surriscaldamento"
     elif pmi_down and inflation_up:
-        return "stagflation"
+        return "stagflazione"
     elif pmi_down and inflation_down:
-        return "deflation"
+        return "recessione"
     else:
         # Caso neutro/transizione - decide in base al peso maggiore
         if abs(delta_pmi) > abs(delta_inflation):
-            return "reflation" if pmi_up else "deflation"
+            return "surriscaldamento" if pmi_up else "recessione"
         else:
-            return "stagflation" if inflation_up else "goldilocks"
+            return "stagflazione" if inflation_up else "espansione"
 
 
 def calculate_momentum(delta: float) -> str:
@@ -325,6 +329,20 @@ def detect_cpi_divergence(cpi_headline: float, cpi_core: Optional[float]) -> Opt
             }
     
     return None
+
+
+def get_regime_forex_score(regime: str) -> int:
+    """
+    Restituisce il punteggio forex per un regime economico.
+    
+    Args:
+        regime: chiave del regime ("espansione", "surriscaldamento", "stagflazione", "recessione")
+    
+    Returns:
+        Punteggio forex: +1 per espansione/surriscaldamento, -1 per stagflazione/recessione
+    """
+    regime_info = REGIME_DEFINITIONS.get(regime, {})
+    return regime_info.get("forex_score", 0)
 
 
 # ============================================================================
