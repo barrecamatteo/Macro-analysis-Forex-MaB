@@ -5448,13 +5448,13 @@ def display_analysis_matrix(analysis: dict):
             
             # Mappa nomi parametri con range (ORDINE IMPORTANTE!)
             param_names = {
-                "tassi_attuali": "Tassi Attuali [-1/+1]",
+                "tassi_attuali": "🏦 Tassi Attuali [-1/+1]",
                 "regime_economico": "🎯 Regime Economico [-2/+2]",
-                "aspettative_tassi": "Aspettative Tassi [-2/+2]",
-                "inflazione": "Inflazione [-1/+1]",
-                "crescita_pil": "Crescita/PIL [-1/+1]",
-                "risk_sentiment": "Risk Sentiment [-1/+1]",
-                "bilancia_fiscale": "Bilancia/Fiscale [-1/+1]",
+                "aspettative_tassi": "📈 Aspettative Tassi [-2/+2]",
+                "inflazione": "💰 Inflazione [-1/+1]",
+                "crescita_pil": "📊 Crescita/PIL [-1/+1]",
+                "risk_sentiment": "⚠️ Risk Sentiment [-1/+1]",
+                "bilancia_fiscale": "💵 Bilancia/Fiscale [-1/+1]",
                 "news_catalyst": "⚡ News Catalyst [-2/+2]"
             }
             
