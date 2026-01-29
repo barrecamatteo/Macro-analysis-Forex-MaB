@@ -66,8 +66,8 @@ REGIME_DEFINITIONS = {
         "condition": "PMI ↑ + Inflazione ↓",
         "forex_score": 1
     },
-    "surriscaldamento": {
-        "name": "Surriscaldamento",
+    "reflazione": {
+        "name": "Reflazione",
         "emoji": "🟡",
         "color": "#F59E0B",
         "description": "Crescita forte, inflazione in aumento",
@@ -84,8 +84,8 @@ REGIME_DEFINITIONS = {
         "condition": "PMI ↓ + Inflazione ↑",
         "forex_score": -1
     },
-    "recessione": {
-        "name": "Recessione",
+    "deflazione": {
+        "name": "Deflazione",
         "emoji": "🔵",
         "color": "#6366F1",
         "description": "Crescita debole, inflazione in calo",
@@ -249,7 +249,7 @@ def identify_regime(delta_pmi: float, delta_inflation: float) -> str:
     Identifica il regime economico basato sui delta.
     
     Returns:
-        Chiave del regime: "espansione", "surriscaldamento", "stagflazione", "recessione"
+        Chiave del regime: "espansione", "reflazione", "stagflazione", "deflazione"
     """
     # Soglia per considerare un cambiamento significativo
     threshold = 0.1
@@ -263,15 +263,15 @@ def identify_regime(delta_pmi: float, delta_inflation: float) -> str:
     if pmi_up and inflation_down:
         return "espansione"
     elif pmi_up and inflation_up:
-        return "surriscaldamento"
+        return "reflazione"
     elif pmi_down and inflation_up:
         return "stagflazione"
     elif pmi_down and inflation_down:
-        return "recessione"
+        return "deflazione"
     else:
         # Caso neutro/transizione - decide in base al peso maggiore
         if abs(delta_pmi) > abs(delta_inflation):
-            return "surriscaldamento" if pmi_up else "recessione"
+            return "reflazione" if pmi_up else "deflazione"
         else:
             return "stagflazione" if inflation_up else "espansione"
 
@@ -415,26 +415,37 @@ def get_regime_history(supabase_request_func, currency: str, months: int = 6) ->
         return []
 
 
-def get_all_current_regimes(supabase_request_func) -> dict:
+def get_all_current_regimes(supabase_request_func) -> tuple[dict, datetime | None]:
     """
-    Recupera il regime corrente per tutte le valute.
+    Recupera il regime più recente per tutte le valute.
     
     Returns:
-        dict con {currency: regime_data}
+        tuple(dict con {currency: regime_data}, datetime più recente o None)
     """
-    now = datetime.now()
     regimes = {}
+    latest_timestamp = None
     
     for currency in CPI_CONFIG.keys():
         try:
-            endpoint = f"economic_regimes_history?currency=eq.{currency}&year=eq.{now.year}&month=eq.{now.month}"
+            # Prendi l'ultimo record per ogni valuta (ordinato per year, month DESC)
+            endpoint = f"economic_regimes_history?currency=eq.{currency}&order=year.desc,month.desc&limit=1"
             result = supabase_request_func("GET", endpoint)
             if result and len(result) > 0:
-                regimes[currency] = result[0]
+                data = result[0]
+                regimes[currency] = data
+                
+                # Estrai timestamp più recente
+                if "updated_at" in data and data["updated_at"]:
+                    try:
+                        ts = datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00"))
+                        if latest_timestamp is None or ts > latest_timestamp:
+                            latest_timestamp = ts
+                    except:
+                        pass
         except:
             pass
     
-    return regimes
+    return regimes, latest_timestamp
 
 
 # ============================================================================
