@@ -4477,9 +4477,10 @@ def display_economic_regimes(regimes_data: dict):
                 "Valuta": currency,
                 "Regime": "⚠️ N/A",
                 "PMI Comp.": "N/A",
-                "CPI Head": "N/A",
-                "CPI Core": "N/A",
+                "PMI Avg 3m": "N/A",
                 "Δ PMI": "N/A",
+                "CPI Head": "N/A",
+                "Infl Avg 3m": "N/A",
                 "Δ Infl.": "N/A",
                 "Mom. PMI": "-",
                 "Mom. Infl.": "-"
@@ -4495,9 +4496,10 @@ def display_economic_regimes(regimes_data: dict):
             "Valuta": currency,
             "Regime": f"{regime_emoji} {regime_name}",
             "PMI Comp.": f"{data.get('pmi_composite', 'N/A'):.1f}" if data.get('pmi_composite') else "N/A",
-            "CPI Head": f"{data.get('cpi_headline', 'N/A'):.1f}%" if data.get('cpi_headline') else "N/A",
-            "CPI Core": f"{data.get('cpi_core', 'N/A'):.1f}%" if data.get('cpi_core') else "-",
+            "PMI Avg 3m": f"{data.get('pmi_avg_3m', 'N/A'):.1f}" if data.get('pmi_avg_3m') else "N/A",
             "Δ PMI": f"{data.get('delta_pmi', 0):+.1f}" if data.get('delta_pmi') is not None else "N/A",
+            "CPI Head": f"{data.get('cpi_headline', 'N/A'):.1f}%" if data.get('cpi_headline') else "N/A",
+            "Infl Avg 3m": f"{data.get('inflation_avg_3m', 'N/A'):.1f}%" if data.get('inflation_avg_3m') else "N/A",
             "Δ Infl.": f"{data.get('delta_inflation', 0):+.1f}" if data.get('delta_inflation') is not None else "N/A",
             "Mom. PMI": data.get("momentum_pmi", "-"),
             "Mom. Infl.": data.get("momentum_inflation", "-")
@@ -4543,6 +4545,72 @@ def display_economic_regimes(regimes_data: dict):
     **Legenda:** PMI Comp. = PMI Composito (ponderato Manufacturing + Services) | 
     Δ = variazione vs media 3 mesi | Mom. = Momentum (⬆️⬆️ forte aumento, ⬆️ aumento, ↗️ leggero, ➡️ stabile, ↘️ leggero calo, ⬇️ calo, ⬇️⬇️ forte calo)
     """)
+    
+    # === EXPANDER VERIFICA DATI ===
+    with st.expander("🔍 Verifica Calcoli (dettagli)", expanded=False):
+        st.markdown("#### Formula Calcolo Regimi")
+        st.markdown("""
+        ```
+        Δ PMI = PMI Composite attuale - Media PMI ultimi 3 mesi
+        Δ Inflazione = Indice Inflazione attuale - Media Inflazione ultimi 3 mesi
+        
+        Indice Inflazione = (CPI Core × 0.7) + (CPI Headline × 0.3)
+        (se Core non disponibile, usa solo Headline)
+        
+        Regimi:
+        - Goldilocks:   Δ PMI > 0  E  Δ Inflazione < 0
+        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0
+        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0
+        - Deflazione:   Δ PMI < 0  E  Δ Inflazione < 0
+        ```
+        """)
+        
+        st.markdown("#### Dettagli per Valuta")
+        
+        for currency in currency_order:
+            data = regimes_data.get(currency, {})
+            if not data or data.get("error"):
+                continue
+            
+            with st.container():
+                st.markdown(f"**{currency}**")
+                
+                col_a, col_b = st.columns(2)
+                
+                with col_a:
+                    st.markdown("**PMI:**")
+                    pmi_manuf = data.get("pmi_manufacturing", "N/A")
+                    pmi_serv = data.get("pmi_services", "N/A")
+                    pmi_comp = data.get("pmi_composite", "N/A")
+                    pmi_avg = data.get("pmi_avg_3m", "N/A")
+                    delta_pmi = data.get("delta_pmi", "N/A")
+                    
+                    # Pesi PMI
+                    weights = {"USD": "30/70", "EUR": "50/50", "GBP": "20/80", 
+                              "JPY": "60/40", "CHF": "100/0", "AUD": "50/50", "CAD": "100/0"}
+                    
+                    st.text(f"  Manuf: {pmi_manuf}")
+                    st.text(f"  Services: {pmi_serv if pmi_serv else '-'}")
+                    st.text(f"  Pesi M/S: {weights.get(currency, '50/50')}")
+                    st.text(f"  Composite: {pmi_comp}")
+                    st.text(f"  Media 3m: {pmi_avg}")
+                    st.text(f"  Δ PMI: {delta_pmi:+.2f}" if isinstance(delta_pmi, (int, float)) else f"  Δ PMI: {delta_pmi}")
+                
+                with col_b:
+                    st.markdown("**Inflazione:**")
+                    cpi_head = data.get("cpi_headline", "N/A")
+                    cpi_core = data.get("cpi_core", "N/A")
+                    infl_idx = data.get("inflation_index", "N/A")
+                    infl_avg = data.get("inflation_avg_3m", "N/A")
+                    delta_infl = data.get("delta_inflation", "N/A")
+                    
+                    st.text(f"  CPI Headline: {cpi_head}%")
+                    st.text(f"  CPI Core: {cpi_core}%" if cpi_core else "  CPI Core: -")
+                    st.text(f"  Indice (0.7C+0.3H): {infl_idx:.2f}%" if isinstance(infl_idx, (int, float)) else f"  Indice: {infl_idx}")
+                    st.text(f"  Media 3m: {infl_avg}%")
+                    st.text(f"  Δ Infl: {delta_infl:+.2f}" if isinstance(delta_infl, (int, float)) else f"  Δ Infl: {delta_infl}")
+                
+                st.markdown("---")
 
 
 def display_central_bank_history(history_data: dict = None):
