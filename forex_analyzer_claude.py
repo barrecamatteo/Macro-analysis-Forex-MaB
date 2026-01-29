@@ -11,6 +11,17 @@ import hashlib
 import re
 import calendar
 
+# Import modulo regimi economici
+try:
+    from economic_regimes import (
+        CPI_CONFIG, PMI_WEIGHTS, REGIME_DEFINITIONS,
+        analyze_currency_regime, analyze_all_regimes,
+        save_regime_to_supabase, get_regime_history, get_all_current_regimes
+    )
+    REGIMES_MODULE_LOADED = True
+except ImportError:
+    REGIMES_MODULE_LOADED = False
+
 # Timezone Italia (con fallback)
 try:
     from zoneinfo import ZoneInfo
@@ -319,25 +330,7 @@ def load_data_timestamps(user_id: str) -> dict:
     if len(timestamps) < len(data_types):
         try:
             cached = get_latest_analysis_data(user_id)
-            
-            # *** PRIORITÀ: Usa data_timestamps salvati (timestamp REALI) ***
-            if cached.get("data_timestamps"):
-                saved_timestamps = cached["data_timestamps"]
-                for dt in data_types:
-                    if dt not in timestamps and dt in saved_timestamps:
-                        try:
-                            ts_str = saved_timestamps[dt]
-                            ts_dt = datetime.strptime(ts_str, "%Y-%m-%d_%H-%M-%S")
-                            if ITALY_TZ:
-                                ts_dt = ts_dt.replace(tzinfo=ITALY_TZ)
-                            timestamps[dt] = ts_dt
-                            st.session_state[f"timestamp_{dt}"] = ts_dt
-                        except:
-                            pass
-            
-            # *** FALLBACK: Solo se non ci sono data_timestamps (analisi vecchie) ***
-            # usa cached_datetime come approssimazione
-            elif cached.get("cached_datetime"):
+            if cached.get("cached_datetime"):
                 cached_dt = datetime.strptime(cached["cached_datetime"], "%Y-%m-%d_%H-%M-%S")
                 if ITALY_TZ:
                     cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
@@ -1010,10 +1003,6 @@ def get_latest_analysis_data(user_id: str) -> dict:
         # Aggiungi anche il datetime per mostrare quanto sono vecchi i dati
         cached_data['cached_datetime'] = datetime_key
         
-        # *** IMPORTANTE: Aggiungi i timestamp REALI dei dati (se salvati) ***
-        if 'data_timestamps' in data_container:
-            cached_data['data_timestamps'] = data_container['data_timestamps']
-        
     except Exception as e:
         # Se fallisce, ritorna dict vuoto
         pass
@@ -1146,112 +1135,6 @@ FOREX_PAIRS = [
     "GBP/CAD", "USD/CHF", "EUR/CHF", "GBP/CHF", "CAD/CHF",
     "AUD/CHF", "EUR/USD", "EUR/GBP", "GBP/USD",
 ]
-
-# Volatilità tipica giornaliera per coppia (in % del prezzo)
-# Usata per calcolare gli scenari di prezzo
-PAIR_VOLATILITY = {
-    # Major pairs - volatilità più bassa
-    "EUR/USD": 0.50,
-    "GBP/USD": 0.65,
-    "USD/JPY": 0.55,
-    "USD/CHF": 0.55,
-    "AUD/USD": 0.60,
-    "USD/CAD": 0.55,
-    # Cross pairs - volatilità media/alta
-    "EUR/GBP": 0.45,
-    "EUR/JPY": 0.70,
-    "GBP/JPY": 0.90,  # Molto volatile
-    "EUR/CHF": 0.40,
-    "GBP/CHF": 0.70,
-    "AUD/JPY": 0.75,
-    "CAD/JPY": 0.70,
-    "EUR/AUD": 0.70,
-    "GBP/AUD": 0.85,
-    "EUR/CAD": 0.60,
-    "GBP/CAD": 0.75,
-    "AUD/CAD": 0.55,
-    "AUD/CHF": 0.60,
-    "CAD/CHF": 0.55,
-}
-
-
-def calculate_price_scenarios(pair: str, current_price: float, differential: int) -> dict:
-    """
-    Calcola scenari di prezzo con probabilità basate sul differenziale.
-    
-    Args:
-        pair: Coppia forex (es. "EUR/USD")
-        current_price: Prezzo attuale
-        differential: Differenziale score_base - score_quote
-    
-    Returns:
-        dict con scenari e probabilità
-    """
-    if current_price is None or current_price <= 0:
-        return None
-    
-    # Ottieni volatilità della coppia (default 0.6% se non trovata)
-    volatility_pct = PAIR_VOLATILITY.get(pair, 0.60)
-    
-    # Calcola range in punti
-    base_range = current_price * (volatility_pct / 100)
-    extended_range = current_price * (volatility_pct * 1.5 / 100)
-    
-    # Determina decimali in base alla coppia
-    if "JPY" in pair:
-        decimals = 2
-    else:
-        decimals = 4
-    
-    # Calcola livelli di prezzo
-    range_low = round(current_price - base_range, decimals)
-    range_high = round(current_price + base_range, decimals)
-    
-    base_strong_low = round(current_price + base_range, decimals)
-    base_strong_high = round(current_price + extended_range, decimals)
-    
-    quote_strong_low = round(current_price - extended_range, decimals)
-    quote_strong_high = round(current_price - base_range, decimals)
-    
-    # Calcola probabilità basate sul differenziale
-    if differential >= 7:
-        prob_base_strong = 65
-        prob_range = 25
-        prob_quote_strong = 10
-    elif differential >= 4:
-        prob_base_strong = 55
-        prob_range = 30
-        prob_quote_strong = 15
-    elif differential >= 1:
-        prob_base_strong = 45
-        prob_range = 35
-        prob_quote_strong = 20
-    elif differential == 0:
-        prob_base_strong = 33
-        prob_range = 34
-        prob_quote_strong = 33
-    elif differential >= -3:
-        prob_base_strong = 20
-        prob_range = 35
-        prob_quote_strong = 45
-    elif differential >= -6:
-        prob_base_strong = 15
-        prob_range = 30
-        prob_quote_strong = 55
-    else:  # <= -7
-        prob_base_strong = 10
-        prob_range = 25
-        prob_quote_strong = 65
-    
-    return {
-        "base_range": f"{range_low} - {range_high}",
-        "base_strong": f"{base_strong_low} - {base_strong_high}",
-        "quote_strong": f"{quote_strong_low} - {quote_strong_high}",
-        "prob_base_strong": prob_base_strong,
-        "prob_range": prob_range,
-        "prob_quote_strong": prob_quote_strong,
-        "current_price": round(current_price, decimals)
-    }
 
 
 # ============================================================================
@@ -4500,6 +4383,168 @@ def display_pmi_table(pmi_data: dict):
         st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
+# ============================================================================
+# FUNZIONE DISPLAY REGIMI ECONOMICI
+# ============================================================================
+
+def display_economic_regimes(regimes_data: dict):
+    """
+    Mostra l'analisi dei regimi economici per tutte le valute.
+    
+    Design:
+    - Matrice 2x2 con quadranti (Goldilocks, Reflation, Stagflation, Deflation)
+    - Tabella con regime per ogni valuta
+    - Indicatori di momentum
+    - Alert divergenze CPI
+    """
+    if not regimes_data:
+        st.info("ℹ️ Nessun dato regime disponibile. Clicca 🔄 per aggiornare.")
+        return
+    
+    # === MATRICE 2x2 DEI REGIMI ===
+    st.markdown("#### 📊 Matrice Regimi Economici")
+    
+    # Conta valute per ogni regime
+    regime_counts = {"goldilocks": [], "reflation": [], "stagflation": [], "deflation": []}
+    for currency, data in regimes_data.items():
+        regime = data.get("regime")
+        if regime and regime in regime_counts:
+            regime_counts[regime].append(currency)
+    
+    # Mostra matrice 2x2
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Goldilocks (PMI ↑, Inflazione ↓)
+        gold_currencies = regime_counts.get("goldilocks", [])
+        st.markdown(f"""
+        <div style="background-color: #d1fae5; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
+            <h4 style="color: #059669; margin: 0;">🟢 Goldilocks</h4>
+            <p style="color: #065f46; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↓</p>
+            <p style="color: #047857; font-weight: bold; font-size: 18px;">{', '.join(gold_currencies) if gold_currencies else 'Nessuna'}</p>
+            <p style="color: #065f46; font-size: 11px;">Bullish valute forti</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Deflation (PMI ↓, Inflazione ↓)
+        defl_currencies = regime_counts.get("deflation", [])
+        st.markdown(f"""
+        <div style="background-color: #e0e7ff; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
+            <h4 style="color: #4f46e5; margin: 0;">🛡️ Deflazione</h4>
+            <p style="color: #3730a3; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↓</p>
+            <p style="color: #4338ca; font-weight: bold; font-size: 18px;">{', '.join(defl_currencies) if defl_currencies else 'Nessuna'}</p>
+            <p style="color: #3730a3; font-size: 11px;">Risk-off, safe haven</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        # Reflation (PMI ↑, Inflazione ↑)
+        refl_currencies = regime_counts.get("reflation", [])
+        st.markdown(f"""
+        <div style="background-color: #fef3c7; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
+            <h4 style="color: #d97706; margin: 0;">🚀 Reflazione</h4>
+            <p style="color: #92400e; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↑</p>
+            <p style="color: #b45309; font-weight: bold; font-size: 18px;">{', '.join(refl_currencies) if refl_currencies else 'Nessuna'}</p>
+            <p style="color: #92400e; font-size: 11px;">Strong bullish commodity</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Stagflation (PMI ↓, Inflazione ↑)
+        stag_currencies = regime_counts.get("stagflation", [])
+        st.markdown(f"""
+        <div style="background-color: #fee2e2; border-radius: 10px; padding: 15px; margin: 5px; min-height: 120px;">
+            <h4 style="color: #dc2626; margin: 0;">🔴 Stagflazione</h4>
+            <p style="color: #991b1b; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↑</p>
+            <p style="color: #b91c1c; font-weight: bold; font-size: 18px;">{', '.join(stag_currencies) if stag_currencies else 'Nessuna'}</p>
+            <p style="color: #991b1b; font-size: 11px;">Bearish, alta volatilità</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # === TABELLA DETTAGLI PER VALUTA ===
+    st.markdown("#### 📋 Dettagli per Valuta")
+    
+    table_rows = []
+    divergence_alerts = []
+    
+    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+    
+    for currency in currency_order:
+        data = regimes_data.get(currency, {})
+        if not data or data.get("error"):
+            table_rows.append({
+                "Valuta": currency,
+                "Regime": "⚠️ N/A",
+                "PMI Comp.": "N/A",
+                "CPI Head": "N/A",
+                "CPI Core": "N/A",
+                "Δ PMI": "N/A",
+                "Δ Infl.": "N/A",
+                "Mom. PMI": "-",
+                "Mom. Infl.": "-"
+            })
+            continue
+        
+        regime = data.get("regime", "N/A")
+        regime_info = data.get("regime_info", {})
+        regime_emoji = regime_info.get("emoji", "❓") if regime_info else "❓"
+        regime_name = regime_info.get("name", regime) if regime_info else regime
+        
+        row = {
+            "Valuta": currency,
+            "Regime": f"{regime_emoji} {regime_name}",
+            "PMI Comp.": f"{data.get('pmi_composite', 'N/A'):.1f}" if data.get('pmi_composite') else "N/A",
+            "CPI Head": f"{data.get('cpi_headline', 'N/A'):.1f}%" if data.get('cpi_headline') else "N/A",
+            "CPI Core": f"{data.get('cpi_core', 'N/A'):.1f}%" if data.get('cpi_core') else "-",
+            "Δ PMI": f"{data.get('delta_pmi', 0):+.1f}" if data.get('delta_pmi') is not None else "N/A",
+            "Δ Infl.": f"{data.get('delta_inflation', 0):+.1f}" if data.get('delta_inflation') is not None else "N/A",
+            "Mom. PMI": data.get("momentum_pmi", "-"),
+            "Mom. Infl.": data.get("momentum_inflation", "-")
+        }
+        table_rows.append(row)
+        
+        # Raccogli alert divergenze
+        if data.get("divergence"):
+            div = data["divergence"]
+            divergence_alerts.append(f"**{currency}**: {div.get('emoji', '⚠️')} {div.get('message', '')}")
+    
+    # Mostra tabella
+    if table_rows:
+        df = pd.DataFrame(table_rows)
+        
+        # Funzione per colorare in base al regime
+        def style_regime_table(row):
+            styles = [''] * len(row)
+            regime_cell = row["Regime"]
+            
+            if "Goldilocks" in regime_cell:
+                styles[1] = 'background-color: #d1fae5; color: #059669; font-weight: bold'
+            elif "Reflazione" in regime_cell:
+                styles[1] = 'background-color: #fef3c7; color: #d97706; font-weight: bold'
+            elif "Stagflazione" in regime_cell:
+                styles[1] = 'background-color: #fee2e2; color: #dc2626; font-weight: bold'
+            elif "Deflazione" in regime_cell:
+                styles[1] = 'background-color: #e0e7ff; color: #4f46e5; font-weight: bold'
+            
+            return styles
+        
+        styled_df = df.style.apply(style_regime_table, axis=1)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    
+    # === ALERT DIVERGENZE ===
+    if divergence_alerts:
+        st.markdown("#### ⚠️ Alert Divergenze CPI")
+        for alert in divergence_alerts:
+            st.warning(alert)
+    
+    # Legenda
+    st.caption("""
+    **Legenda:** PMI Comp. = PMI Composito (ponderato Manufacturing + Services) | 
+    Δ = variazione vs media 3 mesi | Mom. = Momentum (⬆️⬆️ forte aumento, ⬆️ aumento, ↗️ leggero, ➡️ stabile, ↘️ leggero calo, ⬇️ calo, ⬇️⬇️ forte calo)
+    """)
+
+
 def display_central_bank_history(history_data: dict = None):
     """
     Mostra la tabella storico decisioni delle banche centrali.
@@ -5312,7 +5357,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_base.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation  # Testo completo
+                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
                         })
                 
                 if score_rows_base:
@@ -5356,7 +5401,7 @@ def display_analysis_matrix(analysis: dict):
                         score_rows_quote.append({
                             "Parametro": param_label,
                             "Score": score_display,
-                            "Motivazione": motivation  # Testo completo
+                            "Motivazione": motivation[:150] + "..." if len(motivation) > 150 else motivation
                         })
                 
                 if score_rows_quote:
@@ -5404,124 +5449,49 @@ def display_analysis_matrix(analysis: dict):
             
             st.markdown("---")
             
-            # === SCENARI DI PREZZO CON PROBABILITÀ ===
-            # Ottieni prezzo attuale dai dati forex (più fonti possibili)
-            actual_price = None
-            
-            # 1. Prima prova session_state (dati più recenti)
-            forex_prices_data = st.session_state.get("last_forex_prices")
-            if forex_prices_data and isinstance(forex_prices_data, dict):
-                prices_dict = forex_prices_data.get("prices", {})
-                if prices_dict and selected_pair in prices_dict:
-                    price_val = prices_dict.get(selected_pair)
-                    # Il prezzo può essere un float diretto o un dict con chiave "price"
-                    if isinstance(price_val, (int, float)):
-                        actual_price = float(price_val)
-                    elif isinstance(price_val, dict):
-                        actual_price = price_val.get("price")
-            
-            # 2. Fallback: prova dai dati dell'analisi corrente
-            if not actual_price:
-                current_analysis = st.session_state.get('current_analysis', {})
-                analysis_forex = current_analysis.get('forex_prices') or current_analysis.get('data', {}).get('forex_prices')
-                if analysis_forex and isinstance(analysis_forex, dict):
-                    prices_dict = analysis_forex.get("prices", analysis_forex)
-                    if prices_dict and selected_pair in prices_dict:
-                        price_val = prices_dict.get(selected_pair)
-                        if isinstance(price_val, (int, float)):
-                            actual_price = float(price_val)
-                        elif isinstance(price_val, dict):
-                            actual_price = price_val.get("price")
-            
-            # Calcola differenziale
-            differential = score_base - score_quote
-            
-            # Calcola scenari di prezzo
-            if actual_price and actual_price > 0:
-                price_scenarios = calculate_price_scenarios(selected_pair, actual_price, differential)
-            else:
-                price_scenarios = None
-            
+            # === SCENARI DI PREZZO ===
+            price_scenarios = pair_data.get("price_scenarios", {})
+            current_price = pair_data.get("current_price", "N/A")
             key_drivers = pair_data.get("key_drivers", [])
             
-            if price_scenarios:
+            if price_scenarios or current_price != "N/A":
                 st.markdown("### 📊 Scenari di Prezzo")
                 
-                # Box prezzo attuale con differenziale
-                diff_text = f"+{differential}" if differential > 0 else str(differential)
-                diff_color = "#28a745" if differential > 0 else "#dc3545" if differential < 0 else "#6c757d"
-                
+                # Box prezzo attuale
                 st.markdown(f"""
                 <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                    <p style="margin: 0;">
-                        <strong>Prezzo attuale:</strong> {price_scenarios['current_price']} 
-                        &nbsp;&nbsp;|&nbsp;&nbsp;
-                        <strong>Differenziale:</strong> <span style="color: {diff_color}; font-weight: bold;">{diff_text}</span>
-                    </p>
+                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                # Tre scenari con probabilità
-                col_base_strong, col_range, col_quote_strong = st.columns(3)
-                
-                # Determina quale scenario è più probabile
-                probs = [
-                    price_scenarios['prob_base_strong'],
-                    price_scenarios['prob_range'],
-                    price_scenarios['prob_quote_strong']
-                ]
-                max_prob = max(probs)
-                
-                with col_base_strong:
-                    is_most_likely = price_scenarios['prob_base_strong'] == max_prob
-                    border_style = "border: 3px solid #28a745;" if is_most_likely else ""
-                    star = "⭐ " if is_most_likely else ""
-                    st.markdown(f"""
-                    <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px; {border_style}">
-                        <p style="margin: 0; font-size: 1.2em;">🟢 <strong>{base_curr} Forte</strong></p>
-                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_strong']}</p>
-                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #155724;">
-                            {star}{price_scenarios['prob_base_strong']}%
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_range:
-                    is_most_likely = price_scenarios['prob_range'] == max_prob
-                    border_style = "border: 3px solid #856404;" if is_most_likely else ""
-                    star = "⭐ " if is_most_likely else ""
-                    st.markdown(f"""
-                    <div style="text-align: center; padding: 15px; background: #fff3cd; border-radius: 8px; {border_style}">
-                        <p style="margin: 0; font-size: 1.2em;">🟡 <strong>Range</strong></p>
-                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['base_range']}</p>
-                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #856404;">
-                            {star}{price_scenarios['prob_range']}%
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col_quote_strong:
-                    is_most_likely = price_scenarios['prob_quote_strong'] == max_prob
-                    border_style = "border: 3px solid #721c24;" if is_most_likely else ""
-                    star = "⭐ " if is_most_likely else ""
-                    st.markdown(f"""
-                    <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px; {border_style}">
-                        <p style="margin: 0; font-size: 1.2em;">🔴 <strong>{quote_curr} Forte</strong></p>
-                        <p style="margin: 8px 0; font-size: 1.1em;">{price_scenarios['quote_strong']}</p>
-                        <p style="margin: 0; font-size: 1.3em; font-weight: bold; color: #721c24;">
-                            {star}{price_scenarios['prob_quote_strong']}%
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                if price_scenarios:
+                    col_base_range, col_base_strong, col_quote_strong = st.columns(3)
+                    
+                    with col_base_range:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                            <p style="margin: 0;">🟡 <strong>Base</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_range', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_base_strong:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px;">
+                            <p style="margin: 0;">🟢 <strong>{base_curr} Forte</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_strong', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col_quote_strong:
+                        st.markdown(f"""
+                        <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px;">
+                            <p style="margin: 0;">🔴 <strong>{quote_curr} Forte</strong></p>
+                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('quote_strong', 'N/A')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
                 
                 st.markdown("")
-            elif actual_price:
-                st.markdown("### 📊 Scenari di Prezzo")
-                st.markdown(f"""
-                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px;">
-                    <p style="margin: 0;"><strong>Prezzo attuale:</strong> {actual_price}</p>
-                </div>
-                """, unsafe_allow_html=True)
             
             # === DRIVER CHIAVE ===
             if key_drivers:
@@ -5692,44 +5662,23 @@ def main():
             if cached_data.get('news_structured'):
                 st.session_state['last_news_structured'] = cached_data['news_structured']
             
-            # *** PRIORITÀ: Usa data_timestamps (timestamp REALI di aggiornamento dati) ***
-            if cached_data.get('data_timestamps'):
-                saved_timestamps = cached_data['data_timestamps']
-                data_type_map = {
-                    'macro': 'macro_data',
-                    'cb_history': 'cb_history_data',
-                    'pmi': 'pmi_data',
-                    'prices': 'forex_prices',
-                    'news': 'news_structured'
-                }
-                for ts_key, data_key in data_type_map.items():
-                    if ts_key in saved_timestamps and cached_data.get(data_key):
-                        try:
-                            ts_str = saved_timestamps[ts_key]
-                            ts_dt = datetime.strptime(ts_str, "%Y-%m-%d_%H-%M-%S")
-                            if ITALY_TZ:
-                                ts_dt = ts_dt.replace(tzinfo=ITALY_TZ)
-                            st.session_state[f'timestamp_{ts_key}'] = ts_dt
-                        except:
-                            pass
-            
-            # *** FALLBACK: Solo se non ci sono data_timestamps (analisi vecchie) ***
-            elif cached_data.get('cached_datetime'):
+            # Imposta anche i timestamps dalla data dell'analisi
+            if cached_data.get('cached_datetime'):
                 try:
                     cached_dt = datetime.strptime(cached_data['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
                     if ITALY_TZ:
                         cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
                     
-                    # Imposta timestamp per ogni tipo di dato presente (fallback)
-                    if cached_data.get('macro_data') and 'timestamp_macro' not in st.session_state:
+                    # Imposta timestamp per ogni tipo di dato presente
+                    if cached_data.get('macro_data'):
                         st.session_state['timestamp_macro'] = cached_dt
-                    if cached_data.get('cb_history_data') and 'timestamp_cb_history' not in st.session_state:
+                    if cached_data.get('cb_history_data'):
                         st.session_state['timestamp_cb_history'] = cached_dt
-                    if cached_data.get('pmi_data') and 'timestamp_pmi' not in st.session_state:
+                    if cached_data.get('pmi_data'):
                         st.session_state['timestamp_pmi'] = cached_dt
-                    if cached_data.get('forex_prices') and 'timestamp_prices' not in st.session_state:
+                    if cached_data.get('forex_prices'):
                         st.session_state['timestamp_prices'] = cached_dt
-                    if cached_data.get('news_structured') and 'timestamp_news' not in st.session_state:
+                    if cached_data.get('news_structured'):
                         st.session_state['timestamp_news'] = cached_dt
                 except:
                     pass
@@ -5955,6 +5904,48 @@ def main():
     
     st.markdown("---")
     
+    # --- SEZIONE 6: REGIMI ECONOMICI ---
+    if REGIMES_MODULE_LOADED:
+        col_title6, col_status6, col_btn6 = st.columns([3, 3, 1])
+        with col_title6:
+            st.markdown("### 🎯 Regimi Economici")
+        with col_status6:
+            ts_regime = st.session_state.get('timestamp_regimes')
+            ts_str = ts_regime.strftime("%d/%m %H:%M") if ts_regime else "Mai"
+            st.caption(f"📅 {ts_str}")
+        with col_btn6:
+            if st.button("🔄", key="upd_regimes", help="Aggiorna Regimi Economici"):
+                with st.spinner("Analisi regimi economici..."):
+                    # Prepara dati PMI per l'analisi regimi
+                    pmi_for_regimes = {}
+                    if pmi_data:
+                        for curr, data in pmi_data.items():
+                            pmi_for_regimes[curr] = {
+                                "manufacturing": data.get("manufacturing", {}).get("current"),
+                                "services": data.get("services", {}).get("current")
+                            }
+                    
+                    # Analizza regimi
+                    regimes_result = analyze_all_regimes(pmi_for_regimes)
+                    
+                    # Salva su Supabase se disponibile
+                    if SUPABASE_ENABLED:
+                        for currency, regime_data in regimes_result.items():
+                            if not regime_data.get("error"):
+                                save_regime_to_supabase(supabase_request, currency, regime_data)
+                    
+                    st.session_state['last_regimes_data'] = regimes_result
+                    st.session_state['timestamp_regimes'] = get_italy_now()
+                    st.rerun()
+        
+        regimes_data = st.session_state.get('last_regimes_data')
+        if regimes_data:
+            display_economic_regimes(regimes_data)
+        else:
+            st.info("ℹ️ Nessun dato regime. Clicca 🔄 per analizzare (richiede PMI aggiornati).")
+        
+        st.markdown("---")
+    
     # ===== SEZIONE ANALISI CLAUDE =====
     st.markdown("## 🤖 Analisi Claude AI")
     
@@ -6024,14 +6015,6 @@ def main():
             # Salva risultato
             progress.progress(80, text="💾 Salvataggio...")
             
-            # Salva i timestamp REALI di quando i dati sono stati aggiornati
-            data_timestamps = {}
-            for dt in ["macro", "cb_history", "pmi", "prices", "news"]:
-                ts = st.session_state.get(f'timestamp_{dt}')
-                if ts:
-                    # Converti datetime in stringa per JSON
-                    data_timestamps[dt] = ts.strftime("%Y-%m-%d_%H-%M-%S") if hasattr(ts, 'strftime') else str(ts)
-            
             analysis_result = {
                 "macro_data": macro_data,
                 "pmi_data": pmi_data,
@@ -6041,8 +6024,7 @@ def main():
                 "news_structured": news_structured,
                 "links_structured": links_structured,
                 "claude_analysis": claude_analysis,
-                "options_selected": {"full": True},
-                "data_timestamps": data_timestamps  # Timestamp REALI dei dati
+                "options_selected": {"full": True}
             }
             
             if save_analysis(analysis_result, user_id, "full", {"full": True}):
