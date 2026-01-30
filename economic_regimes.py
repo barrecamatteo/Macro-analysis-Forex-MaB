@@ -371,9 +371,11 @@ def save_regime_to_supabase(supabase_request_func, currency: str, data: dict) ->
             "pmi_manufacturing": data.get("pmi_manufacturing"),
             "pmi_services": data.get("pmi_services"),
             "pmi_composite": data.get("pmi_composite"),
+            "pmi_avg_3m": data.get("pmi_avg_3m"),
             "cpi_headline": data.get("cpi_headline"),
             "cpi_core": data.get("cpi_core"),
             "inflation_index": data.get("inflation_index"),
+            "inflation_avg_3m": data.get("inflation_avg_3m"),
             "delta_pmi": data.get("delta_pmi"),
             "delta_inflation": data.get("delta_inflation"),
             "regime": data.get("regime"),
@@ -432,6 +434,11 @@ def get_all_current_regimes(supabase_request_func) -> tuple[dict, datetime | Non
             result = supabase_request_func("GET", endpoint)
             if result and len(result) > 0:
                 data = result[0]
+                
+                # Aggiungi regime_info se mancante
+                if data.get("regime") and "regime_info" not in data:
+                    data["regime_info"] = REGIME_DEFINITIONS.get(data["regime"])
+                
                 regimes[currency] = data
                 
                 # Estrai timestamp più recente
