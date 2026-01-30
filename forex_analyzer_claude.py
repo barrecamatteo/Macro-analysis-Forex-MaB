@@ -10,6 +10,7 @@ import requests
 import hashlib
 import re
 import calendar
+import time
 
 # Import modulo regimi economici
 try:
@@ -1120,6 +1121,55 @@ def get_user_analyses(user_id: str, limit: int = 50) -> list:
         analyses = sorted(analyses, key=lambda x: x.get("data", {}).get("analysis_datetime", "") or x.get("analysis_datetime", ""), reverse=True)
     
     return analyses[:limit]
+
+
+def get_currency_scores_history(user_id: str, limit: int = 30) -> dict:
+    """
+    Estrae lo storico dei punteggi per ogni valuta dalle analisi salvate.
+    
+    Returns:
+        dict con {currency: [{"date": "...", "score": X}, ...]}
+    """
+    analyses = get_user_analyses(user_id, limit=limit)
+    
+    # Dizionario per ogni valuta
+    history = {curr: [] for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]}
+    
+    for analysis in analyses:
+        # Estrai datetime
+        dt_str = analysis.get("analysis_datetime") or analysis.get("data", {}).get("analysis_datetime", "")
+        if not dt_str:
+            continue
+        
+        # Formatta data per display
+        try:
+            if "_" in dt_str:
+                date_part = dt_str.split("_")[0]
+                date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+            else:
+                date_obj = datetime.strptime(dt_str, "%Y-%m-%d")
+            date_display = date_obj.strftime("%d/%m")
+        except:
+            date_display = dt_str[:10]
+        
+        # Estrai currency_analysis
+        claude_data = analysis.get("claude_analysis") or analysis.get("data", {}).get("claude_analysis", {})
+        currency_analysis = claude_data.get("currency_analysis", {})
+        
+        for curr in history.keys():
+            if curr in currency_analysis:
+                score = currency_analysis[curr].get("total_score", 0)
+                history[curr].append({
+                    "date": date_display,
+                    "datetime": dt_str,
+                    "score": score
+                })
+    
+    # Inverti l'ordine (dal più vecchio al più recente per i grafici)
+    for curr in history:
+        history[curr] = list(reversed(history[curr]))
+    
+    return history
 
 
 def format_datetime_display(datetime_str: str) -> str:
@@ -5157,14 +5207,51 @@ def display_analysis_matrix(analysis: dict):
             column_config=currency_column_config
         )
         
-        # Expander per vedere le sintesi complete
-        with st.expander("📝 Vedi sintesi complete per valuta"):
-            for curr, data in currencies_sorted:
-                score = data.get("total_score", 0)
-                summary = data.get("summary", "N/A")
-                indicator = "🟢🟢" if score >= 3 else "🟢" if score > 0 else "🔴🔴" if score <= -3 else "🔴" if score < 0 else "🟡"
-                st.markdown(f"**{curr}** {indicator} ({score:+d}): {summary}")
-                st.markdown("---")
+        # Expander per vedere lo storico punteggi per ogni valuta
+        with st.expander("📈 Storico punteggi per valuta"):
+            # Recupera storico (usa user_id da session_state)
+            user_id_for_history = st.session_state.get('user_id', 'default')
+            scores_history = get_currency_scores_history(user_id_for_history, limit=20)
+            
+            if any(len(h) > 1 for h in scores_history.values()):
+                # Crea tabs per ogni valuta
+                tabs = st.tabs(list(scores_history.keys()))
+                
+                for tab, (curr, history) in zip(tabs, scores_history.items()):
+                    with tab:
+                        if len(history) > 1:
+                            # Prepara dati per il grafico
+                            dates = [h["date"] for h in history]
+                            scores = [h["score"] for h in history]
+                            
+                            # Crea DataFrame per il grafico
+                            chart_df = pd.DataFrame({
+                                "Data": dates,
+                                "Punteggio": scores
+                            })
+                            
+                            # Grafico a linee con Streamlit
+                            st.line_chart(
+                                chart_df.set_index("Data"),
+                                use_container_width=True,
+                                height=200
+                            )
+                            
+                            # Statistiche rapide
+                            avg_score = sum(scores) / len(scores)
+                            min_score = min(scores)
+                            max_score = max(scores)
+                            trend = scores[-1] - scores[0] if len(scores) > 1 else 0
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            col1.metric("Media", f"{avg_score:.1f}")
+                            col2.metric("Min", f"{min_score:+d}")
+                            col3.metric("Max", f"{max_score:+d}")
+                            col4.metric("Trend", f"{trend:+d}", delta=f"{trend:+d}")
+                        else:
+                            st.info(f"Dati insufficienti per {curr}. Servono almeno 2 analisi.")
+            else:
+                st.info("Storico non disponibile. Esegui più analisi per vedere i grafici.")
         
         st.markdown("---")
     
@@ -5913,7 +6000,67 @@ def main():
         return  # Stop qui se visualizzando analisi storica
     
     # ===== MAIN AREA - DATI INPUT =====
-    st.markdown("## 📊 Dati di Input")
+    col_main_title, col_main_btn = st.columns([6, 1])
+    with col_main_title:
+        st.markdown("## 📊 Dati di Input")
+    with col_main_btn:
+        if st.button("🔄 Tutto", key="upd_all", help="Aggiorna tutti i dati"):
+            with st.spinner("Aggiornamento di tutti i dati..."):
+                progress_all = st.progress(0, text="Aggiornamento Macro...")
+                
+                # 1. Macro
+                new_macro = fetch_macro_data()
+                st.session_state['last_macro_data'] = new_macro
+                st.session_state['timestamp_macro'] = get_italy_now()
+                save_data_timestamp('macro', user_id)
+                progress_all.progress(15, text="Aggiornamento PMI e Regimi...")
+                
+                # 2. PMI + Regimi
+                new_pmi_data = fetch_all_pmi_data()
+                st.session_state['last_pmi_data'] = new_pmi_data
+                st.session_state['timestamp_pmi'] = get_italy_now()
+                save_data_timestamp('pmi', user_id)
+                
+                if REGIMES_MODULE_LOADED:
+                    pmi_for_regimes = {}
+                    for curr, data in new_pmi_data.items():
+                        pmi_for_regimes[curr] = {
+                            "manufacturing": data.get("manufacturing", {}).get("current"),
+                            "services": data.get("services", {}).get("current")
+                        }
+                    regimes_result = analyze_all_regimes(pmi_for_regimes)
+                    if SUPABASE_ENABLED:
+                        for currency, regime_data in regimes_result.items():
+                            if not regime_data.get("error"):
+                                save_regime_to_supabase(supabase_request, currency, regime_data)
+                    st.session_state['last_regimes_data'] = regimes_result
+                    st.session_state['timestamp_regimes'] = get_italy_now()
+                progress_all.progress(40, text="Aggiornamento Storico BC...")
+                
+                # 3. Storico BC
+                new_cb = get_central_bank_history_summary()
+                st.session_state['last_cb_history'] = new_cb
+                st.session_state['timestamp_cb_history'] = get_italy_now()
+                save_data_timestamp('cb_history', user_id)
+                progress_all.progress(60, text="Aggiornamento Prezzi...")
+                
+                # 4. Prezzi Forex
+                new_prices = fetch_forex_prices()
+                st.session_state['last_forex_prices'] = new_prices
+                st.session_state['timestamp_prices'] = get_italy_now()
+                save_data_timestamp('prices', user_id)
+                progress_all.progress(80, text="Aggiornamento Notizie...")
+                
+                # 5. Notizie
+                new_news, new_structured = fetch_news_from_sources(NEWS_SOURCES)
+                st.session_state['last_news_text'] = new_news
+                st.session_state['last_news_structured'] = new_structured
+                st.session_state['timestamp_news'] = get_italy_now()
+                save_data_timestamp('news', user_id)
+                
+                progress_all.progress(100, text="✅ Tutti i dati aggiornati!")
+                time.sleep(0.5)
+                st.rerun()
     
     # --- SEZIONE 1: DATI MACRO ---
     col_title1, col_status1, col_btn1 = st.columns([3, 3, 1])
