@@ -5211,45 +5211,168 @@ def display_analysis_matrix(analysis: dict):
         with st.expander("📈 Storico punteggi per valuta"):
             # Recupera storico (usa user_id da session_state)
             user_id_for_history = st.session_state.get('user_id', 'default')
-            scores_history = get_currency_scores_history(user_id_for_history, limit=20)
+            scores_history = get_currency_scores_history(user_id_for_history, limit=50)
             
-            if any(len(h) > 1 for h in scores_history.values()):
-                # Crea tabs per ogni valuta
-                tabs = st.tabs(list(scores_history.keys()))
+            # Verifica se ci sono dati
+            max_data_points = max(len(h) for h in scores_history.values()) if scores_history else 0
+            
+            if max_data_points > 1:
+                # --- CONTROLLI ---
+                col_curr1, col_curr2, col_range = st.columns([2, 2, 3])
                 
-                for tab, (curr, history) in zip(tabs, scores_history.items()):
-                    with tab:
-                        if len(history) > 1:
-                            # Prepara dati per il grafico
-                            dates = [h["date"] for h in history]
-                            scores = [h["score"] for h in history]
-                            
-                            # Crea DataFrame per il grafico
-                            chart_df = pd.DataFrame({
-                                "Data": dates,
-                                "Punteggio": scores
+                currencies_list = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+                
+                with col_curr1:
+                    primary_currency = st.selectbox(
+                        "📊 Valuta principale",
+                        currencies_list,
+                        index=0,
+                        key="hist_primary_curr"
+                    )
+                
+                with col_curr2:
+                    compare_enabled = st.checkbox("Confronta con", key="hist_compare_enabled")
+                    if compare_enabled:
+                        # Rimuovi la valuta principale dalle opzioni
+                        compare_options = [c for c in currencies_list if c != primary_currency]
+                        secondary_currency = st.selectbox(
+                            "Seconda valuta",
+                            compare_options,
+                            index=0,
+                            key="hist_secondary_curr",
+                            label_visibility="collapsed"
+                        )
+                    else:
+                        secondary_currency = None
+                
+                with col_range:
+                    # Slider per range temporale
+                    range_options = min(max_data_points, 50)
+                    if range_options >= 3:
+                        data_range = st.slider(
+                            "📅 Ultime N analisi",
+                            min_value=3,
+                            max_value=range_options,
+                            value=min(15, range_options),
+                            key="hist_range"
+                        )
+                    else:
+                        data_range = range_options
+                
+                # --- PREPARA DATI ---
+                primary_history = scores_history.get(primary_currency, [])[-data_range:]
+                
+                if len(primary_history) > 1:
+                    # Crea DataFrame per grafico
+                    chart_data = []
+                    
+                    for h in primary_history:
+                        chart_data.append({
+                            "Data": h["date"],
+                            "Punteggio": h["score"],
+                            "Valuta": primary_currency
+                        })
+                    
+                    # Aggiungi seconda valuta se abilitata
+                    if compare_enabled and secondary_currency:
+                        secondary_history = scores_history.get(secondary_currency, [])[-data_range:]
+                        for h in secondary_history:
+                            chart_data.append({
+                                "Data": h["date"],
+                                "Punteggio": h["score"],
+                                "Valuta": secondary_currency
                             })
-                            
-                            # Grafico a linee con Streamlit
-                            st.line_chart(
-                                chart_df.set_index("Data"),
-                                use_container_width=True,
-                                height=200
+                    
+                    chart_df = pd.DataFrame(chart_data)
+                    
+                    # --- GRAFICO CON ALTAIR ---
+                    try:
+                        import altair as alt
+                        
+                        # Definisci colori
+                        if compare_enabled and secondary_currency:
+                            color_scale = alt.Scale(
+                                domain=[primary_currency, secondary_currency],
+                                range=['#1f77b4', '#ff7f0e']  # Blu e Arancione
                             )
-                            
-                            # Statistiche rapide
-                            avg_score = sum(scores) / len(scores)
-                            min_score = min(scores)
-                            max_score = max(scores)
-                            trend = scores[-1] - scores[0] if len(scores) > 1 else 0
-                            
-                            col1, col2, col3, col4 = st.columns(4)
-                            col1.metric("Media", f"{avg_score:.1f}")
-                            col2.metric("Min", f"{min_score:+d}")
-                            col3.metric("Max", f"{max_score:+d}")
-                            col4.metric("Trend", f"{trend:+d}", delta=f"{trend:+d}")
                         else:
-                            st.info(f"Dati insufficienti per {curr}. Servono almeno 2 analisi.")
+                            color_scale = alt.Scale(
+                                domain=[primary_currency],
+                                range=['#1f77b4']
+                            )
+                        
+                        chart = alt.Chart(chart_df).mark_line(
+                            point=True,
+                            strokeWidth=2
+                        ).encode(
+                            x=alt.X('Data:N', title='Data', sort=None),
+                            y=alt.Y('Punteggio:Q', title='Punteggio', scale=alt.Scale(domain=[-12, 12])),
+                            color=alt.Color('Valuta:N', scale=color_scale, legend=alt.Legend(title="Valuta")),
+                            tooltip=['Data', 'Valuta', 'Punteggio']
+                        ).properties(
+                            height=350
+                        ).configure_axis(
+                            labelFontSize=12,
+                            titleFontSize=14
+                        )
+                        
+                        # Aggiungi linea zero
+                        zero_line = alt.Chart(pd.DataFrame({'y': [0]})).mark_rule(
+                            strokeDash=[5, 5],
+                            color='gray'
+                        ).encode(y='y:Q')
+                        
+                        st.altair_chart(chart + zero_line, use_container_width=True)
+                        
+                    except ImportError:
+                        # Fallback a grafico Streamlit base
+                        st.line_chart(
+                            chart_df.pivot(index="Data", columns="Valuta", values="Punteggio"),
+                            use_container_width=True,
+                            height=350
+                        )
+                    
+                    # --- STATISTICHE ---
+                    st.markdown("##### 📊 Statistiche")
+                    
+                    if compare_enabled and secondary_currency:
+                        col_stat1, col_stat2 = st.columns(2)
+                        
+                        with col_stat1:
+                            scores_1 = [h["score"] for h in primary_history]
+                            avg_1 = sum(scores_1) / len(scores_1)
+                            trend_1 = scores_1[-1] - scores_1[0]
+                            st.markdown(f"**{primary_currency}** 🔵")
+                            sub1, sub2, sub3, sub4 = st.columns(4)
+                            sub1.metric("Media", f"{avg_1:.1f}")
+                            sub2.metric("Min", f"{min(scores_1):+d}")
+                            sub3.metric("Max", f"{max(scores_1):+d}")
+                            sub4.metric("Trend", f"{trend_1:+d}")
+                        
+                        with col_stat2:
+                            secondary_history_stats = scores_history.get(secondary_currency, [])[-data_range:]
+                            if secondary_history_stats:
+                                scores_2 = [h["score"] for h in secondary_history_stats]
+                                avg_2 = sum(scores_2) / len(scores_2)
+                                trend_2 = scores_2[-1] - scores_2[0]
+                                st.markdown(f"**{secondary_currency}** 🟠")
+                                sub1, sub2, sub3, sub4 = st.columns(4)
+                                sub1.metric("Media", f"{avg_2:.1f}")
+                                sub2.metric("Min", f"{min(scores_2):+d}")
+                                sub3.metric("Max", f"{max(scores_2):+d}")
+                                sub4.metric("Trend", f"{trend_2:+d}")
+                    else:
+                        scores_1 = [h["score"] for h in primary_history]
+                        avg_1 = sum(scores_1) / len(scores_1)
+                        trend_1 = scores_1[-1] - scores_1[0]
+                        
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("Media", f"{avg_1:.1f}")
+                        col2.metric("Min", f"{min(scores_1):+d}")
+                        col3.metric("Max", f"{max(scores_1):+d}")
+                        col4.metric("Trend", f"{trend_1:+d}", delta=f"{trend_1:+d}")
+                else:
+                    st.info(f"Dati insufficienti per {primary_currency}. Servono almeno 2 analisi.")
             else:
                 st.info("Storico non disponibile. Esegui più analisi per vedere i grafici.")
         
