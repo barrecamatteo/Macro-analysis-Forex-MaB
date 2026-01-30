@@ -5301,7 +5301,8 @@ def display_analysis_matrix(analysis: dict):
                                 range=['#1f77b4']
                             )
                         
-                        chart = alt.Chart(chart_df).mark_line(
+                        # Grafico principale
+                        line_chart = alt.Chart(chart_df).mark_line(
                             point=True,
                             strokeWidth=2
                         ).encode(
@@ -5311,18 +5312,25 @@ def display_analysis_matrix(analysis: dict):
                             tooltip=['Data', 'Valuta', 'Punteggio']
                         ).properties(
                             height=350
-                        ).configure_axis(
+                        )
+                        
+                        # Linea zero di riferimento
+                        zero_df = pd.DataFrame({'zero': [0]})
+                        zero_line = alt.Chart(zero_df).mark_rule(
+                            strokeDash=[5, 5],
+                            color='gray',
+                            strokeWidth=1
+                        ).encode(
+                            y='zero:Q'
+                        )
+                        
+                        # Combina i grafici con layer
+                        final_chart = alt.layer(zero_line, line_chart).configure_axis(
                             labelFontSize=12,
                             titleFontSize=14
                         )
                         
-                        # Aggiungi linea zero
-                        zero_line = alt.Chart(pd.DataFrame({'y': [0]})).mark_rule(
-                            strokeDash=[5, 5],
-                            color='gray'
-                        ).encode(y='y:Q')
-                        
-                        st.altair_chart(chart + zero_line, use_container_width=True)
+                        st.altair_chart(final_chart, use_container_width=True)
                         
                     except ImportError:
                         # Fallback a grafico Streamlit base
