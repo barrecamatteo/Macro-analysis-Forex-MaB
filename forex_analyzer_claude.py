@@ -1128,7 +1128,7 @@ def get_currency_scores_history(user_id: str, limit: int = 30) -> dict:
     Estrae lo storico dei punteggi per ogni valuta dalle analisi salvate.
     
     Returns:
-        dict con {currency: [{"date": "...", "score": X}, ...]}
+        dict con {currency: [{"date": "...", "date_obj": datetime, "score": X}, ...]}
     """
     analyses = get_user_analyses(user_id, limit=limit)
     
@@ -1151,6 +1151,7 @@ def get_currency_scores_history(user_id: str, limit: int = 30) -> dict:
             date_display = date_obj.strftime("%d/%m")
         except:
             date_display = dt_str[:10]
+            date_obj = None
         
         # Estrai currency_analysis
         claude_data = analysis.get("claude_analysis") or analysis.get("data", {}).get("claude_analysis", {})
@@ -1161,6 +1162,7 @@ def get_currency_scores_history(user_id: str, limit: int = 30) -> dict:
                 score = currency_analysis[curr].get("total_score", 0)
                 history[curr].append({
                     "date": date_display,
+                    "date_obj": date_obj,
                     "datetime": dt_str,
                     "score": score
                 })
@@ -5211,14 +5213,28 @@ def display_analysis_matrix(analysis: dict):
         with st.expander("📈 Storico punteggi per valuta"):
             # Recupera storico (usa user_id da session_state)
             user_id_for_history = st.session_state.get('user_id', 'default')
-            scores_history = get_currency_scores_history(user_id_for_history, limit=50)
+            scores_history = get_currency_scores_history(user_id_for_history, limit=100)
             
             # Verifica se ci sono dati
             max_data_points = max(len(h) for h in scores_history.values()) if scores_history else 0
             
             if max_data_points > 1:
+                # Trova range date disponibili
+                all_dates = []
+                for curr_hist in scores_history.values():
+                    for h in curr_hist:
+                        if h.get("date_obj"):
+                            all_dates.append(h["date_obj"])
+                
+                if all_dates:
+                    min_date = min(all_dates).date()
+                    max_date = max(all_dates).date()
+                else:
+                    min_date = datetime.now().date() - timedelta(days=30)
+                    max_date = datetime.now().date()
+                
                 # --- CONTROLLI ---
-                col_curr1, col_curr2, col_range = st.columns([2, 2, 3])
+                col_curr1, col_curr2 = st.columns([1, 1])
                 
                 currencies_list = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
                 
@@ -5233,7 +5249,6 @@ def display_analysis_matrix(analysis: dict):
                 with col_curr2:
                     compare_enabled = st.checkbox("Confronta con", key="hist_compare_enabled")
                     if compare_enabled:
-                        # Rimuovi la valuta principale dalle opzioni
                         compare_options = [c for c in currencies_list if c != primary_currency]
                         secondary_currency = st.selectbox(
                             "Seconda valuta",
@@ -5245,26 +5260,41 @@ def display_analysis_matrix(analysis: dict):
                     else:
                         secondary_currency = None
                 
-                with col_range:
-                    # Slider per range temporale
-                    range_options = min(max_data_points, 50)
-                    if range_options >= 3:
-                        data_range = st.slider(
-                            "📅 Ultime N analisi",
-                            min_value=3,
-                            max_value=range_options,
-                            value=min(15, range_options),
-                            key="hist_range"
-                        )
-                    else:
-                        data_range = range_options
+                # Date picker
+                col_date1, col_date2 = st.columns(2)
+                with col_date1:
+                    date_from = st.date_input(
+                        "📅 Da",
+                        value=min_date,
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="hist_date_from"
+                    )
+                with col_date2:
+                    date_to = st.date_input(
+                        "📅 A",
+                        value=max_date,
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="hist_date_to"
+                    )
                 
-                # --- PREPARA DATI ---
-                primary_history = scores_history.get(primary_currency, [])[-data_range:]
+                # --- FILTRA DATI PER DATE ---
+                def filter_by_date(history_list, from_date, to_date):
+                    filtered = []
+                    for h in history_list:
+                        if h.get("date_obj"):
+                            h_date = h["date_obj"].date()
+                            if from_date <= h_date <= to_date:
+                                filtered.append(h)
+                    return filtered
                 
-                if len(primary_history) > 1:
+                primary_history = filter_by_date(scores_history.get(primary_currency, []), date_from, date_to)
+                
+                if len(primary_history) > 0:
                     # Crea DataFrame per grafico
                     chart_data = []
+                    all_scores = []
                     
                     for h in primary_history:
                         chart_data.append({
@@ -5272,18 +5302,31 @@ def display_analysis_matrix(analysis: dict):
                             "Punteggio": h["score"],
                             "Valuta": primary_currency
                         })
+                        all_scores.append(h["score"])
                     
                     # Aggiungi seconda valuta se abilitata
                     if compare_enabled and secondary_currency:
-                        secondary_history = scores_history.get(secondary_currency, [])[-data_range:]
+                        secondary_history = filter_by_date(scores_history.get(secondary_currency, []), date_from, date_to)
                         for h in secondary_history:
                             chart_data.append({
                                 "Data": h["date"],
                                 "Punteggio": h["score"],
                                 "Valuta": secondary_currency
                             })
+                            all_scores.append(h["score"])
                     
                     chart_df = pd.DataFrame(chart_data)
+                    
+                    # Calcola scala Y dinamica con margine
+                    if all_scores:
+                        y_min = min(all_scores) - 2
+                        y_max = max(all_scores) + 2
+                        # Assicurati che zero sia sempre visibile se i dati lo attraversano
+                        if min(all_scores) <= 0 <= max(all_scores):
+                            y_min = min(y_min, -1)
+                            y_max = max(y_max, 1)
+                    else:
+                        y_min, y_max = -5, 5
                     
                     # --- GRAFICO CON ALTAIR ---
                     try:
@@ -5293,7 +5336,7 @@ def display_analysis_matrix(analysis: dict):
                         if compare_enabled and secondary_currency:
                             color_scale = alt.Scale(
                                 domain=[primary_currency, secondary_currency],
-                                range=['#1f77b4', '#ff7f0e']  # Blu e Arancione
+                                range=['#1f77b4', '#ff7f0e']
                             )
                         else:
                             color_scale = alt.Scale(
@@ -5301,17 +5344,18 @@ def display_analysis_matrix(analysis: dict):
                                 range=['#1f77b4']
                             )
                         
-                        # Grafico principale
+                        # Grafico principale con scala Y dinamica
                         line_chart = alt.Chart(chart_df).mark_line(
-                            point=True,
-                            strokeWidth=2
+                            point=alt.OverlayMarkDef(size=60),
+                            strokeWidth=2.5
                         ).encode(
                             x=alt.X('Data:N', title='Data', sort=None),
-                            y=alt.Y('Punteggio:Q', title='Punteggio', scale=alt.Scale(domain=[-12, 12])),
+                            y=alt.Y('Punteggio:Q', title='Punteggio', 
+                                   scale=alt.Scale(domain=[y_min, y_max])),
                             color=alt.Color('Valuta:N', scale=color_scale, legend=alt.Legend(title="Valuta")),
                             tooltip=['Data', 'Valuta', 'Punteggio']
                         ).properties(
-                            height=350
+                            height=400
                         )
                         
                         # Linea zero di riferimento
@@ -5324,7 +5368,7 @@ def display_analysis_matrix(analysis: dict):
                             y='zero:Q'
                         )
                         
-                        # Combina i grafici con layer
+                        # Combina i grafici
                         final_chart = alt.layer(zero_line, line_chart).configure_axis(
                             labelFontSize=12,
                             titleFontSize=14
@@ -5333,54 +5377,40 @@ def display_analysis_matrix(analysis: dict):
                         st.altair_chart(final_chart, use_container_width=True)
                         
                     except ImportError:
-                        # Fallback a grafico Streamlit base
                         st.line_chart(
                             chart_df.pivot(index="Data", columns="Valuta", values="Punteggio"),
                             use_container_width=True,
-                            height=350
+                            height=400
                         )
                     
-                    # --- STATISTICHE ---
-                    st.markdown("##### 📊 Statistiche")
-                    
-                    if compare_enabled and secondary_currency:
-                        col_stat1, col_stat2 = st.columns(2)
-                        
-                        with col_stat1:
+                    # --- STATISTICHE IN TOGGLE COMPATTO ---
+                    with st.expander("📊 Statistiche", expanded=False):
+                        if compare_enabled and secondary_currency:
+                            secondary_history_stats = filter_by_date(scores_history.get(secondary_currency, []), date_from, date_to)
+                            
+                            # Riga unica con tutte le statistiche
                             scores_1 = [h["score"] for h in primary_history]
-                            avg_1 = sum(scores_1) / len(scores_1)
-                            trend_1 = scores_1[-1] - scores_1[0]
-                            st.markdown(f"**{primary_currency}** 🔵")
-                            sub1, sub2, sub3, sub4 = st.columns(4)
-                            sub1.metric("Media", f"{avg_1:.1f}")
-                            sub2.metric("Min", f"{min(scores_1):+d}")
-                            sub3.metric("Max", f"{max(scores_1):+d}")
-                            sub4.metric("Trend", f"{trend_1:+d}")
-                        
-                        with col_stat2:
-                            secondary_history_stats = scores_history.get(secondary_currency, [])[-data_range:]
-                            if secondary_history_stats:
-                                scores_2 = [h["score"] for h in secondary_history_stats]
-                                avg_2 = sum(scores_2) / len(scores_2)
-                                trend_2 = scores_2[-1] - scores_2[0]
-                                st.markdown(f"**{secondary_currency}** 🟠")
-                                sub1, sub2, sub3, sub4 = st.columns(4)
-                                sub1.metric("Media", f"{avg_2:.1f}")
-                                sub2.metric("Min", f"{min(scores_2):+d}")
-                                sub3.metric("Max", f"{max(scores_2):+d}")
-                                sub4.metric("Trend", f"{trend_2:+d}")
-                    else:
-                        scores_1 = [h["score"] for h in primary_history]
-                        avg_1 = sum(scores_1) / len(scores_1)
-                        trend_1 = scores_1[-1] - scores_1[0]
-                        
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric("Media", f"{avg_1:.1f}")
-                        col2.metric("Min", f"{min(scores_1):+d}")
-                        col3.metric("Max", f"{max(scores_1):+d}")
-                        col4.metric("Trend", f"{trend_1:+d}", delta=f"{trend_1:+d}")
+                            scores_2 = [h["score"] for h in secondary_history_stats] if secondary_history_stats else []
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if scores_1:
+                                    avg_1 = sum(scores_1) / len(scores_1)
+                                    trend_1 = scores_1[-1] - scores_1[0] if len(scores_1) > 1 else 0
+                                    st.caption(f"**{primary_currency}** 🔵: Media {avg_1:.1f} | Min {min(scores_1):+d} | Max {max(scores_1):+d} | Trend {trend_1:+d}")
+                            with col2:
+                                if scores_2:
+                                    avg_2 = sum(scores_2) / len(scores_2)
+                                    trend_2 = scores_2[-1] - scores_2[0] if len(scores_2) > 1 else 0
+                                    st.caption(f"**{secondary_currency}** 🟠: Media {avg_2:.1f} | Min {min(scores_2):+d} | Max {max(scores_2):+d} | Trend {trend_2:+d}")
+                        else:
+                            scores_1 = [h["score"] for h in primary_history]
+                            if scores_1:
+                                avg_1 = sum(scores_1) / len(scores_1)
+                                trend_1 = scores_1[-1] - scores_1[0] if len(scores_1) > 1 else 0
+                                st.caption(f"**{primary_currency}**: Media {avg_1:.1f} | Min {min(scores_1):+d} | Max {max(scores_1):+d} | Trend {trend_1:+d}")
                 else:
-                    st.info(f"Dati insufficienti per {primary_currency}. Servono almeno 2 analisi.")
+                    st.info(f"Nessun dato nel periodo selezionato per {primary_currency}.")
             else:
                 st.info("Storico non disponibile. Esegui più analisi per vedere i grafici.")
         
