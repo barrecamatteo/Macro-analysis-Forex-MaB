@@ -6127,34 +6127,53 @@ def main():
         
         st.markdown("## 📊 Dati dell'analisi storica")
         
-        # Macro
+        # --- SEZIONE 1: Macro ---
         if data_container.get('macro_data'):
             st.markdown("### 📊 Dati Macro")
             display_macro_data(data_container['macro_data'])
+            st.markdown("---")
         
-        # CB History
+        # --- SEZIONE 2: Regimi Economici (con PMI in toggle) ---
+        regimes_data = data_container.get('regimes_data')
+        pmi_data = data_container.get('pmi_data')
+        
+        if regimes_data or pmi_data:
+            st.markdown("### 🎯 Regimi Economici")
+            
+            if regimes_data and REGIMES_MODULE_LOADED:
+                display_economic_regimes(regimes_data)
+                
+                # Toggle per vedere i dati PMI grezzi
+                if pmi_data:
+                    with st.expander("📈 Visualizza Dati PMI Grezzi", expanded=False):
+                        display_pmi_table(pmi_data)
+            elif pmi_data:
+                # Solo PMI se non ci sono regimi
+                st.info("ℹ️ Regimi non calcolati in questa analisi.")
+                with st.expander("📈 Visualizza Dati PMI", expanded=True):
+                    display_pmi_table(pmi_data)
+            
+            st.markdown("---")
+        
+        # --- SEZIONE 3: Storico BC ---
         if data_container.get('cb_history_data'):
             st.markdown("### 🏦 Storico Banche Centrali")
             display_central_bank_history(data_container['cb_history_data'])
+            st.markdown("---")
         
-        # PMI
-        if data_container.get('pmi_data'):
-            st.markdown("### 📈 Dati PMI")
-            display_pmi_table(data_container['pmi_data'])
-        
-        # Prezzi
+        # --- SEZIONE 4: Prezzi Forex ---
         if data_container.get('forex_prices'):
             st.markdown("### 💱 Prezzi Forex")
             display_forex_prices(data_container['forex_prices'])
+            st.markdown("---")
         
-        # News
+        # --- SEZIONE 5: Notizie ---
         if data_container.get('news_structured'):
             st.markdown("### 📰 Notizie")
             display_news_summary(data_container['news_structured'], data_container.get('links_structured'))
+            st.markdown("---")
         
-        st.markdown("---")
-        
-        # Analisi Claude storica
+        # --- Analisi Claude storica ---
         if data_container.get('claude_analysis'):
             display_analysis_matrix(data_container['claude_analysis'])
         
