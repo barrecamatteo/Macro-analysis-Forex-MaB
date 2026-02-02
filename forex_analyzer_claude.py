@@ -33,8 +33,10 @@ try:
         format_cot_for_display
     )
     COT_MODULE_LOADED = True
-except ImportError:
+    print("[INFO] Modulo COT caricato correttamente")
+except ImportError as e:
     COT_MODULE_LOADED = False
+    print(f"[WARNING] Modulo COT non caricato: {e}")
 
 # Timezone Italia (con fallback)
 try:
@@ -6344,6 +6346,18 @@ def main():
         else:
             st.caption("❌ API Key mancante")
         
+        # Status moduli
+        modules_status = []
+        if REGIMES_MODULE_LOADED:
+            modules_status.append("Regimi ✅")
+        else:
+            modules_status.append("Regimi ❌")
+        if COT_MODULE_LOADED:
+            modules_status.append("COT ✅")
+        else:
+            modules_status.append("COT ❌")
+        st.caption(" | ".join(modules_status))
+        
         st.markdown("---")
         
         # Calendario analisi
@@ -6500,7 +6514,13 @@ def main():
                 progress_all.progress(85, text="Aggiornamento Notizie...")
                 
                 # 5. Notizie
-                new_news, new_structured = fetch_news_from_sources(NEWS_SOURCES)
+                new_news, new_structured = search_web_news()
+                
+                # Aggiungi ForexFactory news
+                ff_news = fetch_forexfactory_news()
+                if ff_news.get("success") and ff_news.get("news"):
+                    new_structured["forexfactory_direct"] = ff_news["news"]
+                
                 st.session_state['last_news_text'] = new_news
                 st.session_state['last_news_structured'] = new_structured
                 st.session_state['timestamp_news'] = get_italy_now()
