@@ -80,18 +80,18 @@ REGIME_DEFINITIONS = {
         "emoji": "🔴",
         "color": "#EF4444",
         "description": "Crescita debole, inflazione alta",
-        "sentiment": "BC paralizzata - investitori fuggono",
+        "sentiment": "BC paralizzata - direzione incerta, volatilità alta",
         "condition": "PMI ↓ + Inflazione ↑",
-        "forex_score": -2
+        "forex_score": -1
     },
     "deflazione": {
         "name": "Deflazione",
         "emoji": "🔵",
         "color": "#6366F1",
         "description": "Crescita debole, inflazione in calo",
-        "sentiment": "BC taglierà tassi - valuta meno attrattiva",
+        "sentiment": "BC DEVE tagliare tassi - valuta in deprezzamento certo",
         "condition": "PMI ↓ + Inflazione ↓",
-        "forex_score": -1
+        "forex_score": -2
     }
 }
 
