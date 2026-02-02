@@ -579,6 +579,73 @@ class COTDataManager:
             'fetch_status': self.last_fetch_status,
             'debug': self.debug_messages
         }
+    
+    def get_cached_analysis(self, weeks: int = 52) -> Dict:
+        """
+        Carica i dati COT da Supabase e restituisce l'analisi (senza scaricare dalla CFTC).
+        Utile per caricare dati all'avvio dell'app.
+        
+        Args:
+            weeks: Numero di settimane da caricare
+            
+        Returns:
+            Dict con analisi completa o dict con status 'error'
+        """
+        self.clear_debug_log()
+        self._log_debug("=== CARICAMENTO DATI COT DA CACHE ===")
+        
+        if not self.supabase:
+            self._log_debug("Supabase non configurato", "WARNING")
+            return {'status': 'error', 'message': 'Supabase non disponibile'}
+        
+        try:
+            # Calcola data minima
+            min_date = (datetime.now() - timedelta(weeks=weeks)).strftime('%Y-%m-%d')
+            
+            results = {}
+            last_update = None
+            
+            for currency in CURRENCY_CONTRACTS.keys():
+                # Usa supabase_request come funzione (non come client)
+                endpoint = f"cot_data?currency=eq.{currency}&report_date=gte.{min_date}&order=report_date.asc"
+                response = self.supabase("GET", endpoint)
+                
+                if response:
+                    df = pd.DataFrame(response)
+                    df['report_date'] = pd.to_datetime(df['report_date'])
+                    results[currency] = df
+                    self._log_debug(f"Caricati {len(df)} record per {currency} da cache")
+                    
+                    # Prendi l'ultima data come timestamp
+                    if len(df) > 0:
+                        latest = df['report_date'].max()
+                        if last_update is None or latest > last_update:
+                            last_update = latest
+            
+            if not results:
+                self._log_debug("Nessun dato in cache!", "WARNING")
+                return {'status': 'error', 'message': 'Nessun dato COT in cache'}
+            
+            # Analizza i dati
+            analysis = self.analyze_all_currencies(results)
+            
+            self._log_debug("=== CARICAMENTO DA CACHE COMPLETATO ===")
+            
+            return {
+                'status': 'ok',
+                'last_update': last_update.isoformat() if last_update else datetime.now().isoformat(),
+                'currencies': analysis,
+                'fetch_status': {'cache': True},
+                'debug': self.debug_messages
+            }
+            
+        except Exception as e:
+            self._log_debug(f"Errore caricamento cache: {e}", "ERROR")
+            return {
+                'status': 'error',
+                'message': str(e),
+                'debug': self.debug_messages
+            }
 
 
 # ============================================
