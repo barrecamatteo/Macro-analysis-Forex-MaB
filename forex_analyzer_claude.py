@@ -124,7 +124,7 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
         return {
             "is_fresh": False,
             "status": "🟠",
-            "message": "Mai aggiornato",
+            "message": "Da aggiornare",
             "reason": "Nessun dato disponibile"
         }
     
@@ -145,13 +145,13 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornati ieri",
+                "message": f"Da aggiornare (ieri)",
                 "reason": "Non aggiornati oggi"
             }
         return {
             "is_fresh": True,
             "status": "🟢",
-            "message": f"Aggiornati oggi",
+            "message": f"Aggiornato",
             "reason": ""
         }
     
@@ -163,13 +163,13 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornate ieri",
+                "message": f"Da aggiornare (ieri)",
                 "reason": "Non aggiornate oggi"
             }
         return {
             "is_fresh": True,
             "status": "🟢",
-            "message": f"Aggiornate oggi",
+            "message": f"Aggiornato",
             "reason": ""
         }
     
@@ -190,8 +190,8 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Meeting recenti: {', '.join(meetings_after[:3])}",
-                "reason": "Meeting BC avvenuti dopo ultimo aggiornamento"
+                "message": f"Da aggiornare (meeting recenti)",
+                "reason": f"Meeting BC: {', '.join(meetings_after[:2])}"
             }
         
         # Trova prossimo meeting
@@ -205,7 +205,7 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
                         next_meetings.append(f"{currency} tra {days_until}gg")
                     break
         
-        msg = f"Aggiornati {age_days}gg fa"
+        msg = f"Aggiornato" if age_days == 0 else f"Aggiornato {age_days}gg fa"
         if next_meetings:
             msg += f" | Prossimi: {', '.join(next_meetings[:2])}"
         
@@ -232,8 +232,8 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
                 return {
                     "is_fresh": False,
                     "status": "🟠",
-                    "message": f"Nuovi PMI disponibili",
-                    "reason": f"Periodo PMI ({'Flash' if day_of_month >= 22 else 'Finale'}) - aggiorna!"
+                    "message": f"Da aggiornare (nuovi PMI)",
+                    "reason": f"Periodo PMI ({'Flash' if day_of_month >= 22 else 'Finale'})"
                 }
         
         # Fuori periodo critico, controlla solo età
@@ -241,14 +241,14 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornati {age_days}gg fa",
+                "message": f"Da aggiornare ({age_days}gg fa)",
                 "reason": "Dati troppo vecchi"
             }
         
         return {
             "is_fresh": True,
             "status": "🟢",
-            "message": f"Aggiornati {age_days}gg fa",
+            "message": f"Aggiornato" if age_days == 0 else f"Aggiornato {age_days}gg fa",
             "reason": ""
         }
     
@@ -263,7 +263,7 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
                 return {
                     "is_fresh": False,
                     "status": "🟠",
-                    "message": f"Periodo CPI (10-15 del mese)",
+                    "message": f"Da aggiornare (periodo CPI)",
                     "reason": "Nuovi dati inflazione probabilmente disponibili"
                 }
         
@@ -272,24 +272,20 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornati {age_days}gg fa",
+                "message": f"Da aggiornare ({age_days}gg fa)",
                 "reason": "Dati vecchi di oltre 7 giorni"
             }
         
         return {
             "is_fresh": True,
             "status": "🟢",
-            "message": f"Aggiornati {age_days}gg fa",
+            "message": f"Aggiornato" if age_days == 0 else f"Aggiornato {age_days}gg fa",
             "reason": ""
         }
     
     # ===== REGIMI ECONOMICI =====
     if data_type == "regimes":
         # I regimi si basano su PMI (esce ~1° del mese) e CPI (esce ~10-15 del mese)
-        # Considera "vecchi" se:
-        # 1. È passato il 1° del mese corrente E l'ultimo update era del mese precedente
-        # 2. È passato il 15° del mese corrente E l'ultimo update era prima del 15°
-        
         current_month = now.month
         current_year = now.year
         last_update_month = last_updated.month
@@ -303,7 +299,7 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornati {last_updated.strftime('%d/%m')}",
+                "message": f"Da aggiornare (nuovi PMI)",
                 "reason": "Nuovi PMI disponibili (inizio mese)"
             }
         
@@ -312,14 +308,33 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             return {
                 "is_fresh": False,
                 "status": "🟠",
-                "message": f"Aggiornati il {last_updated.day}/{last_updated.month}",
+                "message": f"Da aggiornare (nuovi CPI)",
                 "reason": "Nuovi CPI disponibili (metà mese)"
             }
         
         return {
             "is_fresh": True,
             "status": "🟢",
-            "message": f"Aggiornati {last_updated.strftime('%d/%m %H:%M')}",
+            "message": f"Aggiornato" if age_days == 0 else f"Aggiornato {age_days}gg fa",
+            "reason": ""
+        }
+    
+    # ===== COT (Commitment of Traders) =====
+    if data_type == "cot":
+        # I dati COT escono il venerdì (riferiti al martedì)
+        # Considera "vecchi" se non aggiornati da più di 7 giorni
+        if age_days > 7:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Da aggiornare ({age_days}gg fa)",
+                "reason": "Nuovi dati COT probabilmente disponibili"
+            }
+        
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornato" if age_days == 0 else f"Aggiornato {age_days}gg fa",
             "reason": ""
         }
     
@@ -6617,11 +6632,8 @@ def main():
         with col_title_reg:
             st.markdown("### 🎯 Regimi Economici")
         with col_status_reg:
-            status_emoji = regimes_freshness["status"]
-            ts_str = regimes_freshness["message"] if ts_regime else "Mai aggiornato"
-            st.caption(f"{status_emoji} {ts_str}")
-            if regimes_freshness.get("reason"):
-                st.caption(f"⚠️ {regimes_freshness['reason']}")
+            ts_str = ts_regime.strftime("%d/%m %H:%M") if ts_regime else "Mai"
+            st.caption(f"📅 {ts_str} - {regimes_freshness.get('status', '🟠')} {regimes_freshness.get('message', 'N/A')}")
         with col_btn_reg:
             if st.button("🔄", key="upd_regimes", help="Aggiorna Regimi Economici (recupera PMI e CPI)"):
                 with st.spinner("Analisi regimi economici..."):
