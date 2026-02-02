@@ -338,6 +338,24 @@ def check_data_freshness(data_type: str, last_updated: datetime | None) -> dict:
             "reason": ""
         }
     
+    # ===== RISK SENTIMENT (VIX + S&P 500) =====
+    if data_type == "risk_sentiment":
+        # Da aggiornare se non aggiornato oggi dopo le 8:00
+        today_8am = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        if now.hour >= 8 and last_updated < today_8am:
+            return {
+                "is_fresh": False,
+                "status": "🟠",
+                "message": f"Da aggiornare (ieri)",
+                "reason": "Aggiorna per avere VIX e S&P di oggi"
+            }
+        return {
+            "is_fresh": True,
+            "status": "🟢",
+            "message": f"Aggiornato",
+            "reason": ""
+        }
+    
     # Default
     return {
         "is_fresh": True,
@@ -6707,21 +6725,14 @@ def main():
     # --- SEZIONE 3.6: RISK SENTIMENT (VIX + S&P 500) ---
     risk_sentiment_data = st.session_state.get('last_risk_sentiment')
     ts_risk = st.session_state.get('timestamp_risk_sentiment')
+    risk_freshness = check_data_freshness("risk_sentiment", ts_risk)
     
     col_title_risk, col_status_risk, col_btn_risk = st.columns([3, 3, 1])
     with col_title_risk:
         st.markdown("### 📊 Risk Sentiment")
     with col_status_risk:
-        if ts_risk:
-            ts_str = ts_risk.strftime("%d/%m %H:%M")
-            # Considera fresco se aggiornato oggi
-            today = get_italy_now().date()
-            is_fresh = ts_risk.date() == today
-            status = "🟢 Aggiornato" if is_fresh else "🟠 Da aggiornare"
-        else:
-            ts_str = "Mai"
-            status = "🟠 Da aggiornare"
-        st.caption(f"📅 {ts_str} - {status}")
+        ts_str = ts_risk.strftime("%d/%m %H:%M") if ts_risk else "Mai"
+        st.caption(f"📅 {ts_str} - {risk_freshness.get('status', '🟠')} {risk_freshness.get('message', 'N/A')}")
     with col_btn_risk:
         if st.button("🔄", key="upd_risk", help="Aggiorna Risk Sentiment (VIX + S&P 500)"):
             with st.spinner("Recupero dati VIX e S&P 500..."):
