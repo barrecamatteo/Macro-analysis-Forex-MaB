@@ -55,6 +55,12 @@ PMI_WEIGHTS = {
     "CAD": {"manufacturing": 1.00, "services": 0.00}   # Solo Ivey PMI disponibile
 }
 
+# Soglie per determinare se il momentum è "FORTE" o "DEBOLE"
+MOMENTUM_THRESHOLDS = {
+    "pmi_strong": 1.5,       # |delta PMI| > 1.5 = momentum forte
+    "inflation_strong": 0.3  # |delta inflation| > 0.3% = momentum forte
+}
+
 # Definizione regimi economici
 REGIME_DEFINITIONS = {
     "espansione": {
@@ -62,36 +68,40 @@ REGIME_DEFINITIONS = {
         "emoji": "🟢",
         "color": "#10B981",
         "description": "Crescita solida, inflazione in calo",
-        "sentiment": "Risk-On - economia sana, attrattiva per investimenti",
+        "sentiment": "Goldilocks - BC può stare a guardare, economia sana",
         "condition": "PMI ↑ + Inflazione ↓",
-        "forex_score": 1
+        "score_range": "+1",
+        "score_logic": "Fisso +1 (situazione ideale, stabile)"
     },
     "reflazione": {
         "name": "Reflazione",
         "emoji": "🟡",
         "color": "#F59E0B",
         "description": "Crescita forte, inflazione in aumento",
-        "sentiment": "BC alzerà tassi - valuta attrattiva per carry trade",
+        "sentiment": "BC DEVE alzare tassi - conta momentum inflazione",
         "condition": "PMI ↑ + Inflazione ↑",
-        "forex_score": 2
+        "score_range": "+1 / +2",
+        "score_logic": "Inflazione forte → +2, debole → +1"
     },
     "stagflazione": {
         "name": "Stagflazione",
         "emoji": "🔴",
         "color": "#EF4444",
         "description": "Crescita debole, inflazione alta",
-        "sentiment": "BC paralizzata - direzione incerta, volatilità alta",
+        "sentiment": "BC paralizzata - massima incertezza",
         "condition": "PMI ↓ + Inflazione ↑",
-        "forex_score": -1
+        "score_range": "-1 / 0",
+        "score_logic": "Almeno uno forte → -1, entrambi deboli → 0"
     },
     "deflazione": {
         "name": "Deflazione",
         "emoji": "🔵",
         "color": "#6366F1",
         "description": "Crescita debole, inflazione in calo",
-        "sentiment": "BC DEVE tagliare tassi - valuta in deprezzamento certo",
+        "sentiment": "BC DEVE tagliare tassi - conta momentum PMI",
         "condition": "PMI ↓ + Inflazione ↓",
-        "forex_score": -2
+        "score_range": "-2 / -1",
+        "score_logic": "PMI forte → -2, debole → -1"
     }
 }
 
@@ -331,18 +341,97 @@ def detect_cpi_divergence(cpi_headline: float, cpi_core: Optional[float]) -> Opt
     return None
 
 
-def get_regime_forex_score(regime: str) -> int:
+def get_regime_forex_score(regime: str, delta_pmi: float = 0, delta_inflation: float = 0) -> dict:
     """
-    Restituisce il punteggio forex per un regime economico.
+    Calcola il punteggio forex per un regime economico basandosi sui momentum.
+    
+    La logica tiene conto di QUANDO la BC è OBBLIGATA ad agire:
+    - In DEFLAZIONE: conta il momentum PMI (economia soffre → BC deve tagliare)
+    - In REFLAZIONE: conta il momentum inflazione (prezzi salgono → BC deve alzare)
+    - In STAGFLAZIONE: entrambi contano (conflitto → incertezza)
+    - In ESPANSIONE: goldilocks, BC può stare a guardare (score fisso)
     
     Args:
-        regime: chiave del regime ("espansione", "surriscaldamento", "stagflazione", "recessione")
+        regime: chiave del regime ("espansione", "reflazione", "stagflazione", "deflazione")
+        delta_pmi: variazione PMI rispetto alla media 3 mesi
+        delta_inflation: variazione inflazione rispetto alla media 3 mesi
     
     Returns:
-        Punteggio forex: +1 per espansione/surriscaldamento, -1 per stagflazione/recessione
+        dict con score, momentum_pmi, momentum_inflation, explanation
     """
-    regime_info = REGIME_DEFINITIONS.get(regime, {})
-    return regime_info.get("forex_score", 0)
+    # Determina se i momentum sono "forti" o "deboli"
+    pmi_threshold = MOMENTUM_THRESHOLDS["pmi_strong"]
+    infl_threshold = MOMENTUM_THRESHOLDS["inflation_strong"]
+    
+    pmi_strong = abs(delta_pmi) > pmi_threshold
+    inflation_strong = abs(delta_inflation) > infl_threshold
+    
+    # Emoji per momentum
+    pmi_momentum = "⚡ Forte" if pmi_strong else "〰️ Debole"
+    infl_momentum = "⚡ Forte" if inflation_strong else "〰️ Debole"
+    
+    # Calcola score in base al regime
+    if regime == "espansione":
+        # Goldilocks: BC può stare a guardare → score fisso +1
+        score = 1
+        explanation = "Goldilocks: economia cresce, inflazione scende. BC neutrale."
+        key_momentum = "Nessuno (situazione ideale)"
+        
+    elif regime == "reflazione":
+        # Conta principalmente il momentum INFLAZIONE
+        # Se inflazione sale forte → BC DEVE alzare → molto bullish
+        if inflation_strong:
+            score = 2
+            explanation = f"Inflazione accelera ({delta_inflation:+.2f}%), BC DEVE alzare tassi aggressivamente."
+        else:
+            score = 1
+            explanation = f"Inflazione sale moderatamente ({delta_inflation:+.2f}%), BC alzerà gradualmente."
+        key_momentum = f"Inflazione: {infl_momentum}"
+        
+    elif regime == "stagflazione":
+        # CONFLITTO: entrambi i momentum contano
+        # Più intenso = più incertezza = peggio
+        if pmi_strong or inflation_strong:
+            score = -1
+            if pmi_strong and inflation_strong:
+                explanation = f"Crisi: PMI crolla ({delta_pmi:+.2f}) E inflazione esplode ({delta_inflation:+.2f}%). BC paralizzata."
+            elif pmi_strong:
+                explanation = f"PMI crolla ({delta_pmi:+.2f}), BC sotto pressione per tagliare nonostante inflazione."
+            else:
+                explanation = f"Inflazione esplode ({delta_inflation:+.2f}%), BC sotto pressione per alzare nonostante economia debole."
+        else:
+            score = 0
+            explanation = f"Stagflazione moderata: situazione brutta ma stabile. BC in attesa."
+        key_momentum = f"PMI: {pmi_momentum}, Inflazione: {infl_momentum}"
+        
+    elif regime == "deflazione":
+        # Conta principalmente il momentum PMI
+        # Se PMI crolla forte → BC DEVE tagliare → molto bearish
+        if pmi_strong:
+            score = -2
+            explanation = f"PMI crolla ({delta_pmi:+.2f}), BC DEVE tagliare tassi aggressivamente."
+        else:
+            score = -1
+            explanation = f"PMI scende moderatamente ({delta_pmi:+.2f}), BC taglierà gradualmente."
+        key_momentum = f"PMI: {pmi_momentum}"
+        
+    else:
+        # Regime sconosciuto
+        score = 0
+        explanation = "Regime non riconosciuto"
+        key_momentum = "N/A"
+    
+    return {
+        "score": score,
+        "momentum_pmi": pmi_momentum,
+        "momentum_pmi_value": delta_pmi,
+        "momentum_pmi_strong": pmi_strong,
+        "momentum_inflation": infl_momentum,
+        "momentum_inflation_value": delta_inflation,
+        "momentum_inflation_strong": inflation_strong,
+        "key_momentum": key_momentum,
+        "explanation": explanation
+    }
 
 
 # ============================================================================
