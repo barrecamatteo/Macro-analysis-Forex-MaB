@@ -3605,10 +3605,47 @@ def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -
             delta_inflation = regime_info.get("delta_inflation", 0) or 0
             
             # Calcola score con la nuova logica basata sui momentum
-            score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
-            forex_score = score_result["score"]
-            explanation = score_result["explanation"]
-            key_momentum = score_result["key_momentum"]
+            try:
+                score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
+                if isinstance(score_result, dict):
+                    forex_score = score_result["score"]
+                    explanation = score_result.get("explanation", "")
+                    key_momentum = score_result.get("key_momentum", "")
+                    momentum_pmi = score_result.get("momentum_pmi", "")
+                    momentum_inflation = score_result.get("momentum_inflation", "")
+                    momentum_pmi_strong = score_result.get("momentum_pmi_strong", False)
+                    momentum_inflation_strong = score_result.get("momentum_inflation_strong", False)
+                else:
+                    # Vecchia versione che ritorna int
+                    forex_score = score_result
+                    pmi_strong = abs(delta_pmi) > 1.5
+                    infl_strong = abs(delta_inflation) > 0.3
+                    momentum_pmi = "⚡ Forte" if pmi_strong else "〰️ Debole"
+                    momentum_inflation = "⚡ Forte" if infl_strong else "〰️ Debole"
+                    momentum_pmi_strong = pmi_strong
+                    momentum_inflation_strong = infl_strong
+                    key_momentum = f"PMI: {momentum_pmi}, Infl: {momentum_inflation}"
+                    explanation = f"Score calcolato: {forex_score}"
+            except Exception:
+                # Fallback - calcola localmente
+                pmi_strong = abs(delta_pmi) > 1.5
+                infl_strong = abs(delta_inflation) > 0.3
+                if regime == "espansione":
+                    forex_score = 1
+                elif regime == "reflazione":
+                    forex_score = 2 if infl_strong else 1
+                elif regime == "stagflazione":
+                    forex_score = -1 if (pmi_strong or infl_strong) else 0
+                elif regime == "deflazione":
+                    forex_score = -2 if pmi_strong else -1
+                else:
+                    forex_score = 0
+                momentum_pmi = "⚡ Forte" if pmi_strong else "〰️ Debole"
+                momentum_inflation = "⚡ Forte" if infl_strong else "〰️ Debole"
+                momentum_pmi_strong = pmi_strong
+                momentum_inflation_strong = infl_strong
+                key_momentum = f"PMI: {momentum_pmi}, Infl: {momentum_inflation}"
+                explanation = f"Score calcolato: {forex_score}"
             
             regime_name = REGIME_DEFINITIONS.get(regime, {}).get("name", regime)
             regime_emoji = REGIME_DEFINITIONS.get(regime, {}).get("emoji", "")
@@ -3626,10 +3663,10 @@ def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -
                 "regime_emoji": regime_emoji,
                 "delta_pmi": delta_pmi,
                 "delta_inflation": delta_inflation,
-                "momentum_pmi": score_result["momentum_pmi"],
-                "momentum_inflation": score_result["momentum_inflation"],
-                "momentum_pmi_strong": score_result["momentum_pmi_strong"],
-                "momentum_inflation_strong": score_result["momentum_inflation_strong"],
+                "momentum_pmi": momentum_pmi,
+                "momentum_inflation": momentum_inflation,
+                "momentum_pmi_strong": momentum_pmi_strong,
+                "momentum_inflation_strong": momentum_inflation_strong,
                 "key_momentum": key_momentum,
                 "explanation": explanation,
                 "score": forex_score
@@ -4961,11 +4998,38 @@ def display_economic_regimes(regimes_data: dict):
         delta_pmi = data.get('delta_pmi', 0) or 0
         delta_inflation = data.get('delta_inflation', 0) or 0
         
-        # Importa la funzione se non è già importata
-        score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
-        score = score_result["score"]
-        pmi_strong = score_result["momentum_pmi_strong"]
-        infl_strong = score_result["momentum_inflation_strong"]
+        # Calcola score - gestisce sia nuova che vecchia versione della funzione
+        try:
+            if REGIMES_MODULE_LOADED:
+                score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
+                if isinstance(score_result, dict):
+                    score = score_result["score"]
+                    pmi_strong = score_result.get("momentum_pmi_strong", False)
+                    infl_strong = score_result.get("momentum_inflation_strong", False)
+                else:
+                    # Vecchia versione che ritorna int
+                    score = score_result
+                    pmi_strong = abs(delta_pmi) > 1.5
+                    infl_strong = abs(delta_inflation) > 0.3
+            else:
+                # Modulo non caricato - calcola localmente
+                pmi_strong = abs(delta_pmi) > 1.5
+                infl_strong = abs(delta_inflation) > 0.3
+                if regime == "espansione":
+                    score = 1
+                elif regime == "reflazione":
+                    score = 2 if infl_strong else 1
+                elif regime == "stagflazione":
+                    score = -1 if (pmi_strong or infl_strong) else 0
+                elif regime == "deflazione":
+                    score = -2 if pmi_strong else -1
+                else:
+                    score = 0
+        except Exception:
+            # Fallback se la funzione non supporta i nuovi parametri
+            score = 0
+            pmi_strong = abs(delta_pmi) > 1.5
+            infl_strong = abs(delta_inflation) > 0.3
         
         # Emoji per momentum nella tabella
         pmi_mom_emoji = "⚡" if pmi_strong else "〰️"
