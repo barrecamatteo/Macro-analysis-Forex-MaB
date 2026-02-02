@@ -24,6 +24,18 @@ try:
 except ImportError:
     REGIMES_MODULE_LOADED = False
 
+# Import modulo COT (Commitment of Traders)
+try:
+    from cot_data import (
+        COTDataManager,
+        get_cot_analysis,
+        get_cot_scores_for_currency,
+        format_cot_for_display
+    )
+    COT_MODULE_LOADED = True
+except ImportError:
+    COT_MODULE_LOADED = False
+
 # Timezone Italia (con fallback)
 try:
     from zoneinfo import ZoneInfo
@@ -2908,14 +2920,50 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
 
 ---
 
+### 8️⃣ COT INDEX [-1 a +1]
+**Logica:** Posizionamento degli speculatori (Non-Commercial) nel range 52 settimane.
+
+**IMPORTANTE:** I valori COT Index sono PRE-CALCOLATI e forniti nei dati di input.
+USA il valore fornito per assegnare il punteggio secondo questa tabella:
+
+| COT Index | Score | Motivo |
+|-----------|-------|--------|
+| > 80% | 0 | Estremo long - troppo affollato, cautela |
+| 60% - 80% | +1 | Speculatori bullish, segui il trend |
+| 40% - 60% | 0 | Posizionamento neutrale |
+| 20% - 40% | -1 | Speculatori bearish, segui il trend |
+| < 20% | 0 | Estremo short - troppo affollato, cautela |
+
+⚠️ Se il dato COT non è disponibile → Score = 0
+
+---
+
+### 9️⃣ COT MOMENTUM [-1 a +1]
+**Logica:** Accelerazione del posizionamento rispetto alla media recente.
+
+**IMPORTANTE:** I valori COT Momentum sono PRE-CALCOLATI e forniti nei dati di input.
+USA il valore fornito per assegnare il punteggio:
+
+| Momentum | Score | Motivo |
+|----------|-------|--------|
+| Sopra 75° percentile | +1 | Accelerazione acquisti, speculatori stanno accumulando |
+| Nella norma | 0 | Posizionamento stabile |
+| Sotto 25° percentile | -1 | Accelerazione vendite, speculatori stanno scaricando |
+
+⚠️ Se il dato COT non è disponibile → Score = 0
+
+---
+
 ## ═══════════════════════════════════════════════════════════════════
 ## RANGE TOTALI PER VALUTA
 ## ═══════════════════════════════════════════════════════════════════
 
 - **Aspettative Tassi**: da -2 a +2 (peso doppio)
 - **News Catalyst**: da -2 a +2 (peso doppio)
+- **COT Index**: da -1 a +1
+- **COT Momentum**: da -1 a +1
 - **Altri 6 parametri**: da -1 a +1
-- **TOTALE per valuta**: da -10 a +10
+- **TOTALE per valuta**: da -12 a +12
 
 ## ═══════════════════════════════════════════════════════════════════
 ## FORMATO OUTPUT JSON
@@ -2957,6 +3005,14 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 "news_catalyst": {
                     "score": 0,
                     "motivation": "CPI in linea con attese. Nessuna sorpresa significativa"
+                },
+                "cot_index": {
+                    "score": 0,
+                    "motivation": "COT Index 55%, posizionamento neutrale"
+                },
+                "cot_momentum": {
+                    "score": 0,
+                    "motivation": "Delta nella norma, nessuna accelerazione"
                 }
             }
         },
@@ -2991,6 +3047,14 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 "news_catalyst": {
                     "score": 0,
                     "motivation": "NFP in linea con attese. Geopolitica già in risk sentiment"
+                },
+                "cot_index": {
+                    "score": 1,
+                    "motivation": "COT Index 72%, speculatori bullish su USD"
+                },
+                "cot_momentum": {
+                    "score": 1,
+                    "motivation": "Delta sopra 75° percentile, accelerazione acquisti"
                 }
             }
         },
@@ -3006,9 +3070,9 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
 ## ⚠️ REGOLE CRITICHE FINALI
 
 1. **TUTTE LE 7 VALUTE OBBLIGATORIE**: EUR, USD, GBP, JPY, CHF, AUD, CAD
-2. **total_score = SOMMA degli 8 punteggi** (verifica che sia corretto!)
+2. **total_score = SOMMA dei 10 punteggi** (verifica che sia corretto!)
 3. **USA SOLO I DATI FORNITI** - non inventare
-4. **MOTIVAZIONI CON NUMERI**: cita sempre i valori specifici (tassi %, inflazione %, PMI)
+4. **MOTIVAZIONI CON NUMERI**: cita sempre i valori specifici (tassi %, inflazione %, PMI, COT Index %)
 5. **COERENZA**: se dai +1 a USD per tassi alti, non dare +1 anche a EUR che ha tassi più bassi
 
 ## ⛔ REGOLA CRITICA NEWS CATALYST ⛔
@@ -3724,7 +3788,7 @@ def calculate_pair_from_currencies(currency_analysis: dict, forex_prices: dict =
     return pair_analysis
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None, cot_data: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -3737,6 +3801,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         forex_prices: Prezzi forex in tempo reale (opzionale)
         economic_events: Dati eventi economici recenti per News Catalyst (opzionale)
         cb_history_data: Storico decisioni banche centrali (opzionale)
+        cot_data: Dati COT (Commitment of Traders) per valuta (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -3859,6 +3924,62 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
     
+    # Sezione COT Data (Commitment of Traders)
+    cot_section = ""
+    if cot_data and cot_data.get('status') == 'ok':
+        currencies_cot = cot_data.get('currencies', {})
+        cot_lines = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+            if curr in currencies_cot:
+                data = currencies_cot[curr]
+                if data.get('status') == 'ok':
+                    net_pos = data.get('net_position', 0)
+                    cot_index = data.get('cot_index', 50)
+                    momentum = data.get('momentum', {})
+                    scores = data.get('scores', {})
+                    
+                    # Determina interpretazione COT Index
+                    if cot_index > 80:
+                        index_interp = "Estremo Long (0)"
+                    elif cot_index >= 60:
+                        index_interp = "Bullish (+1)"
+                    elif cot_index >= 40:
+                        index_interp = "Neutrale (0)"
+                    elif cot_index >= 20:
+                        index_interp = "Bearish (-1)"
+                    else:
+                        index_interp = "Estremo Short (0)"
+                    
+                    # Determina interpretazione Momentum
+                    delta = momentum.get('delta_current', 0)
+                    p75 = momentum.get('percentile_75', 0)
+                    p25 = momentum.get('percentile_25', 0)
+                    if delta > p75:
+                        mom_interp = "Accelerazione acquisti (+1)"
+                    elif delta < p25:
+                        mom_interp = "Accelerazione vendite (-1)"
+                    else:
+                        mom_interp = "Stabile (0)"
+                    
+                    cot_lines.append(
+                        f"**{curr}:** Net Position: {net_pos:+,} | "
+                        f"COT Index: {cot_index:.0f}% → {index_interp} | "
+                        f"Momentum: Δ {delta:+,} (75°perc: {p75:+,}) → {mom_interp}"
+                    )
+        
+        if cot_lines:
+            cot_section = f"""
+## 📊 DATI COT (Commitment of Traders - Non-Commercial/Speculatori):
+{chr(10).join(cot_lines)}
+
+⚠️ **USA QUESTI VALORI PRE-CALCOLATI per i parametri COT Index e COT Momentum!**
+- COT Index: Posizionamento nel range 52 settimane (già interpretato sopra)
+- COT Momentum: Accelerazione vs media mobile 4 settimane (già interpretato sopra)
+- **NOTA USD:** Il COT USD è basato sul Dollar Index (DXY), interpretazione diretta (Long DXY = Bullish USD)
+
+---
+"""
+
     today = get_italy_now()
     
     currencies_list = ", ".join(CURRENCIES.keys())
@@ -3883,6 +4004,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 {pmi_section}
 {cb_history_section}
 {economic_events_section}
+{cot_section}
 {prices_section}
 {news_section}
 {additional_section}
@@ -3896,7 +4018,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 5. **PIL è LAGGING indicator**: conferma la crescita passata
 6. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
 7. Ogni **summary** deve spiegare la situazione della valuta con DATI NUMERICI
-8. **total_score** = somma degli 8 punteggi parametro (verifica sia corretto!)
+8. **total_score** = somma dei 10 punteggi parametro (verifica sia corretto!)
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -4078,6 +4200,134 @@ Restituisci SOLO il JSON corretto, senza spiegazioni, senza markdown, senza ```.
 # ============================================================================
 # FUNZIONI VISUALIZZAZIONE
 # ============================================================================
+
+def display_cot_data(cot_data: dict):
+    """
+    Mostra la tabella dei dati COT con colori per indicare condizioni positive/negative.
+    
+    Args:
+        cot_data: Dict restituito da get_cot_analysis() o caricato da session_state
+    """
+    if not cot_data:
+        st.warning("⚠️ Nessun dato COT disponibile")
+        return
+    
+    if cot_data.get('status') != 'ok':
+        st.error(f"❌ Errore dati COT: {cot_data.get('message', 'Errore sconosciuto')}")
+        if cot_data.get('debug'):
+            with st.expander("🔍 Debug Log"):
+                for msg in cot_data['debug'][-10:]:  # Ultimi 10 messaggi
+                    st.text(msg)
+        return
+    
+    currencies_data = cot_data.get('currencies', {})
+    
+    if not currencies_data:
+        st.warning("⚠️ Nessun dato COT per le valute")
+        return
+    
+    # Costruisci la tabella
+    rows = []
+    for currency in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD']:
+        data = currencies_data.get(currency, {})
+        
+        if data.get('status') != 'ok':
+            rows.append({
+                'Valuta': currency,
+                'Net Position': '❌ N/A',
+                'COT Index': 'N/A',
+                'Δ Sett.': 'N/A',
+                'MA(4) Δ': 'N/A',
+                '75° Perc': 'N/A',
+            })
+            continue
+        
+        # Dati
+        net_pos = data.get('net_position', 0)
+        cot_index = data.get('cot_index', 50)
+        momentum = data.get('momentum', {})
+        delta_current = momentum.get('delta_current', 0)
+        ma4_delta = momentum.get('ma4_delta', 0)
+        p75 = momentum.get('percentile_75', 0)
+        p25 = momentum.get('percentile_25', 0)
+        scores = data.get('scores', {})
+        
+        # Colori COT Index
+        if cot_index > 80 or cot_index < 20:
+            cot_color = "⚪"  # Estremi
+        elif cot_index >= 60:
+            cot_color = "🟢"  # Bullish
+        elif cot_index <= 40:
+            cot_color = "🔴"  # Bearish
+        else:
+            cot_color = "⚪"  # Neutro
+        
+        # Colori Momentum
+        if delta_current > p75:
+            mom_color = "🟢"  # Accelerazione acquisti
+        elif delta_current < p25:
+            mom_color = "🔴"  # Accelerazione vendite
+        else:
+            mom_color = "⚪"  # Stabile
+        
+        rows.append({
+            'Valuta': currency,
+            'Net Position': f"{net_pos:+,}",
+            'COT Index': f"{cot_color} {cot_index:.0f}%",
+            'Δ Sett.': f"{mom_color} {delta_current:+,}",
+            'MA(4) Δ': f"{ma4_delta:+,}",
+            '75° Perc': f"{p75:+,}",
+        })
+    
+    # Mostra tabella
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    
+    # Info aggiornamento
+    if cot_data.get('last_update'):
+        last_upd = cot_data['last_update']
+        if isinstance(last_upd, str):
+            try:
+                last_upd = datetime.fromisoformat(last_upd.replace('Z', '+00:00'))
+                last_upd_str = last_upd.strftime('%d/%m/%Y %H:%M')
+            except:
+                last_upd_str = last_upd
+        else:
+            last_upd_str = str(last_upd)
+        
+        # Trova la data del report più recente
+        report_dates = []
+        for curr, data in currencies_data.items():
+            if data.get('report_date'):
+                report_dates.append(data['report_date'])
+        
+        report_date_str = max(report_dates) if report_dates else "N/A"
+        
+        st.caption(f"📅 Ultimo aggiornamento: {last_upd_str} | Dati report: martedì {report_date_str}")
+    
+    # Legenda
+    with st.expander("ℹ️ Legenda"):
+        st.markdown("""
+        **COT Index** (posizionamento nel range 52 settimane):
+        - 🟢 60-80%: Speculatori bullish
+        - 🔴 20-40%: Speculatori bearish  
+        - ⚪ 40-60% o >80% o <20%: Neutro/Estremi
+        
+        **Momentum** (Δ Settimana vs MA e percentili):
+        - 🟢 Sopra 75° percentile: Accelerazione acquisti
+        - 🔴 Sotto 25° percentile: Accelerazione vendite
+        - ⚪ Nella norma: Stabile
+        
+        **Colonne:**
+        - **Net Position**: Long - Short dei Non-Commercial (speculatori)
+        - **Δ Sett.**: Variazione rispetto alla settimana precedente
+        - **MA(4) Δ**: Media mobile a 4 settimane dei delta
+        - **75° Perc**: Soglia 75° percentile per segnale momentum positivo
+        
+        **Nota USD:** Il COT USD è basato sul Dollar Index (DXY). Long DXY = Bullish USD.
+        Per le altre valute (EUR, GBP, etc.), Long = Bullish valuta / Bearish USD.
+        """)
+
 
 def display_forex_prices(forex_prices: dict):
     """Mostra la tabella dei prezzi forex recuperati"""
@@ -6161,6 +6411,12 @@ def main():
             display_central_bank_history(data_container['cb_history_data'])
             st.markdown("---")
         
+        # --- SEZIONE 3.5: COT Data ---
+        if data_container.get('cot_data') and COT_MODULE_LOADED:
+            st.markdown("### 📊 COT Positioning (Commitment of Traders)")
+            display_cot_data(data_container['cot_data'])
+            st.markdown("---")
+        
         # --- SEZIONE 4: Prezzi Forex ---
         if data_container.get('forex_prices'):
             st.markdown("### 💱 Prezzi Forex")
@@ -6222,14 +6478,26 @@ def main():
                 st.session_state['last_cb_history'] = new_cb
                 st.session_state['timestamp_cb_history'] = get_italy_now()
                 save_data_timestamp('cb_history', user_id)
-                progress_all.progress(60, text="Aggiornamento Prezzi...")
+                progress_all.progress(50, text="Aggiornamento COT Data...")
+                
+                # 3.5 COT Data
+                if COT_MODULE_LOADED:
+                    try:
+                        cot_manager = COTDataManager(supabase_request if SUPABASE_ENABLED else None)
+                        cot_result = cot_manager.fetch_and_update()
+                        st.session_state['last_cot_data'] = cot_result
+                        st.session_state['timestamp_cot'] = get_italy_now()
+                        save_data_timestamp('cot', user_id)
+                    except Exception as e:
+                        st.session_state['last_cot_data'] = {'status': 'error', 'message': str(e)}
+                progress_all.progress(65, text="Aggiornamento Prezzi...")
                 
                 # 4. Prezzi Forex
                 new_prices = fetch_forex_prices()
                 st.session_state['last_forex_prices'] = new_prices
                 st.session_state['timestamp_prices'] = get_italy_now()
                 save_data_timestamp('prices', user_id)
-                progress_all.progress(80, text="Aggiornamento Notizie...")
+                progress_all.progress(85, text="Aggiornamento Notizie...")
                 
                 # 5. Notizie
                 new_news, new_structured = fetch_news_from_sources(NEWS_SOURCES)
@@ -6367,6 +6635,43 @@ def main():
         st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
     st.markdown("---")
     
+    # --- SEZIONE 3.5: COT DATA ---
+    if COT_MODULE_LOADED:
+        cot_data = st.session_state.get('last_cot_data')
+        ts_cot = st.session_state.get('timestamp_cot')
+        cot_freshness = check_data_freshness("cot", ts_cot)
+        
+        col_title_cot, col_status_cot, col_btn_cot = st.columns([3, 3, 1])
+        with col_title_cot:
+            st.markdown("### 📊 COT Positioning")
+        with col_status_cot:
+            ts_str = ts_cot.strftime("%d/%m %H:%M") if ts_cot else "Mai"
+            st.caption(f"📅 {ts_str} - {cot_freshness.get('status', '🟠')} {cot_freshness.get('message', 'N/A')}")
+        with col_btn_cot:
+            if st.button("🔄", key="upd_cot", help="Aggiorna dati COT"):
+                with st.spinner("Aggiornamento dati COT..."):
+                    try:
+                        cot_manager = COTDataManager(supabase_request if SUPABASE_ENABLED else None)
+                        cot_result = cot_manager.fetch_and_update()
+                        st.session_state['last_cot_data'] = cot_result
+                        st.session_state['timestamp_cot'] = get_italy_now()
+                        save_data_timestamp('cot', user_id)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Errore: {e}")
+        
+        if cot_data and cot_data.get('status') == 'ok':
+            display_cot_data(cot_data)
+        elif cot_data and cot_data.get('status') == 'error':
+            st.warning(f"⚠️ Errore COT: {cot_data.get('message', 'Errore sconosciuto')}")
+            if cot_data.get('debug'):
+                with st.expander("🔍 Debug Log"):
+                    for msg in cot_data.get('debug', [])[-5:]:
+                        st.text(msg)
+        else:
+            st.info("ℹ️ Nessun dato COT. Clicca 🔄 per aggiornare.")
+        st.markdown("---")
+    
     # --- SEZIONE 4: PREZZI FOREX ---
     col_title4, col_status4, col_btn4 = st.columns([3, 3, 1])
     with col_title4:
@@ -6478,6 +6783,9 @@ def main():
             # Link aggiuntivi
             add_text = st.session_state.get('last_links_text', '')
             
+            # Dati COT
+            cot_data = st.session_state.get('last_cot_data')
+            
             # Analisi Claude
             progress.progress(30, text="🤖 Claude sta analizzando...")
             
@@ -6489,7 +6797,8 @@ def main():
                 pmi_data,
                 forex_prices,
                 economic_events,
-                cb_history_data
+                cb_history_data,
+                cot_data
             )
             
             # ===== INTEGRA REGIMI ECONOMICI NEI PUNTEGGI =====
@@ -6521,8 +6830,9 @@ def main():
             # Salva risultato
             progress.progress(80, text="💾 Salvataggio...")
             
-            # Includi regimi se disponibili
+            # Includi regimi e COT se disponibili
             regimes_for_save = st.session_state.get('last_regimes_data', {})
+            cot_for_save = st.session_state.get('last_cot_data', {})
             
             analysis_result = {
                 "macro_data": macro_data,
@@ -6533,6 +6843,7 @@ def main():
                 "news_structured": news_structured,
                 "links_structured": links_structured,
                 "regimes_data": regimes_for_save,  # Aggiungi regimi
+                "cot_data": cot_for_save,  # Aggiungi COT
                 "claude_analysis": claude_analysis,
                 "options_selected": {"full": True}
             }
