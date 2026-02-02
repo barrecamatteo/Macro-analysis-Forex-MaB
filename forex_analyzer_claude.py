@@ -4241,6 +4241,9 @@ def display_cot_data(cot_data: dict):
                 'Δ Sett.': 'N/A',
                 'MA(4) Δ': 'N/A',
                 '75° Perc': 'N/A',
+                'Sett.': data.get('weeks_available', 0),
+                'Min 52w': 'N/A',
+                'Max 52w': 'N/A',
             })
             continue
         
@@ -4279,6 +4282,9 @@ def display_cot_data(cot_data: dict):
             'Δ Sett.': f"{mom_color} {delta_current:+,}",
             'MA(4) Δ': f"{ma4_delta:+,}",
             '75° Perc': f"{p75:+,}",
+            'Sett.': data.get('weeks_available', '?'),  # Debug: quante settimane
+            'Min 52w': f"{data.get('min_52w', 0):+,}",  # Debug
+            'Max 52w': f"{data.get('max_52w', 0):+,}",  # Debug
         })
     
     # Mostra tabella
@@ -4308,27 +4314,78 @@ def display_cot_data(cot_data: dict):
         st.caption(f"📅 Ultimo aggiornamento: {last_upd_str} | Dati report: martedì {report_date_str}")
     
     # Legenda
-    with st.expander("ℹ️ Legenda"):
+    with st.expander("ℹ️ Cos'è il COT e come interpretarlo"):
         st.markdown("""
-        **COT Index** (posizionamento nel range 52 settimane):
-        - 🟢 60-80%: Speculatori bullish
-        - 🔴 20-40%: Speculatori bearish  
-        - ⚪ 40-60% o >80% o <20%: Neutro/Estremi
+        ### 📊 Cos'è il COT Report?
         
-        **Momentum** (Δ Settimana vs MA e percentili):
-        - 🟢 Sopra 75° percentile: Accelerazione acquisti
-        - 🔴 Sotto 25° percentile: Accelerazione vendite
-        - ⚪ Nella norma: Stabile
+        Il **Commitment of Traders (COT)** è un report settimanale pubblicato dalla CFTC che mostra il posizionamento 
+        dei grandi operatori sui mercati futures. I **Non-Commercial** (hedge fund, speculatori istituzionali) 
+        sono i "big players" che muovono il mercato - seguire il loro posizionamento può anticipare i trend.
         
-        **Colonne:**
-        - **Net Position**: Long - Short dei Non-Commercial (speculatori)
-        - **Δ Sett.**: Variazione rispetto alla settimana precedente
-        - **MA(4) Δ**: Media mobile a 4 settimane dei delta
-        - **75° Perc**: Soglia 75° percentile per segnale momentum positivo
+        ---
         
-        **Nota USD:** Il COT USD è basato sul Dollar Index (DXY). Long DXY = Bullish USD.
-        Per le altre valute (EUR, GBP, etc.), Long = Bullish valuta / Bearish USD.
+        ### 📈 COT Index - "Dove siamo nel range?"
+        
+        Il **COT Index** misura la posizione netta attuale rispetto al range delle ultime 52 settimane:
+        
+        - **Formula**: (Net Attuale - Min 52w) / (Max 52w - Min 52w) × 100
+        - **100%** = Gli speculatori sono ai massimi di posizionamento long dell'ultimo anno
+        - **0%** = Gli speculatori sono ai massimi di posizionamento short dell'ultimo anno
+        
+        | COT Index | Colore | Interpretazione | Score |
+        |-----------|--------|-----------------|-------|
+        | > 80% | ⚪ | **Estremo Long** - Mercato affollato, possibile inversione | 0 |
+        | 60-80% | 🟢 | **Bullish** - Speculatori stanno comprando, segui il trend | +1 |
+        | 40-60% | ⚪ | **Neutro** - Nessun segnale chiaro | 0 |
+        | 20-40% | 🔴 | **Bearish** - Speculatori stanno vendendo, segui il trend | -1 |
+        | < 20% | ⚪ | **Estremo Short** - Mercato affollato, possibile inversione | 0 |
+        
+        **Perché neutro agli estremi?** Quando tutti sono già long/short, non c'è più "carburante" per continuare. 
+        Le inversioni partono spesso dagli estremi.
+        
+        ---
+        
+        ### 🚀 Momentum - "Stanno accelerando?"
+        
+        Il **Momentum** misura se gli speculatori stanno **accelerando** i loro acquisti/vendite rispetto 
+        alla media delle ultime 4 settimane:
+        
+        - **Δ Sett.** = Variazione della Net Position rispetto alla settimana precedente
+        - **MA(4) Δ** = Media delle variazioni delle ultime 4 settimane
+        - Confrontiamo il Δ attuale con i percentili storici
+        
+        | Momentum | Colore | Interpretazione | Score |
+        |----------|--------|-----------------|-------|
+        | > 75° percentile | 🟢 | **Accelerazione acquisti** - Stanno comprando più del solito | +1 |
+        | 25°-75° percentile | ⚪ | **Stabile** - Variazioni nella norma | 0 |
+        | < 25° percentile | 🔴 | **Accelerazione vendite** - Stanno vendendo più del solito | -1 |
+        
+        **Perché è importante?** Il momentum cattura i cambi di direzione. Un estremo long (COT Index 85%) 
+        con momentum negativo (-1) segnala che l'inversione è già iniziata!
+        
+        ---
+        
+        ### 💡 Come usare insieme COT Index + Momentum
+        
+        | COT Index | Momentum | Totale | Significato |
+        |-----------|----------|--------|-------------|
+        | 🟢 Bullish (+1) | 🟢 Accelera (+1) | **+2** | Forte segnale buy |
+        | 🟢 Bullish (+1) | ⚪ Stabile (0) | **+1** | Buy confermato |
+        | ⚪ Estremo (0) | 🟢 Accelera (+1) | **+1** | Ancora comprano, ma cautela |
+        | ⚪ Estremo (0) | 🔴 Rallenta (-1) | **-1** | ⚠️ Inversione in corso! |
+        | 🔴 Bearish (-1) | 🔴 Accelera (-1) | **-2** | Forte segnale sell |
+        
+        ---
+        
+        ### 📝 Note tecniche
+        
+        - **Net Position**: Long - Short dei Non-Commercial (numero di contratti futures)
+        - **USD**: Basato sul Dollar Index (DXY). Long DXY = Bullish USD
+        - **Altre valute**: Long EUR futures = Bullish EUR / Bearish USD
+        - **Aggiornamento**: I dati escono il venerdì (riferiti al martedì precedente)
+        - **Min/Max 52w**: Range usato per calcolare il COT Index
         """)
+
 
 
 def display_forex_prices(forex_prices: dict):
@@ -6427,7 +6484,7 @@ def main():
         
         # --- SEZIONE 3.5: COT Data ---
         if data_container.get('cot_data') and COT_MODULE_LOADED:
-            st.markdown("### 📊 COT Positioning (Commitment of Traders)")
+            st.markdown("### 📊 COT Non-Commercial (Speculatori)")
             display_cot_data(data_container['cot_data'])
             st.markdown("---")
         
@@ -6663,7 +6720,7 @@ def main():
         
         col_title_cot, col_status_cot, col_btn_cot = st.columns([3, 3, 1])
         with col_title_cot:
-            st.markdown("### 📊 COT Positioning")
+            st.markdown("### 📊 COT Non-Commercial (Speculatori)")
         with col_status_cot:
             ts_str = ts_cot.strftime("%d/%m %H:%M") if ts_cot else "Mai"
             st.caption(f"📅 {ts_str} - {cot_freshness.get('status', '🟠')} {cot_freshness.get('message', 'N/A')}")
