@@ -343,54 +343,123 @@ class COTDataManager:
             'status': 'ok'
         }
     
-    def calculate_scores(self, cot_index: float, momentum: Dict) -> Dict:
+    def calculate_scores(self, cot_index: float, momentum: Dict, net_position: int) -> Dict:
         """
-        Calcola i punteggi per COT Index e Momentum.
+        Calcola il COT Score UNIFICATO (-2 a +2) basato su:
+        - Net Position (LONG/SHORT)
+        - COT Index (intensità: Alto >70%, Medio 30-70%, Basso <30%)
+        - Momentum (direzione: Positivo, Stabile, Negativo)
         
         Args:
             cot_index: COT Index (0-100)
             momentum: Dict con dati momentum
+            net_position: Posizione netta attuale
             
         Returns:
-            Dict con index_score, momentum_score, interpretations
+            Dict con cot_score, interpretation
         """
-        # Score COT Index
-        if cot_index > COT_INDEX_THRESHOLDS['extreme_high']:
-            index_score = 0
-            index_interpretation = "Estremo Long (cautela)"
-        elif cot_index >= COT_INDEX_THRESHOLDS['bullish']:
-            index_score = 1
-            index_interpretation = "Bullish"
-        elif cot_index >= COT_INDEX_THRESHOLDS['neutral_low']:
-            index_score = 0
-            index_interpretation = "Neutrale"
-        elif cot_index >= COT_INDEX_THRESHOLDS['extreme_low']:
-            index_score = -1
-            index_interpretation = "Bearish"
-        else:
-            index_score = 0
-            index_interpretation = "Estremo Short (cautela)"
+        # Determina se LONG o SHORT
+        is_long = net_position > 0
         
-        # Score Momentum
-        if momentum['status'] != 'ok':
-            momentum_score = 0
-            momentum_interpretation = "Dati insufficienti"
-        elif momentum['deviation'] > momentum['percentile_75']:
-            momentum_score = 1
-            momentum_interpretation = "Accelerazione acquisti"
-        elif momentum['deviation'] < momentum['percentile_25']:
-            momentum_score = -1
-            momentum_interpretation = "Accelerazione vendite"
+        # Determina intensità dal COT Index
+        if cot_index > 70:
+            intensity = "high"  # Alto
+        elif cot_index >= 30:
+            intensity = "medium"  # Medio
         else:
-            momentum_score = 0
-            momentum_interpretation = "Stabile"
+            intensity = "low"  # Basso
+        
+        # Determina direzione momentum
+        if momentum.get('status') != 'ok':
+            mom_direction = "stable"
+        else:
+            delta = momentum.get('delta_current', 0)
+            p75 = momentum.get('percentile_75', 0)
+            p25 = momentum.get('percentile_25', 0)
+            
+            if delta > p75:
+                mom_direction = "positive"
+            elif delta < p25:
+                mom_direction = "negative"
+            else:
+                mom_direction = "stable"
+        
+        # Calcola score e interpretazione basati sulla tabella
+        if is_long:
+            # === LONG (Net > 0) ===
+            if intensity == "high":  # Index > 70%
+                if mom_direction == "positive":
+                    score = 2
+                    interpretation = "📈📈 Long forte + accelerazione acquisti"
+                elif mom_direction == "stable":
+                    score = 1
+                    interpretation = "📈 Long forte consolidato"
+                else:  # negative
+                    score = 0
+                    interpretation = "⚠️ Long forte ma stanno vendendo"
+            elif intensity == "medium":  # Index 30-70%
+                if mom_direction == "positive":
+                    score = 1
+                    interpretation = "📈 Long in costruzione"
+                elif mom_direction == "stable":
+                    score = 0
+                    interpretation = "⚪ Long moderato, stabile"
+                else:  # negative
+                    score = -1
+                    interpretation = "📉 Stanno chiudendo i long"
+            else:  # intensity == "low", Index < 30%
+                if mom_direction == "positive":
+                    score = 1
+                    interpretation = "📈 Ricostruendo posizioni long"
+                elif mom_direction == "stable":
+                    score = 0
+                    interpretation = "⚪ Long debole, stabile"
+                else:  # negative
+                    score = -1
+                    interpretation = "📉 Long in esaurimento"
+        else:
+            # === SHORT (Net < 0) ===
+            if intensity == "low":  # Index < 30%
+                if mom_direction == "negative":
+                    score = -2
+                    interpretation = "📉📉 Short forte + accelerazione vendite"
+                elif mom_direction == "stable":
+                    score = -1
+                    interpretation = "📉 Short forte consolidato"
+                else:  # positive
+                    score = 0
+                    interpretation = "⚠️ Short forte ma stanno comprando"
+            elif intensity == "medium":  # Index 30-70%
+                if mom_direction == "negative":
+                    score = -1
+                    interpretation = "📉 Bearish in costruzione"
+                elif mom_direction == "stable":
+                    score = 0
+                    interpretation = "⚪ Short moderato, stabile"
+                else:  # positive
+                    score = 1
+                    interpretation = "📈 Stanno chiudendo gli short"
+            else:  # intensity == "high", Index > 70%
+                if mom_direction == "negative":
+                    score = -1
+                    interpretation = "📉 Ricostruendo posizioni short"
+                elif mom_direction == "stable":
+                    score = 0
+                    interpretation = "⚪ Short debole, stabile"
+                else:  # positive
+                    score = 1
+                    interpretation = "📈 Short in esaurimento → Bullish"
         
         return {
-            'index_score': index_score,
-            'index_interpretation': index_interpretation,
-            'momentum_score': momentum_score,
-            'momentum_interpretation': momentum_interpretation,
-            'total_score': index_score + momentum_score
+            'cot_score': score,
+            'interpretation': interpretation,
+            'details': {
+                'net_position': net_position,
+                'is_long': is_long,
+                'cot_index': cot_index,
+                'intensity': intensity,
+                'momentum_direction': mom_direction
+            }
         }
     
     # ============================================
@@ -437,7 +506,8 @@ class COTDataManager:
             # Calcoli
             cot_index = self.calculate_cot_index(net_positions)
             momentum = self.calculate_momentum(net_positions)
-            scores = self.calculate_scores(cot_index, momentum)
+            current_net = int(net_positions[-1])
+            scores = self.calculate_scores(cot_index, momentum, current_net)
             
             # Dati più recenti
             latest = df.iloc[-1]
@@ -447,7 +517,7 @@ class COTDataManager:
                 'status': 'ok',
                 'weeks_available': len(df),
                 'report_date': latest['report_date'].strftime('%Y-%m-%d'),
-                'net_position': int(latest['net_position']),
+                'net_position': current_net,
                 'net_position_prev': int(previous['net_position']),
                 'noncomm_long': int(latest['noncomm_long']) if pd.notna(latest.get('noncomm_long')) else None,
                 'noncomm_short': int(latest['noncomm_short']) if pd.notna(latest.get('noncomm_short')) else None,
@@ -459,9 +529,10 @@ class COTDataManager:
             }
             
             self._log_debug(
-                f"{currency}: Net={results[currency]['net_position']:+,} | "
-                f"Index={cot_index:.0f}% ({scores['index_interpretation']}) | "
-                f"Mom={momentum['delta_current']:+,} ({scores['momentum_interpretation']})"
+                f"{currency}: Net={current_net:+,} | "
+                f"Index={cot_index:.0f}% | "
+                f"Score={scores['cot_score']:+d} ({scores['interpretation']}) | "
+                f"Weeks={len(df)}"
             )
         
         return results
@@ -528,25 +599,25 @@ def get_cot_analysis(supabase_client=None) -> Dict:
     return manager.fetch_and_update()
 
 
-def get_cot_scores_for_currency(cot_data: Dict, currency: str) -> Tuple[int, int]:
+def get_cot_scores_for_currency(cot_data: Dict, currency: str) -> int:
     """
-    Estrae i punteggi COT per una specifica valuta.
+    Estrae il COT Score unificato per una specifica valuta.
     
     Args:
         cot_data: Dict restituito da get_cot_analysis()
         currency: Codice valuta (EUR, GBP, etc.)
         
     Returns:
-        Tuple (index_score, momentum_score)
+        COT Score da -2 a +2
     """
     if not cot_data or cot_data.get('status') != 'ok':
-        return 0, 0
+        return 0
     
     currencies = cot_data.get('currencies', {})
     currency_data = currencies.get(currency, {})
     scores = currency_data.get('scores', {})
     
-    return scores.get('index_score', 0), scores.get('momentum_score', 0)
+    return scores.get('cot_score', 0)
 
 
 def format_cot_for_display(cot_data: Dict) -> List[Dict]:
