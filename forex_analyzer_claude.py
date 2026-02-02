@@ -3576,6 +3576,12 @@ def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -
     """
     Aggiunge il punteggio del regime economico ai punteggi delle valute.
     
+    La logica tiene conto di QUANDO la BC è OBBLIGATA ad agire:
+    - DEFLAZIONE: conta momentum PMI (economia soffre → BC deve tagliare)
+    - REFLAZIONE: conta momentum inflazione (prezzi salgono → BC deve alzare)
+    - STAGFLAZIONE: entrambi contano (conflitto → incertezza)
+    - ESPANSIONE: goldilocks, BC può stare a guardare (score fisso)
+    
     Args:
         currency_analysis: Dict con punteggi delle valute da Claude
         regimes_data: Dict con dati dei regimi da economic_regimes module
@@ -3594,13 +3600,39 @@ def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -
         regime = regime_info.get("regime")
         
         if regime:
-            forex_score = get_regime_forex_score(regime)
-            regime_name = REGIME_DEFINITIONS.get(regime, {}).get("name", regime)
+            # Estrai i delta per il calcolo del momentum
+            delta_pmi = regime_info.get("delta_pmi", 0) or 0
+            delta_inflation = regime_info.get("delta_inflation", 0) or 0
             
-            # Aggiungi il punteggio regime_economico
+            # Calcola score con la nuova logica basata sui momentum
+            score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
+            forex_score = score_result["score"]
+            explanation = score_result["explanation"]
+            key_momentum = score_result["key_momentum"]
+            
+            regime_name = REGIME_DEFINITIONS.get(regime, {}).get("name", regime)
+            regime_emoji = REGIME_DEFINITIONS.get(regime, {}).get("emoji", "")
+            
+            # Aggiungi il punteggio regime_economico con dettagli momentum
             data["scores"]["regime_economico"] = {
                 "score": forex_score,
-                "motivation": f"Regime: {regime_name} ({'+' if forex_score > 0 else ''}{forex_score})"
+                "motivation": f"{regime_emoji} {regime_name} | {key_momentum} → {explanation}"
+            }
+            
+            # Salva anche i dettagli per la visualizzazione UI
+            data["regime_details"] = {
+                "regime": regime,
+                "regime_name": regime_name,
+                "regime_emoji": regime_emoji,
+                "delta_pmi": delta_pmi,
+                "delta_inflation": delta_inflation,
+                "momentum_pmi": score_result["momentum_pmi"],
+                "momentum_inflation": score_result["momentum_inflation"],
+                "momentum_pmi_strong": score_result["momentum_pmi_strong"],
+                "momentum_inflation_strong": score_result["momentum_inflation_strong"],
+                "key_momentum": key_momentum,
+                "explanation": explanation,
+                "score": forex_score
             }
             
             # Aggiorna total_score
@@ -4858,7 +4890,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #059669; margin: 0;">🟢 Espansione</h4>
             <p style="color: #065f46; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↓</p>
             <p style="color: #047857; font-weight: bold; font-size: 18px;">{', '.join(exp_currencies) if exp_currencies else 'Nessuna'}</p>
-            <p style="color: #065f46; font-size: 11px;">📈 Forex: +1 (economia attrattiva)</p>
+            <p style="color: #065f46; font-size: 11px;">📈 Forex: +1 (goldilocks)</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -4869,7 +4901,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #4f46e5; margin: 0;">🔵 Deflazione</h4>
             <p style="color: #3730a3; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↓</p>
             <p style="color: #4338ca; font-weight: bold; font-size: 18px;">{', '.join(defl_currencies) if defl_currencies else 'Nessuna'}</p>
-            <p style="color: #3730a3; font-size: 11px;">📉 Forex: -1 (BC taglia tassi)</p>
+            <p style="color: #3730a3; font-size: 11px;">📉 Forex: -1/-2 (PMI forte → -2)</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4881,7 +4913,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #d97706; margin: 0;">🟡 Reflazione</h4>
             <p style="color: #92400e; font-size: 12px; margin: 5px 0;">PMI ↑ + Inflazione ↑</p>
             <p style="color: #b45309; font-weight: bold; font-size: 18px;">{', '.join(refl_currencies) if refl_currencies else 'Nessuna'}</p>
-            <p style="color: #92400e; font-size: 11px;">📈 Forex: +2 (BC alza tassi)</p>
+            <p style="color: #92400e; font-size: 11px;">📈 Forex: +1/+2 (Infl forte → +2)</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -4892,7 +4924,7 @@ def display_economic_regimes(regimes_data: dict):
             <h4 style="color: #dc2626; margin: 0;">🔴 Stagflazione</h4>
             <p style="color: #991b1b; font-size: 12px; margin: 5px 0;">PMI ↓ + Inflazione ↑</p>
             <p style="color: #b91c1c; font-weight: bold; font-size: 18px;">{', '.join(stag_currencies) if stag_currencies else 'Nessuna'}</p>
-            <p style="color: #991b1b; font-size: 11px;">📉 Forex: -2 (BC paralizzata)</p>
+            <p style="color: #991b1b; font-size: 11px;">📉 Forex: 0/-1 (1+ forte → -1)</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4912,14 +4944,11 @@ def display_economic_regimes(regimes_data: dict):
             table_rows.append({
                 "Valuta": currency,
                 "Regime": "⚠️ N/A",
-                "PMI Comp.": "N/A",
-                "PMI Avg 3m": "N/A",
                 "Δ PMI": "N/A",
-                "CPI Head": "N/A",
-                "Infl Avg 3m": "N/A",
                 "Δ Infl.": "N/A",
-                "Mom. PMI": "-",
-                "Mom. Infl.": "-"
+                "Mom PMI": "-",
+                "Mom Infl": "-",
+                "Score": "-"
             })
             continue
         
@@ -4928,17 +4957,40 @@ def display_economic_regimes(regimes_data: dict):
         regime_emoji = regime_info.get("emoji", "❓") if regime_info else "❓"
         regime_name = regime_info.get("name", regime) if regime_info else regime
         
+        # Calcola lo score con la nuova logica
+        delta_pmi = data.get('delta_pmi', 0) or 0
+        delta_inflation = data.get('delta_inflation', 0) or 0
+        
+        # Importa la funzione se non è già importata
+        score_result = get_regime_forex_score(regime, delta_pmi, delta_inflation)
+        score = score_result["score"]
+        pmi_strong = score_result["momentum_pmi_strong"]
+        infl_strong = score_result["momentum_inflation_strong"]
+        
+        # Emoji per momentum nella tabella
+        pmi_mom_emoji = "⚡" if pmi_strong else "〰️"
+        infl_mom_emoji = "⚡" if infl_strong else "〰️"
+        
+        # Emoji per score
+        if score >= 2:
+            score_display = f"🟢🟢 +{score}"
+        elif score == 1:
+            score_display = f"🟢 +{score}"
+        elif score == 0:
+            score_display = f"⚪ {score}"
+        elif score == -1:
+            score_display = f"🔴 {score}"
+        else:
+            score_display = f"🔴🔴 {score}"
+        
         row = {
             "Valuta": currency,
             "Regime": f"{regime_emoji} {regime_name}",
-            "PMI Comp.": f"{data.get('pmi_composite', 'N/A'):.1f}" if data.get('pmi_composite') else "N/A",
-            "PMI Avg 3m": f"{data.get('pmi_avg_3m', 'N/A'):.1f}" if data.get('pmi_avg_3m') else "N/A",
-            "Δ PMI": f"{data.get('delta_pmi', 0):+.1f}" if data.get('delta_pmi') is not None else "N/A",
-            "CPI Head": f"{data.get('cpi_headline', 'N/A'):.1f}%" if data.get('cpi_headline') else "N/A",
-            "Infl Avg 3m": f"{data.get('inflation_avg_3m', 'N/A'):.1f}%" if data.get('inflation_avg_3m') else "N/A",
-            "Δ Infl.": f"{data.get('delta_inflation', 0):+.1f}" if data.get('delta_inflation') is not None else "N/A",
-            "Mom. PMI": data.get("momentum_pmi", "-"),
-            "Mom. Infl.": data.get("momentum_inflation", "-")
+            "Δ PMI": f"{delta_pmi:+.1f}" if delta_pmi is not None else "N/A",
+            "Δ Infl.": f"{delta_inflation:+.2f}" if delta_inflation is not None else "N/A",
+            "Mom PMI": f"{pmi_mom_emoji} {data.get('momentum_pmi', '-')}",
+            "Mom Infl": f"{infl_mom_emoji} {data.get('momentum_inflation', '-')}",
+            "Score": score_display
         }
         table_rows.append(row)
         
@@ -4978,75 +5030,34 @@ def display_economic_regimes(regimes_data: dict):
     
     # Legenda
     st.caption("""
-    **Legenda:** PMI Comp. = PMI Composito (ponderato Manufacturing + Services) | 
-    Δ = variazione vs media 3 mesi | Mom. = Momentum (⬆️⬆️ forte aumento, ⬆️ aumento, ↗️ leggero, ➡️ stabile, ↘️ leggero calo, ⬇️ calo, ⬇️⬇️ forte calo)
+    **Legenda:** Δ PMI/Infl = variazione vs media 3 mesi | 
+    ⚡ = Momentum Forte (PMI > ±1.5, Infl > ±0.3%) | 〰️ = Momentum Debole |
+    Score = punteggio forex calcolato in base al regime e al momentum
     """)
     
     # === EXPANDER VERIFICA DATI ===
-    with st.expander("🔍 Verifica Calcoli (dettagli)", expanded=False):
-        st.markdown("#### Formula Calcolo Regimi")
+    with st.expander("🔍 Logica Calcolo Score (dettagli)", expanded=False):
+        st.markdown("#### 📊 Logica Score per Regime")
         st.markdown("""
-        ```
-        Δ PMI = PMI Composite attuale - Media PMI ultimi 3 mesi
-        Δ Inflazione = Indice Inflazione attuale - Media Inflazione ultimi 3 mesi
+        La Banca Centrale agisce quando è **OBBLIGATA**:
         
-        Indice Inflazione = (CPI Core × 0.7) + (CPI Headline × 0.3)
-        (se Core non disponibile, usa solo Headline)
+        | Regime | Momentum Chiave | Logica Score |
+        |--------|-----------------|--------------|
+        | 🟢 **Espansione** | Nessuno | Sempre **+1** (goldilocks, BC neutrale) |
+        | 🟡 **Reflazione** | Inflazione | Infl Forte → **+2**, Debole → **+1** |
+        | 🔴 **Stagflazione** | Entrambi | 1+ Forte → **-1**, Entrambi Deboli → **0** |
+        | 🔵 **Deflazione** | PMI | PMI Forte → **-2**, Debole → **-1** |
         
-        Regimi e Punteggi Forex:
-        - Espansione:   Δ PMI > 0  E  Δ Inflazione < 0  → +1 (economia cresce)
-        - Reflazione:   Δ PMI > 0  E  Δ Inflazione > 0  → +2 (BC alza tassi)
-        - Stagflazione: Δ PMI < 0  E  Δ Inflazione > 0  → -2 (BC paralizzata)
-        - Deflazione:   Δ PMI < 0  E  Δ Inflazione < 0  → -1 (BC taglia tassi)
-        ```
+        **Soglie Momentum:**
+        - PMI: **Forte** se |Δ| > 1.5 punti
+        - Inflazione: **Forte** se |Δ| > 0.3%
+        
+        **Perché questa logica?**
+        - In **Deflazione**: il PMI che crolla obbliga la BC a tagliare i tassi → bearish
+        - In **Reflazione**: l'inflazione che esplode obbliga la BC ad alzare → bullish
+        - In **Stagflazione**: conflitto tra PMI e inflazione → incertezza
+        - In **Espansione**: goldilocks, la BC può aspettare → stabile e positivo
         """)
-        
-        st.markdown("#### Dettagli per Valuta")
-        
-        for currency in currency_order:
-            data = regimes_data.get(currency, {})
-            if not data or data.get("error"):
-                continue
-            
-            with st.container():
-                st.markdown(f"**{currency}**")
-                
-                col_a, col_b = st.columns(2)
-                
-                with col_a:
-                    st.markdown("**PMI:**")
-                    pmi_manuf = data.get("pmi_manufacturing", "N/A")
-                    pmi_serv = data.get("pmi_services", "N/A")
-                    pmi_comp = data.get("pmi_composite", "N/A")
-                    pmi_avg = data.get("pmi_avg_3m", "N/A")
-                    delta_pmi = data.get("delta_pmi", "N/A")
-                    
-                    # Pesi PMI
-                    weights = {"USD": "30/70", "EUR": "50/50", "GBP": "20/80", 
-                              "JPY": "60/40", "CHF": "100/0", "AUD": "50/50", "CAD": "100/0"}
-                    
-                    st.text(f"  Manuf: {pmi_manuf}")
-                    st.text(f"  Services: {pmi_serv if pmi_serv else '-'}")
-                    st.text(f"  Pesi M/S: {weights.get(currency, '50/50')}")
-                    st.text(f"  Composite: {pmi_comp}")
-                    st.text(f"  Media 3m: {pmi_avg}")
-                    st.text(f"  Δ PMI: {delta_pmi:+.2f}" if isinstance(delta_pmi, (int, float)) else f"  Δ PMI: {delta_pmi}")
-                
-                with col_b:
-                    st.markdown("**Inflazione:**")
-                    cpi_head = data.get("cpi_headline", "N/A")
-                    cpi_core = data.get("cpi_core", "N/A")
-                    infl_idx = data.get("inflation_index", "N/A")
-                    infl_avg = data.get("inflation_avg_3m", "N/A")
-                    delta_infl = data.get("delta_inflation", "N/A")
-                    
-                    st.text(f"  CPI Headline: {cpi_head}%")
-                    st.text(f"  CPI Core: {cpi_core}%" if cpi_core else "  CPI Core: -")
-                    st.text(f"  Indice (0.7C+0.3H): {infl_idx:.2f}%" if isinstance(infl_idx, (int, float)) else f"  Indice: {infl_idx}")
-                    st.text(f"  Media 3m: {infl_avg}%")
-                    st.text(f"  Δ Infl: {delta_infl:+.2f}" if isinstance(delta_infl, (int, float)) else f"  Δ Infl: {delta_infl}")
-                
-                st.markdown("---")
 
 
 def display_central_bank_history(history_data: dict = None):
