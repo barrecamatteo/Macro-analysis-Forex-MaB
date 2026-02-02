@@ -430,6 +430,151 @@ from macro_data_fetcher import MacroDataFetcher
 
 
 # ============================================================================
+# FUNZIONE RISK SENTIMENT QUANTITATIVO
+# ============================================================================
+
+def fetch_risk_sentiment_data() -> dict:
+    """
+    Calcola il Risk Sentiment basato su indicatori quantitativi:
+    - VIX (indice volatilità/paura)
+    - S&P 500 variazione % giornaliera
+    
+    Returns:
+        dict con regime, score, dati raw e punteggi per valuta
+    """
+    import yfinance as yf
+    
+    result = {
+        "status": "error",
+        "regime": "neutral",
+        "risk_score": 0,
+        "vix": None,
+        "vix_contribution": 0,
+        "sp500_change_pct": None,
+        "sp500_contribution": 0,
+        "currency_scores": {},
+        "interpretation": "",
+        "debug": []
+    }
+    
+    try:
+        # === FETCH VIX ===
+        vix_ticker = yf.Ticker("^VIX")
+        vix_data = vix_ticker.history(period="2d")
+        
+        if len(vix_data) > 0:
+            vix_value = float(vix_data['Close'].iloc[-1])
+            result["vix"] = round(vix_value, 2)
+            result["debug"].append(f"VIX: {vix_value:.2f}")
+            
+            # Calcola contributo VIX
+            if vix_value < 15:
+                result["vix_contribution"] = 1  # Molto basso = risk-on
+                result["debug"].append("VIX < 15: contributo +1 (risk-on)")
+            elif vix_value <= 20:
+                result["vix_contribution"] = 0  # Normale
+                result["debug"].append("VIX 15-20: contributo 0 (normale)")
+            elif vix_value <= 25:
+                result["vix_contribution"] = -1  # Elevato
+                result["debug"].append("VIX 20-25: contributo -1 (elevato)")
+            else:
+                result["vix_contribution"] = -2  # Molto elevato
+                result["debug"].append(f"VIX > 25: contributo -2 (paura)")
+        else:
+            result["debug"].append("VIX: dati non disponibili")
+        
+        # === FETCH S&P 500 ===
+        sp_ticker = yf.Ticker("^GSPC")
+        sp_data = sp_ticker.history(period="5d")
+        
+        if len(sp_data) >= 2:
+            current_close = float(sp_data['Close'].iloc[-1])
+            prev_close = float(sp_data['Close'].iloc[-2])
+            sp_change_pct = ((current_close - prev_close) / prev_close) * 100
+            result["sp500_change_pct"] = round(sp_change_pct, 2)
+            result["debug"].append(f"S&P 500: {sp_change_pct:+.2f}%")
+            
+            # Calcola contributo S&P
+            if sp_change_pct > 1.0:
+                result["sp500_contribution"] = 1  # Rally forte
+                result["debug"].append("S&P > +1%: contributo +1 (rally)")
+            elif sp_change_pct < -1.0:
+                result["sp500_contribution"] = -1  # Sell-off
+                result["debug"].append("S&P < -1%: contributo -1 (sell-off)")
+            else:
+                result["sp500_contribution"] = 0  # Normale
+                result["debug"].append("S&P -1% a +1%: contributo 0 (normale)")
+        else:
+            result["debug"].append("S&P 500: dati non disponibili")
+        
+        # === CALCOLA RISK SCORE TOTALE ===
+        risk_score = result["vix_contribution"] + result["sp500_contribution"]
+        result["risk_score"] = risk_score
+        result["debug"].append(f"Risk Score totale: {risk_score}")
+        
+        # === DETERMINA REGIME ===
+        if risk_score >= 1:
+            result["regime"] = "risk-on"
+            result["interpretation"] = f"📈 RISK-ON (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
+        elif risk_score <= -2:
+            result["regime"] = "risk-off"
+            result["interpretation"] = f"📉 RISK-OFF (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
+        else:
+            result["regime"] = "neutral"
+            result["interpretation"] = f"⚪ NEUTRO (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
+        
+        result["debug"].append(f"Regime: {result['regime'].upper()}")
+        
+        # === ASSEGNA PUNTEGGI PER VALUTA ===
+        # Risk-on: favorisce AUD, CAD / penalizza JPY, CHF, USD
+        # Risk-off: favorisce JPY, CHF, USD / penalizza AUD, CAD
+        
+        if result["regime"] == "risk-on":
+            result["currency_scores"] = {
+                "AUD": {"score": 1, "reason": "Commodity currency, beneficia da risk-on"},
+                "CAD": {"score": 1, "reason": "Commodity currency, beneficia da risk-on"},
+                "EUR": {"score": 0, "reason": "Semi-neutrale in risk-on"},
+                "GBP": {"score": 0, "reason": "Semi-neutrale in risk-on"},
+                "USD": {"score": -1, "reason": "Safe haven, penalizzato in risk-on"},
+                "JPY": {"score": -1, "reason": "Safe haven classico, penalizzato in risk-on"},
+                "CHF": {"score": -1, "reason": "Safe haven classico, penalizzato in risk-on"}
+            }
+        elif result["regime"] == "risk-off":
+            result["currency_scores"] = {
+                "AUD": {"score": -1, "reason": "Commodity currency, penalizzata in risk-off"},
+                "CAD": {"score": -1, "reason": "Commodity currency, penalizzata in risk-off"},
+                "EUR": {"score": 0, "reason": "Semi-neutrale in risk-off"},
+                "GBP": {"score": 0, "reason": "Semi-neutrale in risk-off"},
+                "USD": {"score": 1, "reason": "Safe haven, beneficia da risk-off"},
+                "JPY": {"score": 1, "reason": "Safe haven classico, beneficia da risk-off"},
+                "CHF": {"score": 1, "reason": "Safe haven classico, beneficia da risk-off"}
+            }
+        else:  # neutral
+            result["currency_scores"] = {
+                "AUD": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "CAD": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "EUR": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "GBP": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "USD": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "JPY": {"score": 0, "reason": "Regime neutro, nessun bias"},
+                "CHF": {"score": 0, "reason": "Regime neutro, nessun bias"}
+            }
+        
+        result["status"] = "ok"
+        
+    except Exception as e:
+        result["debug"].append(f"Errore: {str(e)}")
+        result["interpretation"] = "⚠️ Dati non disponibili"
+        # In caso di errore, tutti i punteggi sono 0 (neutro)
+        result["currency_scores"] = {
+            curr: {"score": 0, "reason": "Dati risk sentiment non disponibili"} 
+            for curr in ["AUD", "CAD", "EUR", "GBP", "USD", "JPY", "CHF"]
+        }
+    
+    return result
+
+
+# ============================================================================
 # FUNZIONI PREZZI FOREX IN TEMPO REALE
 # ============================================================================
 
@@ -2778,16 +2923,14 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ---
 
-### 2️⃣ ASPETTATIVE TASSI [-2 a +2] ⭐ PESO DOPPIO
-**Logica:** Il mercato guarda avanti. Le aspettative future contano più del presente.
+### 2️⃣ ASPETTATIVE TASSI [-1 a +1]
+**Logica:** Il mercato guarda avanti. Le aspettative future influenzano la valuta.
 
 | Scenario | Score |
 |----------|-------|
-| BC hawkish, rialzi attesi, inflazione problematica | +2 |
-| BC neutrale con bias hawkish, hold prolungato atteso | +1 |
+| BC hawkish, rialzi attesi o hold prolungato | +1 |
 | BC neutrale, incertezza elevata | 0 |
-| BC leggermente dovish, tagli probabili entro 3-6 mesi | -1 |
-| BC molto dovish, in ciclo di tagli attivo | -2 |
+| BC dovish, in ciclo di tagli o tagli attesi | -1 |
 
 ⚠️ USA SOLO LE NOTIZIE WEB E LO STORICO BC FORNITI per determinare stance!
 
@@ -2820,38 +2963,23 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ### 5️⃣ RISK SENTIMENT [-1 a +1]
 **Logica:** In risk-off, capitali verso safe-haven. In risk-on, verso cicliche.
 
+**IMPORTANTE:** Il Risk Sentiment è PRE-CALCOLATO basandosi su VIX e S&P 500.
+USA il punteggio fornito nei dati di input, NON ricalcolare!
+
 **Classificazione valute:**
-- **Safe-haven:** USD, JPY, CHF
-- **Cicliche:** AUD, CAD, GBP
-- **Semi-ciclica:** EUR
+- **Safe-haven (beneficiano da risk-off):** USD, JPY, CHF
+- **Cicliche (beneficiano da risk-on):** AUD, CAD
+- **Semi-neutre:** EUR, GBP
 
-**Determina il regime di mercato dalle notizie:**
-- VIX > 25 O tensioni geopolitiche acute → **Risk-OFF**
-- VIX < 18 E sentiment positivo → **Risk-ON**
-- Altrimenti → **Neutro**
-
-| Regime | Safe-Haven | Cicliche | Semi-cicliche |
-|--------|------------|----------|---------------|
-| Risk-OFF | +1 | -1 | 0 |
+| Regime | AUD/CAD | EUR/GBP | USD/JPY/CHF |
+|--------|---------|---------|-------------|
+| Risk-ON | +1 | 0 | -1 |
 | Neutro | 0 | 0 | 0 |
-| Risk-ON | -1 | +1 | 0 |
+| Risk-OFF | -1 | 0 | +1 |
 
 ---
 
-### 6️⃣ BILANCIA/FISCALE [-1 a +1]
-**Logica:** Importante nel lungo termine. Peso solo se notizie specifiche.
-
-| Scenario | Score |
-|----------|-------|
-| Current Account surplus + debito gestibile | +1 |
-| Situazione nella media O nessuna notizia | 0 |
-| Deficit gemelli O crisi debito in corso | -1 |
-
-**Regola pratica:** Se non ci sono notizie su crisi fiscali/debito → 0
-
----
-
-### 7️⃣ COT SCORE [-2 a +2] ⭐ PESO DOPPIO
+### 6️⃣ COT SCORE [-2 a +2] ⭐ PESO DOPPIO
 **Logica:** Posizionamento degli speculatori (Non-Commercial) combinando Net Position, COT Index e Momentum.
 
 **IMPORTANTE:** Il COT Score è PRE-CALCOLATO e fornito nei dati di input con la sua interpretazione.
@@ -2877,89 +3005,22 @@ USA il punteggio e l'interpretazione forniti direttamente, NON ricalcolare.
 
 ---
 
-### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
+### 7️⃣ NEWS BONUS [-1 a +1]
 
-**Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast) che NON sono già valutate in altri parametri.
+**Logica:** Bonus/malus giornaliero basato sulle notizie delle ultime 24h che potrebbero muovere la valuta OGGI.
 
-## 🚨🚨🚨 REGOLA FONDAMENTALE 🚨🚨🚨
+**IMPORTANTE:** Questo parametro è un BONUS semplice. Non cercare sorprese complesse.
 
-**News Catalyst valuta SOLO notizie che NON RIENTRANO negli altri 7 parametri!**
+| Notizie ultime 24h | Score | Esempi |
+|-------------------|-------|--------|
+| Notizie POSITIVE per la valuta | +1 | Dati economici sopra attese, dichiarazioni BC favorevoli, upgrade rating |
+| Nessuna notizia rilevante O notizie miste | 0 | Dati in linea, nessuna sorpresa, situazione stabile |
+| Notizie NEGATIVE per la valuta | -1 | Dati economici sotto attese, dichiarazioni BC sfavorevoli, tensioni |
 
-I seguenti temi sono **GIÀ VALUTATI** in altri parametri e **NON POSSONO** essere usati in News Catalyst:
-
-| Tema | Parametro che lo valuta | In News Catalyst = |
-|------|-------------------------|-------------------|
-| Tassi di interesse, carry trade | **Tassi Attuali** | ❌ **0** |
-| BC hawkish/dovish, tagli/rialzi attesi | **Aspettative Tassi** | ❌ **0** |
-| CPI, inflazione, deflazione, prezzi | **Inflazione** | ❌ **0** |
-| PIL, GDP, crescita, recessione | **Crescita/PIL** | ❌ **0** |
-| PMI, manifatturiero, servizi, espansione/contrazione | **Regime Economico** | ❌ **0** |
-| Safe-haven, risk-off/on, tensioni geopolitiche, VIX | **Risk Sentiment** | ❌ **0** |
-| Debito, deficit, bilancia commerciale | **Bilancia/Fiscale** | ❌ **0** |
-
-## ⛔ ESEMPI DI ERRORI DA EVITARE ⛔
-
-❌ **CHF: "PMI manifatturiero crollo -3.9 punti → -2"**
-   → **ERRORE!** Il PMI è già considerato nel Regime Economico! → News Catalyst = **0**
-
-❌ **CAD: "BOC dovish stance pesa negativamente → -2"**  
-   → **ERRORE!** La stance BOC è già in Aspettative Tassi! → News Catalyst = **0**
-
-❌ **JPY: "BOJ hawkish unica nel G7 → +2"**
-   → **ERRORE!** La stance BOJ è già in Aspettative Tassi! → News Catalyst = **0**
-
-❌ **USD: "Inflazione sopra target → +1"**
-   → **ERRORE!** L'inflazione è già nel parametro Inflazione! → News Catalyst = **0**
-
-## ✅ COSA PUÒ ESSERE VALUTATO IN NEWS CATALYST
-
-**SOLO questi tipi di notizie (se avvenute negli ultimi 7 giorni):**
-
-1. **Sorprese su dati SECONDARI** (non coperti da altri parametri):
-   - Retail Sales sorpresa significativa
-   - Trade Balance sorpresa significativa  
-   - Employment Change (non NFP per USD)
-   - Consumer Confidence sorpresa
-   - Industrial Production sorpresa
-
-2. **Eventi geopolitici NUOVI** (<48h, NON già in Risk Sentiment):
-   - Annuncio improvviso di tariffe/sanzioni
-   - Crisi politica nuova
-   - Elezioni con risultato a sorpresa
-
-## ALGORITMO OBBLIGATORIO
-
-```
-STEP 1: La notizia riguarda tassi/inflazione/PIL/PMI/sentiment/bilancia?
-        → SÌ → STOP! News Catalyst = 0 (già in altri parametri)
-        
-STEP 2: È un dato con Actual vs Forecast?
-        → NO → STOP! News Catalyst = 0
-        
-STEP 3: La sorpresa è negli ultimi 7 giorni?
-        → NO → STOP! News Catalyst = 0
-        
-STEP 4: Calcola il punteggio basato sulla sorpresa
-```
-
-## FORMULA
-
-| Sorpresa su dati secondari | Score |
-|----------------------------|-------|
-| Molto positiva (>2 deviazioni std) | +2 |
-| Positiva | +1 |
-| Nessuna sorpresa / temi già coperti | **0** |
-| Negativa | -1 |
-| Molto negativa (>2 deviazioni std) | -2 |
-
-## ESEMPI CORRETTI
-
-✅ "Retail Sales USA +0.8% vs +0.3% atteso, sorpresa significativa → +1"
-✅ "Consumer Confidence crollato a 85 vs 95 atteso → -1"  
-✅ "Nessun dato secondario con sorprese, altri fattori già in parametri dedicati → 0"
-✅ "PMI già valutato in parametro PMI, stance BC già in Aspettative Tassi → 0"
-
-**REGOLA D'ORO: Nel 90% dei casi, News Catalyst dovrebbe essere 0!**
+**Regole:**
+- NON considerare temi già valutati in altri parametri (tassi, inflazione, PIL)
+- Valuta SOLO l'impatto potenziale sul movimento di OGGI
+- Nel dubbio → 0
 
 ---
 
@@ -2967,11 +3028,9 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
 ## RANGE TOTALI PER VALUTA
 ## ═══════════════════════════════════════════════════════════════════
 
-- **Aspettative Tassi**: da -2 a +2 (peso doppio)
 - **COT Score**: da -2 a +2 (peso doppio)
-- **News Catalyst**: da -2 a +2 (peso doppio)
-- **Altri 5 parametri**: da -1 a +1
-- **TOTALE per valuta**: da -13 a +13
+- **Altri 6 parametri**: da -1 a +1
+- **TOTALE per valuta**: da -8 a +8
 
 ## ═══════════════════════════════════════════════════════════════════
 ## FORMATO OUTPUT JSON
@@ -2992,7 +3051,7 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 },
                 "aspettative_tassi": {
                     "score": -1,
-                    "motivation": "BCE neutrale ma mercati prezzano 60% prob taglio entro marzo"
+                    "motivation": "BCE in ciclo tagli, stance dovish"
                 },
                 "inflazione": {
                     "score": 0,
@@ -3004,24 +3063,20 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 },
                 "risk_sentiment": {
                     "score": 0,
-                    "motivation": "EUR semi-ciclica, neutrale in regime attuale"
-                },
-                "bilancia_fiscale": {
-                    "score": 0,
-                    "motivation": "Nessuna notizia rilevante su crisi fiscale Eurozona"
+                    "motivation": "Regime neutro, EUR semi-neutra"
                 },
                 "cot_score": {
                     "score": 1,
                     "motivation": "📈 Long in costruzione - speculatori stanno accumulando EUR"
                 },
-                "news_catalyst": {
+                "news_bonus": {
                     "score": 0,
-                    "motivation": "CPI in linea con attese. Nessuna sorpresa significativa"
+                    "motivation": "Nessuna notizia rilevante nelle ultime 24h"
                 }
             }
         },
         "USD": {
-            "total_score": 2,
+            "total_score": 1,
             "summary": "Sintesi della situazione USD con dati numerici",
             "scores": {
                 "tassi_attuali": {
@@ -3030,7 +3085,7 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 },
                 "aspettative_tassi": {
                     "score": -1,
-                    "motivation": "Fed in ciclo tagli (2 consecutivi), stance dovish"
+                    "motivation": "Fed in ciclo tagli, stance dovish"
                 },
                 "inflazione": {
                     "score": 0,
@@ -3042,19 +3097,15 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
                 },
                 "risk_sentiment": {
                     "score": 0,
-                    "motivation": "USD safe-haven ma regime neutro, nessun flusso risk-off"
-                },
-                "bilancia_fiscale": {
-                    "score": 0,
-                    "motivation": "Deficit elevato ma nessun impatto immediato"
+                    "motivation": "Regime neutro, USD safe-haven ma nessun flusso risk-off"
                 },
                 "cot_score": {
                     "score": -1,
                     "motivation": "📉 Short in costruzione - speculatori vendono USD"
                 },
-                "news_catalyst": {
-                    "score": 0,
-                    "motivation": "NFP in linea con attese. Geopolitica già in risk sentiment"
+                "news_bonus": {
+                    "score": 1,
+                    "motivation": "Retail sales sopra attese ieri"
                 }
             }
         },
@@ -3498,9 +3549,8 @@ SCORE_PARAMETERS = [
     "inflazione",
     "crescita_pil",
     "risk_sentiment",
-    "bilancia_fiscale",
     "cot_score",
-    "news_catalyst"
+    "news_bonus"
 ]
 
 
@@ -3549,12 +3599,11 @@ def add_regime_scores_to_analysis(currency_analysis: dict, regimes_data: dict) -
 
 def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
     """
-    Valida e corregge i punteggi delle valute, in particolare news_catalyst.
+    Valida e corregge i punteggi delle valute.
     
     Regole di validazione:
-    1. news_catalyst deve essere nel range [-2, +2]
-    2. Se la motivazione contiene parole vietate E score != 0, forza a 0
-    3. Ricalcola total_score dopo le correzioni
+    1. Ogni parametro deve essere nel suo range corretto
+    2. Ricalcola total_score dopo le correzioni
     
     Args:
         currency_analysis: Dict con struttura {"EUR": {"total_score": X, "scores": {...}}, ...}
@@ -3562,72 +3611,15 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
     Returns:
         currency_analysis corretto
     """
-    # Parole che indicano "nessuna sorpresa" → score deve essere 0
-    forbidden_phrases_zero = [
-        "nessuna sorpresa",
-        "nessun dato",
-        "mancanza di dati",
-        "assenza di sorprese",
-        "dati in linea",
-        "nessuna notizia rilevante",
-        "no significant",
-        "no surprise",
-    ]
-    
-    # Parole che indicano doppio conteggio → score deve essere 0
-    # Questi temi sono GIÀ valutati in altri parametri!
-    double_count_phrases = [
-        # === GIÀ IN TASSI ATTUALI ===
-        "tassi", "tasso", "interest rate", "carry trade",
-        
-        # === GIÀ IN ASPETTATIVE TASSI ===
-        "boc dovish", "boc hawkish", "boj hawkish", "boj dovish", 
-        "boe dovish", "boe hawkish", "fed hawkish", "fed dovish",
-        "bce hawkish", "bce dovish", "ecb hawkish", "ecb dovish",
-        "rba hawkish", "rba dovish", "snb hawkish", "snb dovish",
-        "stance unica", "differenziazione monetaria", "divergenza monetaria",
-        "dovish stance", "hawkish stance", "dovish", "hawkish",
-        "bias easing", "bias tightening", "tightening", "easing",
-        "politica monetaria", "monetary policy", "rate cut", "rate hike",
-        "taglio tassi", "rialzo tassi", "pausa", "hold",
-        
-        # === GIÀ IN INFLAZIONE ===
-        "inflazione", "inflation", "cpi", "prezzi", "prices",
-        "deflazione", "deflation", "disinflazione",
-        
-        # === GIÀ IN CRESCITA/PIL ===
-        "pil", "gdp", "crescita", "growth", "recessione", "recession",
-        "stagnazione", "stagnation", "contrazione economia",
-        
-        # === GIÀ IN REGIME ECONOMICO ===
-        "pmi", "manifatturiero", "manufacturing", "servizi", "services",
-        "espansione", "contrazione", "expansion", "contraction",
-        "purchasing manager", "business activity",
-        
-        # === GIÀ IN RISK SENTIMENT ===
-        "safe-haven", "safe haven", "risk-off", "risk-on", "risk off", "risk on",
-        "tensioni geopolitiche", "geopolitical", "vix", "volatilità",
-        "flight to safety", "avversione al rischio",
-        
-        # === GIÀ IN BILANCIA/FISCALE ===
-        "debito", "debt", "deficit", "fiscale", "fiscal",
-        "bilancia commerciale", "trade balance", "current account",
-        
-        # === FRASI GENERICHE CHE INDICANO OPINIONE, NON DATI ===
-        "pesa negativamente", "pesa positivamente",
-        "pressione", "pressure", "momentum"
-    ]
-    
     # Range per ogni parametro
     score_ranges = {
         "tassi_attuali": (-1, 1),
-        "aspettative_tassi": (-2, 2),
+        "aspettative_tassi": (-1, 1),
         "inflazione": (-1, 1),
         "crescita_pil": (-1, 1),
         "risk_sentiment": (-1, 1),
-        "bilancia_fiscale": (-1, 1),
         "cot_score": (-2, 2),
-        "news_catalyst": (-2, 2),
+        "news_bonus": (-1, 1),
         "regime_economico": (-2, 2)
     }
     
@@ -3644,10 +3636,9 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
                 continue
             
             score = score_data.get("score", 0)
-            motivation = score_data.get("motivation", "").lower()
             original_score = score
             
-            # 1. Controlla range
+            # Controlla range
             if param in score_ranges:
                 min_val, max_val = score_ranges[param]
                 if score < min_val:
@@ -3657,36 +3648,10 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
                     score = max_val
                     corrections_made.append(f"{currency}/{param}: {original_score} → {score} (fuori range)")
             
-            # 2. Controlla parole vietate per news_catalyst
-            if param == "news_catalyst" and score != 0:
-                should_be_zero = False
-                reason = ""
-                
-                # Controlla frasi che indicano nessuna sorpresa
-                for phrase in forbidden_phrases_zero:
-                    if phrase in motivation:
-                        should_be_zero = True
-                        reason = f"contiene '{phrase}'"
-                        break
-                
-                # Controlla frasi che indicano doppio conteggio
-                if not should_be_zero:
-                    for phrase in double_count_phrases:
-                        if phrase in motivation:
-                            should_be_zero = True
-                            reason = f"doppio conteggio: '{phrase}'"
-                            break
-                
-                if should_be_zero:
-                    corrections_made.append(
-                        f"{currency}/news_catalyst: {original_score} → 0 ({reason})"
-                    )
-                    score = 0
-            
             # Aggiorna il punteggio
             score_data["score"] = score
         
-        # 3. Ricalcola total_score
+        # Ricalcola total_score
         new_total = 0
         for param_name in SCORE_PARAMETERS:
             if param_name in scores and isinstance(scores[param_name], dict):
@@ -3790,7 +3755,7 @@ def calculate_pair_from_currencies(currency_analysis: dict, forex_prices: dict =
     return pair_analysis
 
 
-def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None, cot_data: dict = None) -> dict:
+def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = "", additional_text: str = "", pmi_data: dict = None, forex_prices: dict = None, economic_events: dict = None, cb_history_data: dict = None, cot_data: dict = None, risk_sentiment_data: dict = None) -> dict:
     """
     Esegue l'analisi con Claude AI.
     
@@ -3804,6 +3769,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
         economic_events: Dati eventi economici recenti per News Catalyst (opzionale)
         cb_history_data: Storico decisioni banche centrali (opzionale)
         cot_data: Dati COT (Commitment of Traders) per valuta (opzionale)
+        risk_sentiment_data: Dati Risk Sentiment (VIX + S&P 500) pre-calcolati (opzionale)
     """
     client = anthropic.Anthropic(api_key=api_key)
     
@@ -3925,7 +3891,7 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 
 ---
 """
-    
+
     # Sezione COT Data (Commitment of Traders)
     cot_section = ""
     if cot_data and cot_data.get('status') == 'ok':
@@ -3970,6 +3936,36 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ---
 """
 
+    # Sezione Risk Sentiment (VIX + S&P 500)
+    risk_section = ""
+    if risk_sentiment_data and risk_sentiment_data.get('status') == 'ok':
+        regime = risk_sentiment_data.get('regime', 'neutral')
+        vix = risk_sentiment_data.get('vix')
+        sp_change = risk_sentiment_data.get('sp500_change_pct')
+        currency_scores = risk_sentiment_data.get('currency_scores', {})
+        
+        # Costruisci linee per ogni valuta
+        risk_lines = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+            score_data = currency_scores.get(curr, {})
+            score = score_data.get('score', 0)
+            reason = score_data.get('reason', '')
+            risk_lines.append(f"**{curr}:** Score: {score:+d} ({reason})")
+        
+        risk_section = f"""
+## 📊 RISK SENTIMENT (PRE-CALCOLATO da VIX + S&P 500):
+**Regime: {regime.upper()}** | VIX: {vix} | S&P 500 Δ: {sp_change:+.2f}%
+
+Punteggi pre-calcolati per risk_sentiment:
+{chr(10).join(risk_lines)}
+
+⚠️ **USA I PUNTEGGI PRE-CALCOLATI per il parametro risk_sentiment!**
+- I punteggi sono già calcolati in base a VIX e S&P 500
+- Riporta esattamente i punteggi forniti sopra per ogni valuta
+
+---
+"""
+
     today = get_italy_now()
     
     currencies_list = ", ".join(CURRENCIES.keys())
@@ -3995,6 +3991,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 {cb_history_section}
 {economic_events_section}
 {cot_section}
+{risk_section}
 {prices_section}
 {news_section}
 {additional_section}
@@ -4008,7 +4005,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 5. **PIL è LAGGING indicator**: conferma la crescita passata
 6. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
 7. Ogni **summary** deve spiegare la situazione della valuta con DATI NUMERICI
-8. **total_score** = somma dei 10 punteggi parametro (verifica sia corretto!)
+8. **total_score** = somma degli 8 punteggi parametro (verifica sia corretto!)
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
@@ -6002,13 +5999,12 @@ def display_analysis_matrix(analysis: dict):
             param_names = {
                 "tassi_attuali": "🏦 Tassi Attuali [-1/+1]",
                 "regime_economico": "🎯 Regime Economico [-2/+2]",
-                "aspettative_tassi": "📈 Aspettative Tassi [-2/+2]",
+                "aspettative_tassi": "📈 Aspettative Tassi [-1/+1]",
                 "inflazione": "💰 Inflazione [-1/+1]",
                 "crescita_pil": "📊 Crescita/PIL [-1/+1]",
                 "risk_sentiment": "⚠️ Risk Sentiment [-1/+1]",
-                "bilancia_fiscale": "💵 Bilancia/Fiscale [-1/+1]",
                 "cot_score": "📊 COT Score [-2/+2]",
-                "news_catalyst": "⚡ News Catalyst [-2/+2]"
+                "news_bonus": "📰 News Bonus [-1/+1]"
             }
             
             with col_base:
@@ -6098,40 +6094,6 @@ def display_analysis_matrix(analysis: dict):
                 total_color = "#28a745" if score_quote > 0 else "#dc3545" if score_quote < 0 else "#6c757d"
                 total_emoji = "🟢" if score_quote > 0 else "🔴" if score_quote < 0 else "⚪"
                 st.markdown(f"### {total_emoji} TOTALE: {'+' if score_quote > 0 else ''}{score_quote}")
-            
-            # === EVIDENCE NEWS CATALYST ===
-            if "news_catalyst" in scores and "evidence" in scores.get("news_catalyst", {}):
-                evidence = scores["news_catalyst"]["evidence"]
-                with st.expander("📊 Dettagli calcolo News Catalyst (verifica dati)", expanded=False):
-                    col_ev_base, col_ev_quote = st.columns(2)
-                    
-                    with col_ev_base:
-                        st.markdown(f"**{base_curr} - Dati usati:**")
-                        base_data = evidence.get("base_data", [])
-                        if base_data:
-                            for item in base_data:
-                                event = item.get("event", "N/A")
-                                if item.get("actual"):
-                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
-                                else:
-                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
-                        calc_base = evidence.get("calculation_base", "")
-                        if calc_base:
-                            st.markdown(f"**Calcolo:** {calc_base}")
-                    
-                    with col_ev_quote:
-                        st.markdown(f"**{quote_curr} - Dati usati:**")
-                        quote_data = evidence.get("quote_data", [])
-                        if quote_data:
-                            for item in quote_data:
-                                event = item.get("event", "N/A")
-                                if item.get("actual"):
-                                    st.markdown(f"- **{event}**: {item.get('actual')} vs {item.get('forecast', 'N/A')} → Sorpresa: {item.get('surprise', 'N/A')} → Score: {item.get('score', 0)}")
-                                else:
-                                    st.markdown(f"- **{event}**: {item.get('description', 'N/A')} → Score: {item.get('score', 0)}")
-                        calc_quote = evidence.get("calculation_quote", "")
-                        if calc_quote:
-                            st.markdown(f"**Calcolo:** {calc_quote}")
             
             st.markdown("---")
             
@@ -6742,6 +6704,76 @@ def main():
             st.info("ℹ️ Nessun dato COT. Clicca 🔄 per aggiornare.")
         st.markdown("---")
     
+    # --- SEZIONE 3.6: RISK SENTIMENT (VIX + S&P 500) ---
+    risk_sentiment_data = st.session_state.get('last_risk_sentiment')
+    ts_risk = st.session_state.get('timestamp_risk_sentiment')
+    
+    col_title_risk, col_status_risk, col_btn_risk = st.columns([3, 3, 1])
+    with col_title_risk:
+        st.markdown("### 📊 Risk Sentiment")
+    with col_status_risk:
+        if ts_risk:
+            ts_str = ts_risk.strftime("%d/%m %H:%M")
+            # Considera fresco se aggiornato oggi
+            today = get_italy_now().date()
+            is_fresh = ts_risk.date() == today
+            status = "🟢 Aggiornato" if is_fresh else "🟠 Da aggiornare"
+        else:
+            ts_str = "Mai"
+            status = "🟠 Da aggiornare"
+        st.caption(f"📅 {ts_str} - {status}")
+    with col_btn_risk:
+        if st.button("🔄", key="upd_risk", help="Aggiorna Risk Sentiment (VIX + S&P 500)"):
+            with st.spinner("Recupero dati VIX e S&P 500..."):
+                new_data = fetch_risk_sentiment_data()
+                st.session_state['last_risk_sentiment'] = new_data
+                st.session_state['timestamp_risk_sentiment'] = get_italy_now()
+                st.rerun()
+    
+    # Mostra dati Risk Sentiment
+    if risk_sentiment_data and risk_sentiment_data.get('status') == 'ok':
+        # Mostra regime
+        regime = risk_sentiment_data.get('regime', 'neutral')
+        interpretation = risk_sentiment_data.get('interpretation', '')
+        vix = risk_sentiment_data.get('vix')
+        sp_change = risk_sentiment_data.get('sp500_change_pct')
+        
+        # Colore regime
+        if regime == 'risk-on':
+            regime_color = "🟢"
+        elif regime == 'risk-off':
+            regime_color = "🔴"
+        else:
+            regime_color = "⚪"
+        
+        st.markdown(f"**Regime: {regime_color} {regime.upper()}**")
+        
+        col_vix, col_sp = st.columns(2)
+        with col_vix:
+            if vix is not None:
+                vix_color = "🟢" if vix < 15 else "🟠" if vix <= 20 else "🔴" if vix <= 25 else "🔴🔴"
+                st.metric("VIX", f"{vix:.1f}", help="< 15 = basso, 15-20 = normale, 20-25 = elevato, > 25 = alto")
+        with col_sp:
+            if sp_change is not None:
+                sp_color = "🟢" if sp_change > 1 else "🔴" if sp_change < -1 else "⚪"
+                st.metric("S&P 500 Δ%", f"{sp_change:+.2f}%", help="> +1% = rally, < -1% = sell-off")
+        
+        # Tabella punteggi per valuta
+        with st.expander("📋 Punteggi Risk Sentiment per valuta"):
+            currency_scores = risk_sentiment_data.get('currency_scores', {})
+            rows = []
+            for curr in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'CAD']:
+                score_data = currency_scores.get(curr, {})
+                score = score_data.get('score', 0)
+                reason = score_data.get('reason', '')
+                score_display = f"🟢 +{score}" if score > 0 else f"🔴 {score}" if score < 0 else f"⚪ {score}"
+                rows.append({'Valuta': curr, 'Score': score_display, 'Motivo': reason})
+            df_risk = pd.DataFrame(rows)
+            st.dataframe(df_risk, use_container_width=True, hide_index=True)
+    else:
+        st.info("ℹ️ Nessun dato. Clicca 🔄 per aggiornare.")
+    st.markdown("---")
+    
     # --- SEZIONE 4: PREZZI FOREX ---
     col_title4, col_status4, col_btn4 = st.columns([3, 3, 1])
     with col_title4:
@@ -6856,6 +6888,9 @@ def main():
             # Dati COT
             cot_data = st.session_state.get('last_cot_data')
             
+            # Dati Risk Sentiment
+            risk_sentiment_data = st.session_state.get('last_risk_sentiment')
+            
             # Analisi Claude
             progress.progress(30, text="🤖 Claude sta analizzando...")
             
@@ -6868,7 +6903,8 @@ def main():
                 forex_prices,
                 economic_events,
                 cb_history_data,
-                cot_data
+                cot_data,
+                risk_sentiment_data
             )
             
             # ===== INTEGRA REGIMI ECONOMICI NEI PUNTEGGI =====
