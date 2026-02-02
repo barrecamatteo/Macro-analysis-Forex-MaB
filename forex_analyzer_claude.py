@@ -2836,7 +2836,33 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 
 ---
 
-### 7️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
+### 7️⃣ COT SCORE [-2 a +2] ⭐ PESO DOPPIO
+**Logica:** Posizionamento degli speculatori (Non-Commercial) combinando Net Position, COT Index e Momentum.
+
+**IMPORTANTE:** Il COT Score è PRE-CALCOLATO e fornito nei dati di input con la sua interpretazione.
+USA il punteggio e l'interpretazione forniti direttamente, NON ricalcolare.
+
+**Come viene calcolato (per tua comprensione):**
+- **Net Position** → LONG (>0) o SHORT (<0)
+- **COT Index** → Intensità: Alto (>70%), Medio (30-70%), Basso (<30%)
+- **Momentum** → Accelerazione acquisti (🟢), Stabile (⚪), Accelerazione vendite (🔴)
+
+| Situazione | Score | Significato |
+|------------|-------|-------------|
+| LONG forte + Momentum positivo | **+2** | Molto bullish, trend forte |
+| LONG + Momentum positivo | **+1** | Bullish in costruzione |
+| LONG forte ma Momentum negativo | **0** | ⚠️ Possibile inversione |
+| SHORT + Momentum positivo (chiudono short) | **+1** | Sentiment in miglioramento |
+| Posizione neutra o segnali misti | **0** | Nessun segnale chiaro |
+| LONG ma Momentum negativo (chiudono long) | **-1** | Sentiment in peggioramento |
+| SHORT + Momentum negativo | **-1** | Bearish in costruzione |
+| SHORT forte + Momentum negativo | **-2** | Molto bearish, trend forte |
+
+⚠️ Se il dato COT non è disponibile → Score = 0
+
+---
+
+### 8️⃣ NEWS CATALYST [-2 a +2] ⭐ PESO DOPPIO
 
 **Logica:** Cattura SOLO le SORPRESE economiche recenti (actual ≠ forecast) che NON sono già valutate in altri parametri.
 
@@ -2922,50 +2948,15 @@ STEP 4: Calcola il punteggio basato sulla sorpresa
 
 ---
 
-### 8️⃣ COT INDEX [-1 a +1]
-**Logica:** Posizionamento degli speculatori (Non-Commercial) nel range 52 settimane.
-
-**IMPORTANTE:** I valori COT Index sono PRE-CALCOLATI e forniti nei dati di input.
-USA il valore fornito per assegnare il punteggio secondo questa tabella:
-
-| COT Index | Score | Motivo |
-|-----------|-------|--------|
-| > 80% | 0 | Estremo long - troppo affollato, cautela |
-| 60% - 80% | +1 | Speculatori bullish, segui il trend |
-| 40% - 60% | 0 | Posizionamento neutrale |
-| 20% - 40% | -1 | Speculatori bearish, segui il trend |
-| < 20% | 0 | Estremo short - troppo affollato, cautela |
-
-⚠️ Se il dato COT non è disponibile → Score = 0
-
----
-
-### 9️⃣ COT MOMENTUM [-1 a +1]
-**Logica:** Accelerazione del posizionamento rispetto alla media recente.
-
-**IMPORTANTE:** I valori COT Momentum sono PRE-CALCOLATI e forniti nei dati di input.
-USA il valore fornito per assegnare il punteggio:
-
-| Momentum | Score | Motivo |
-|----------|-------|--------|
-| Sopra 75° percentile | +1 | Accelerazione acquisti, speculatori stanno accumulando |
-| Nella norma | 0 | Posizionamento stabile |
-| Sotto 25° percentile | -1 | Accelerazione vendite, speculatori stanno scaricando |
-
-⚠️ Se il dato COT non è disponibile → Score = 0
-
----
-
 ## ═══════════════════════════════════════════════════════════════════
 ## RANGE TOTALI PER VALUTA
 ## ═══════════════════════════════════════════════════════════════════
 
 - **Aspettative Tassi**: da -2 a +2 (peso doppio)
+- **COT Score**: da -2 a +2 (peso doppio)
 - **News Catalyst**: da -2 a +2 (peso doppio)
-- **COT Index**: da -1 a +1
-- **COT Momentum**: da -1 a +1
-- **Altri 6 parametri**: da -1 a +1
-- **TOTALE per valuta**: da -12 a +12
+- **Altri 5 parametri**: da -1 a +1
+- **TOTALE per valuta**: da -13 a +13
 
 ## ═══════════════════════════════════════════════════════════════════
 ## FORMATO OUTPUT JSON
@@ -3004,17 +2995,13 @@ USA il valore fornito per assegnare il punteggio:
                     "score": 0,
                     "motivation": "Nessuna notizia rilevante su crisi fiscale Eurozona"
                 },
+                "cot_score": {
+                    "score": 1,
+                    "motivation": "📈 Long in costruzione - speculatori stanno accumulando EUR"
+                },
                 "news_catalyst": {
                     "score": 0,
                     "motivation": "CPI in linea con attese. Nessuna sorpresa significativa"
-                },
-                "cot_index": {
-                    "score": 0,
-                    "motivation": "COT Index 55%, posizionamento neutrale"
-                },
-                "cot_momentum": {
-                    "score": 0,
-                    "motivation": "Delta nella norma, nessuna accelerazione"
                 }
             }
         },
@@ -3046,17 +3033,13 @@ USA il valore fornito per assegnare il punteggio:
                     "score": 0,
                     "motivation": "Deficit elevato ma nessun impatto immediato"
                 },
+                "cot_score": {
+                    "score": -1,
+                    "motivation": "📉 Short in costruzione - speculatori vendono USD"
+                },
                 "news_catalyst": {
                     "score": 0,
                     "motivation": "NFP in linea con attese. Geopolitica già in risk sentiment"
-                },
-                "cot_index": {
-                    "score": 1,
-                    "motivation": "COT Index 72%, speculatori bullish su USD"
-                },
-                "cot_momentum": {
-                    "score": 1,
-                    "motivation": "Delta sopra 75° percentile, accelerazione acquisti"
                 }
             }
         },
@@ -3501,6 +3484,7 @@ SCORE_PARAMETERS = [
     "crescita_pil",
     "risk_sentiment",
     "bilancia_fiscale",
+    "cot_score",
     "news_catalyst"
 ]
 
@@ -3627,6 +3611,7 @@ def validate_and_fix_currency_scores(currency_analysis: dict) -> dict:
         "crescita_pil": (-1, 1),
         "risk_sentiment": (-1, 1),
         "bilancia_fiscale": (-1, 1),
+        "cot_score": (-2, 2),
         "news_catalyst": (-2, 2),
         "regime_economico": (-2, 2)
     }
@@ -3940,33 +3925,21 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
                     momentum = data.get('momentum', {})
                     scores = data.get('scores', {})
                     
-                    # Determina interpretazione COT Index
-                    if cot_index > 80:
-                        index_interp = "Estremo Long (0)"
-                    elif cot_index >= 60:
-                        index_interp = "Bullish (+1)"
-                    elif cot_index >= 40:
-                        index_interp = "Neutrale (0)"
-                    elif cot_index >= 20:
-                        index_interp = "Bearish (-1)"
-                    else:
-                        index_interp = "Estremo Short (0)"
+                    # Estrai il COT Score unificato e l'interpretazione
+                    cot_score = scores.get('cot_score', 0)
+                    interpretation = scores.get('interpretation', 'N/A')
                     
-                    # Determina interpretazione Momentum
+                    # Direzione Net Position
+                    net_direction = "LONG" if net_pos > 0 else "SHORT"
+                    
+                    # Delta momentum
                     delta = momentum.get('delta_current', 0)
-                    p75 = momentum.get('percentile_75', 0)
-                    p25 = momentum.get('percentile_25', 0)
-                    if delta > p75:
-                        mom_interp = "Accelerazione acquisti (+1)"
-                    elif delta < p25:
-                        mom_interp = "Accelerazione vendite (-1)"
-                    else:
-                        mom_interp = "Stabile (0)"
                     
                     cot_lines.append(
-                        f"**{curr}:** Net Position: {net_pos:+,} | "
-                        f"COT Index: {cot_index:.0f}% → {index_interp} | "
-                        f"Momentum: Δ {delta:+,} (75°perc: {p75:+,}) → {mom_interp}"
+                        f"**{curr}:** Net Position: {net_pos:+,} ({net_direction}) | "
+                        f"COT Index: {cot_index:.0f}% | "
+                        f"Momentum: Δ {delta:+,} | "
+                        f"**COT Score: {cot_score:+d}** → {interpretation}"
                     )
         
         if cot_lines:
@@ -3974,9 +3947,9 @@ def analyze_with_claude(api_key: str, macro_data: dict = None, news_text: str = 
 ## 📊 DATI COT (Commitment of Traders - Non-Commercial/Speculatori):
 {chr(10).join(cot_lines)}
 
-⚠️ **USA QUESTI VALORI PRE-CALCOLATI per i parametri COT Index e COT Momentum!**
-- COT Index: Posizionamento nel range 52 settimane (già interpretato sopra)
-- COT Momentum: Accelerazione vs media mobile 4 settimane (già interpretato sopra)
+⚠️ **USA IL COT SCORE PRE-CALCOLATO per il parametro cot_score!**
+- Il COT Score (-2 a +2) combina: Net Position (LONG/SHORT), COT Index (intensità), Momentum (direzione)
+- Riporta il punteggio e l'interpretazione esattamente come forniti sopra
 - **NOTA USD:** Il COT USD è basato sul Dollar Index (DXY), interpretazione diretta (Long DXY = Bullish USD)
 
 ---
@@ -4239,11 +4212,8 @@ def display_cot_data(cot_data: dict):
                 'Net Position': '❌ N/A',
                 'COT Index': 'N/A',
                 'Δ Sett.': 'N/A',
-                'MA(4) Δ': 'N/A',
-                '75° Perc': 'N/A',
-                'Sett.': data.get('weeks_available', 0),
-                'Min 52w': 'N/A',
-                'Max 52w': 'N/A',
+                'Score': 'N/A',
+                'Interpretazione': data.get('scores', {}).get('interpretation', 'Dati insufficienti'),
             })
             continue
         
@@ -4252,20 +4222,22 @@ def display_cot_data(cot_data: dict):
         cot_index = data.get('cot_index', 50)
         momentum = data.get('momentum', {})
         delta_current = momentum.get('delta_current', 0)
-        ma4_delta = momentum.get('ma4_delta', 0)
         p75 = momentum.get('percentile_75', 0)
         p25 = momentum.get('percentile_25', 0)
         scores = data.get('scores', {})
+        cot_score = scores.get('cot_score', 0)
+        interpretation = scores.get('interpretation', 'N/A')
         
-        # Colori COT Index
-        if cot_index > 80 or cot_index < 20:
-            cot_color = "⚪"  # Estremi
-        elif cot_index >= 60:
-            cot_color = "🟢"  # Bullish
-        elif cot_index <= 40:
-            cot_color = "🔴"  # Bearish
+        # Colore per Net Position (LONG/SHORT)
+        net_color = "🟢" if net_pos > 0 else "🔴" if net_pos < 0 else "⚪"
+        
+        # Colore per COT Index (intensità)
+        if cot_index > 70:
+            idx_color = "🔵"  # Alto
+        elif cot_index >= 30:
+            idx_color = "⚪"  # Medio
         else:
-            cot_color = "⚪"  # Neutro
+            idx_color = "🟠"  # Basso
         
         # Colori Momentum
         if delta_current > p75:
@@ -4275,16 +4247,25 @@ def display_cot_data(cot_data: dict):
         else:
             mom_color = "⚪"  # Stabile
         
+        # Colore score
+        if cot_score >= 2:
+            score_display = f"🟢🟢 +{cot_score}"
+        elif cot_score == 1:
+            score_display = f"🟢 +{cot_score}"
+        elif cot_score == 0:
+            score_display = f"⚪ {cot_score}"
+        elif cot_score == -1:
+            score_display = f"🔴 {cot_score}"
+        else:  # -2
+            score_display = f"🔴🔴 {cot_score}"
+        
         rows.append({
             'Valuta': currency,
-            'Net Position': f"{net_pos:+,}",
-            'COT Index': f"{cot_color} {cot_index:.0f}%",
+            'Net Position': f"{net_color} {net_pos:+,}",
+            'COT Index': f"{idx_color} {cot_index:.0f}%",
             'Δ Sett.': f"{mom_color} {delta_current:+,}",
-            'MA(4) Δ': f"{ma4_delta:+,}",
-            '75° Perc': f"{p75:+,}",
-            'Sett.': data.get('weeks_available', '?'),  # Debug: quante settimane
-            'Min 52w': f"{data.get('min_52w', 0):+,}",  # Debug
-            'Max 52w': f"{data.get('max_52w', 0):+,}",  # Debug
+            'Score': score_display,
+            'Interpretazione': interpretation,
         })
     
     # Mostra tabella
@@ -4324,56 +4305,56 @@ def display_cot_data(cot_data: dict):
         
         ---
         
-        ### 📈 COT Index - "Dove siamo nel range?"
+        ### 🔢 Le 3 variabili che analizziamo
         
-        Il **COT Index** misura la posizione netta attuale rispetto al range delle ultime 52 settimane:
-        
-        - **Formula**: (Net Attuale - Min 52w) / (Max 52w - Min 52w) × 100
-        - **100%** = Gli speculatori sono ai massimi di posizionamento long dell'ultimo anno
-        - **0%** = Gli speculatori sono ai massimi di posizionamento short dell'ultimo anno
-        
-        | COT Index | Colore | Interpretazione | Score |
-        |-----------|--------|-----------------|-------|
-        | > 80% | ⚪ | **Estremo Long** - Mercato affollato, possibile inversione | 0 |
-        | 60-80% | 🟢 | **Bullish** - Speculatori stanno comprando, segui il trend | +1 |
-        | 40-60% | ⚪ | **Neutro** - Nessun segnale chiaro | 0 |
-        | 20-40% | 🔴 | **Bearish** - Speculatori stanno vendendo, segui il trend | -1 |
-        | < 20% | ⚪ | **Estremo Short** - Mercato affollato, possibile inversione | 0 |
-        
-        **Perché neutro agli estremi?** Quando tutti sono già long/short, non c'è più "carburante" per continuare. 
-        Le inversioni partono spesso dagli estremi.
+        | Variabile | Cosa misura | Come si legge |
+        |-----------|-------------|---------------|
+        | **Net Position** | Direzione: sono LONG o SHORT? | 🟢 Positivo = LONG, 🔴 Negativo = SHORT |
+        | **COT Index** | Intensità rispetto a 52 settimane | 🔵 >70% = Forte, ⚪ 30-70% = Medio, 🟠 <30% = Debole |
+        | **Δ Sett. (Momentum)** | Stanno aumentando o diminuendo? | 🟢 Accelerano acquisti, 🔴 Accelerano vendite |
         
         ---
         
-        ### 🚀 Momentum - "Stanno accelerando?"
+        ### 📈 COT Score Unificato (-2 a +2)
         
-        Il **Momentum** misura se gli speculatori stanno **accelerando** i loro acquisti/vendite rispetto 
-        alla media delle ultime 4 settimane:
+        Combiniamo le 3 variabili per ottenere un **unico punteggio**:
         
-        - **Δ Sett.** = Variazione della Net Position rispetto alla settimana precedente
-        - **MA(4) Δ** = Media delle variazioni delle ultime 4 settimane
-        - Confrontiamo il Δ attuale con i percentili storici
+        #### Quando sono LONG (Net > 0):
         
-        | Momentum | Colore | Interpretazione | Score |
-        |----------|--------|-----------------|-------|
-        | > 75° percentile | 🟢 | **Accelerazione acquisti** - Stanno comprando più del solito | +1 |
-        | 25°-75° percentile | ⚪ | **Stabile** - Variazioni nella norma | 0 |
-        | < 25° percentile | 🔴 | **Accelerazione vendite** - Stanno vendendo più del solito | -1 |
+        | COT Index | Momentum | Score | Significato |
+        |-----------|----------|-------|-------------|
+        | >70% (Forte) | 🟢 Positivo | **+2** | Long forte + stanno ancora comprando |
+        | >70% (Forte) | ⚪ Stabile | **+1** | Long forte consolidato |
+        | >70% (Forte) | 🔴 Negativo | **0** | ⚠️ Long forte MA stanno vendendo |
+        | 30-70% (Medio) | 🟢 Positivo | **+1** | Long in costruzione |
+        | 30-70% (Medio) | ⚪ Stabile | **0** | Neutro |
+        | 30-70% (Medio) | 🔴 Negativo | **-1** | Stanno chiudendo i long |
+        | <30% (Debole) | 🟢 Positivo | **+1** | Ricostruendo posizioni long |
+        | <30% (Debole) | ⚪ Stabile | **0** | Neutro |
+        | <30% (Debole) | 🔴 Negativo | **-1** | Long in esaurimento |
         
-        **Perché è importante?** Il momentum cattura i cambi di direzione. Un estremo long (COT Index 85%) 
-        con momentum negativo (-1) segnala che l'inversione è già iniziata!
+        #### Quando sono SHORT (Net < 0):
+        
+        | COT Index | Momentum | Score | Significato |
+        |-----------|----------|-------|-------------|
+        | <30% (Forte) | 🔴 Negativo | **-2** | Short forte + stanno ancora vendendo |
+        | <30% (Forte) | ⚪ Stabile | **-1** | Short forte consolidato |
+        | <30% (Forte) | 🟢 Positivo | **0** | ⚠️ Short forte MA stanno comprando |
+        | 30-70% (Medio) | 🔴 Negativo | **-1** | Bearish in costruzione |
+        | 30-70% (Medio) | ⚪ Stabile | **0** | Neutro |
+        | 30-70% (Medio) | 🟢 Positivo | **+1** | Stanno chiudendo gli short |
+        | >70% (Debole) | 🔴 Negativo | **-1** | Ricostruendo posizioni short |
+        | >70% (Debole) | ⚪ Stabile | **0** | Neutro |
+        | >70% (Debole) | 🟢 Positivo | **+1** | Short in esaurimento → Bullish |
         
         ---
         
-        ### 💡 Come usare insieme COT Index + Momentum
+        ### 💡 Logica chiave
         
-        | COT Index | Momentum | Totale | Significato |
-        |-----------|----------|--------|-------------|
-        | 🟢 Bullish (+1) | 🟢 Accelera (+1) | **+2** | Forte segnale buy |
-        | 🟢 Bullish (+1) | ⚪ Stabile (0) | **+1** | Buy confermato |
-        | ⚪ Estremo (0) | 🟢 Accelera (+1) | **+1** | Ancora comprano, ma cautela |
-        | ⚪ Estremo (0) | 🔴 Rallenta (-1) | **-1** | ⚠️ Inversione in corso! |
-        | 🔴 Bearish (-1) | 🔴 Accelera (-1) | **-2** | Forte segnale sell |
+        - **Per avere +2**: LONG + posizione FORTE (Index >70%) + Momentum POSITIVO
+        - **Per avere -2**: SHORT + posizione FORTE (Index <30%) + Momentum NEGATIVO
+        - **Score 0**: Segnali misti o possibile inversione (cautela!)
+        - **Il Momentum conferma o smentisce** la direzione della Net Position
         
         ---
         
@@ -4383,7 +4364,6 @@ def display_cot_data(cot_data: dict):
         - **USD**: Basato sul Dollar Index (DXY). Long DXY = Bullish USD
         - **Altre valute**: Long EUR futures = Bullish EUR / Bearish USD
         - **Aggiornamento**: I dati escono il venerdì (riferiti al martedì precedente)
-        - **Min/Max 52w**: Range usato per calcolare il COT Index
         """)
 
 
@@ -6012,6 +5992,7 @@ def display_analysis_matrix(analysis: dict):
                 "crescita_pil": "📊 Crescita/PIL [-1/+1]",
                 "risk_sentiment": "⚠️ Risk Sentiment [-1/+1]",
                 "bilancia_fiscale": "💵 Bilancia/Fiscale [-1/+1]",
+                "cot_score": "📊 COT Score [-2/+2]",
                 "news_catalyst": "⚡ News Catalyst [-2/+2]"
             }
             
