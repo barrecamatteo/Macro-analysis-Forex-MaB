@@ -5053,8 +5053,8 @@ def display_economic_regimes(regimes_data: dict):
             "Regime": f"{regime_emoji} {regime_name}",
             "Δ PMI": f"{delta_pmi:+.1f}" if delta_pmi is not None else "N/A",
             "Δ Infl.": f"{delta_inflation:+.2f}" if delta_inflation is not None else "N/A",
-            "Mom PMI": f"{pmi_mom_emoji} {data.get('momentum_pmi', '-')}",
-            "Mom Infl": f"{infl_mom_emoji} {data.get('momentum_inflation', '-')}",
+            "Mom PMI": f"{pmi_mom_emoji} {'Forte' if pmi_strong else 'Debole'}",
+            "Mom Infl": f"{infl_mom_emoji} {'Forte' if infl_strong else 'Debole'}",
             "Score": score_display
         }
         table_rows.append(row)
@@ -6503,18 +6503,6 @@ def main():
         else:
             st.caption("❌ API Key mancante")
         
-        # Status moduli
-        modules_status = []
-        if REGIMES_MODULE_LOADED:
-            modules_status.append("Regimi ✅")
-        else:
-            modules_status.append("Regimi ❌")
-        if COT_MODULE_LOADED:
-            modules_status.append("COT ✅")
-        else:
-            modules_status.append("COT ❌")
-        st.caption(" | ".join(modules_status))
-        
         st.markdown("---")
         
         # Calendario analisi
@@ -6671,17 +6659,34 @@ def main():
                 progress_all.progress(85, text="Aggiornamento Notizie...")
                 
                 # 5. Notizie
-                new_news, new_structured = search_web_news()
+                try:
+                    new_news, new_structured = search_web_news()
+                    
+                    # Aggiungi ForexFactory news
+                    try:
+                        ff_news = fetch_forexfactory_news()
+                        if ff_news.get("success") and ff_news.get("news"):
+                            new_structured["forexfactory_direct"] = ff_news["news"]
+                    except:
+                        pass  # ForexFactory è opzionale
+                    
+                    st.session_state['last_news_text'] = new_news
+                    st.session_state['last_news_structured'] = new_structured
+                    st.session_state['timestamp_news'] = get_italy_now()
+                    save_data_timestamp('news', user_id)
+                except Exception as e:
+                    # Se fallisce, mantieni i dati esistenti
+                    pass
+                progress_all.progress(95, text="Aggiornamento Risk Sentiment...")
                 
-                # Aggiungi ForexFactory news
-                ff_news = fetch_forexfactory_news()
-                if ff_news.get("success") and ff_news.get("news"):
-                    new_structured["forexfactory_direct"] = ff_news["news"]
-                
-                st.session_state['last_news_text'] = new_news
-                st.session_state['last_news_structured'] = new_structured
-                st.session_state['timestamp_news'] = get_italy_now()
-                save_data_timestamp('news', user_id)
+                # 6. Risk Sentiment (VIX + S&P 500)
+                try:
+                    risk_data = fetch_risk_sentiment_data()
+                    st.session_state['last_risk_sentiment'] = risk_data
+                    st.session_state['timestamp_risk_sentiment'] = get_italy_now()
+                    save_data_timestamp('risk_sentiment', user_id)
+                except Exception as e:
+                    st.session_state['last_risk_sentiment'] = {'status': 'error', 'message': str(e)}
                 
                 progress_all.progress(100, text="✅ Tutti i dati aggiornati!")
                 time.sleep(0.5)
