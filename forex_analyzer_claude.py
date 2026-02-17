@@ -4889,6 +4889,144 @@ def display_pmi_table(pmi_data: dict):
         st.warning("⚠️ Nessun dato PMI da visualizzare")
 
 
+def display_inflation_table(regimes_data: dict):
+    """
+    Mostra i dati di inflazione in formato tabella con colorazione automatica.
+    
+    Design:
+    | Valuta | CPI Headline | CPI Core | Indice | Media 3m | Δ Infl | Trend |
+    |--------|--------------|----------|--------|----------|--------|-------|
+    | USD    | 3.0%         | 3.3%     | 3.21%  | 3.15%    | +0.06  | ↗️    |
+    """
+    if not regimes_data:
+        st.warning("⚠️ Nessun dato inflazione disponibile")
+        return
+    
+    # Costruisci le righe della tabella
+    table_rows = []
+    
+    # Ordine valute
+    currency_order = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+    
+    for curr in currency_order:
+        if curr not in regimes_data:
+            continue
+            
+        data = regimes_data[curr]
+        
+        if data.get("error"):
+            table_rows.append({
+                "Valuta": curr,
+                "CPI Headline": "N/A",
+                "CPI Core": "N/A",
+                "Indice": "N/A",
+                "Media 3m": "N/A",
+                "Δ Infl": "N/A",
+                "Trend": "❓"
+            })
+            continue
+        
+        # Estrai valori
+        cpi_headline = data.get("cpi_headline")
+        cpi_core = data.get("cpi_core")
+        inflation_index = data.get("inflation_index")
+        inflation_avg_3m = data.get("inflation_avg_3m")
+        delta_inflation = data.get("delta_inflation")
+        
+        # Formatta valori
+        headline_str = f"{cpi_headline:.1f}%" if cpi_headline is not None else "N/A"
+        core_str = f"{cpi_core:.1f}%" if cpi_core is not None else "-"
+        index_str = f"{inflation_index:.2f}%" if inflation_index is not None else "N/A"
+        avg_str = f"{inflation_avg_3m:.2f}%" if inflation_avg_3m is not None else "N/A"
+        
+        # Formatta delta con segno
+        if delta_inflation is not None:
+            if delta_inflation > 0:
+                delta_str = f"+{delta_inflation:.2f}"
+            else:
+                delta_str = f"{delta_inflation:.2f}"
+        else:
+            delta_str = "N/A"
+        
+        # Calcola trend
+        if delta_inflation is not None:
+            if delta_inflation > 0.3:
+                trend = "⬆️⬆️"  # Forte aumento
+            elif delta_inflation > 0.1:
+                trend = "⬆️"    # Aumento
+            elif delta_inflation > 0:
+                trend = "↗️"    # Leggero aumento
+            elif delta_inflation > -0.1:
+                trend = "➡️"    # Stabile
+            elif delta_inflation > -0.3:
+                trend = "↘️"    # Leggero calo
+            elif delta_inflation > -0.5:
+                trend = "⬇️"    # Calo
+            else:
+                trend = "⬇️⬇️"  # Forte calo
+        else:
+            trend = "❓"
+        
+        row = {
+            "Valuta": curr,
+            "CPI Headline": headline_str,
+            "CPI Core": core_str,
+            "Indice": index_str,
+            "Media 3m": avg_str,
+            "Δ Infl": delta_str,
+            "Trend": trend
+        }
+        table_rows.append(row)
+    
+    if table_rows:
+        df = pd.DataFrame(table_rows)
+        
+        # Funzione per colorare la tabella
+        def style_inflation_table(dataframe):
+            styles = pd.DataFrame('', index=dataframe.index, columns=dataframe.columns)
+            
+            for idx, row in dataframe.iterrows():
+                # Colora Delta Inflazione
+                try:
+                    delta_str = row["Δ Infl"].replace("+", "").replace("N/A", "0")
+                    delta_val = float(delta_str)
+                    # Per inflazione: aumento = rosso (negativo per valuta), calo = verde (positivo)
+                    if delta_val > 0.1:
+                        styles.loc[idx, "Δ Infl"] = 'background-color: #f8d7da; color: #721c24'  # Rosso (inflazione sale)
+                    elif delta_val < -0.1:
+                        styles.loc[idx, "Δ Infl"] = 'background-color: #d4edda; color: #155724'  # Verde (inflazione scende)
+                except:
+                    pass
+                
+                # Colora CPI Headline in base al livello
+                try:
+                    headline_str = row["CPI Headline"].replace("%", "").replace("N/A", "0")
+                    headline_val = float(headline_str)
+                    if headline_val > 3.0:
+                        styles.loc[idx, "CPI Headline"] = 'background-color: #f8d7da; color: #721c24'  # Rosso (alta)
+                    elif headline_val < 2.0:
+                        styles.loc[idx, "CPI Headline"] = 'background-color: #d4edda; color: #155724'  # Verde (bassa)
+                    else:
+                        styles.loc[idx, "CPI Headline"] = 'background-color: #fff3cd; color: #856404'  # Giallo (target)
+                except:
+                    pass
+            
+            return styles
+        
+        # Applica stile e mostra
+        styled_df = df.style.apply(lambda _: style_inflation_table(df), axis=None)
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        
+        # Legenda
+        st.caption("""
+        **Legenda:** CPI Headline = inflazione totale | CPI Core = escl. energia/food | 
+        Indice = (Core×0.7 + Headline×0.3) | Δ Infl = variazione vs media 3 mesi |
+        **Colori:** 🟢 < 2% | 🟡 2-3% (target) | 🔴 > 3%
+        """)
+    else:
+        st.warning("⚠️ Nessun dato inflazione da visualizzare")
+
+
 # ============================================================================
 # FUNZIONE DISPLAY REGIMI ECONOMICI
 # ============================================================================
@@ -6552,10 +6690,16 @@ def main():
             if regimes_data and REGIMES_MODULE_LOADED:
                 display_economic_regimes(regimes_data)
                 
-                # Toggle per vedere i dati PMI grezzi
-                if pmi_data:
-                    with st.expander("📈 Visualizza Dati PMI Grezzi", expanded=False):
-                        display_pmi_table(pmi_data)
+                # Toggle per vedere i dati grezzi
+                col_pmi, col_infl = st.columns(2)
+                with col_pmi:
+                    if pmi_data:
+                        with st.expander("📈 Dati PMI Grezzi", expanded=False):
+                            display_pmi_table(pmi_data)
+                with col_infl:
+                    if regimes_data:
+                        with st.expander("📊 Dati Inflazione Grezzi", expanded=False):
+                            display_inflation_table(regimes_data)
             elif pmi_data:
                 # Solo PMI se non ci sono regimi
                 st.info("ℹ️ Regimi non calcolati in questa analisi.")
@@ -6778,13 +6922,18 @@ def main():
         if regimes_data:
             display_economic_regimes(regimes_data)
             
-            # Toggle per vedere i dati PMI grezzi
-            with st.expander("📈 Visualizza Dati PMI Grezzi", expanded=False):
-                pmi_data_display = st.session_state.get('last_pmi_data')
-                if pmi_data_display:
-                    display_pmi_table(pmi_data_display)
-                else:
-                    st.info("ℹ️ Nessun dato PMI. Aggiorna i regimi per recuperare i dati.")
+            # Toggle per vedere i dati grezzi
+            col_pmi, col_infl = st.columns(2)
+            with col_pmi:
+                with st.expander("📈 Dati PMI Grezzi", expanded=False):
+                    pmi_data_display = st.session_state.get('last_pmi_data')
+                    if pmi_data_display:
+                        display_pmi_table(pmi_data_display)
+                    else:
+                        st.info("ℹ️ Nessun dato PMI. Aggiorna i regimi per recuperare i dati.")
+            with col_infl:
+                with st.expander("📊 Dati Inflazione Grezzi", expanded=False):
+                    display_inflation_table(regimes_data)
         else:
             st.info("ℹ️ Nessun dato regime. Clicca 🔄 per analizzare.")
         
