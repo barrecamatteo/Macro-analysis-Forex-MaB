@@ -485,19 +485,26 @@ def fetch_risk_sentiment_data() -> dict:
             result["vix"] = round(vix_value, 2)
             result["debug"].append(f"VIX: {vix_value:.2f}")
             
-            # Calcola contributo VIX
-            if vix_value < 15:
-                result["vix_contribution"] = 1  # Molto basso = risk-on
-                result["debug"].append("VIX < 15: contributo +1 (risk-on)")
+            # Calcola contributo VIX (soglie più sensibili)
+            # VIX medio storico ~15-17, sopra 20 = nervosismo, sopra 25 = paura
+            if vix_value < 14:
+                result["vix_contribution"] = 2  # Molto basso = forte risk-on
+                result["debug"].append("VIX < 14: contributo +2 (complacency)")
+            elif vix_value < 17:
+                result["vix_contribution"] = 1  # Basso = risk-on
+                result["debug"].append("VIX 14-17: contributo +1 (tranquillo)")
             elif vix_value <= 20:
                 result["vix_contribution"] = 0  # Normale
-                result["debug"].append("VIX 15-20: contributo 0 (normale)")
+                result["debug"].append("VIX 17-20: contributo 0 (normale)")
             elif vix_value <= 25:
                 result["vix_contribution"] = -1  # Elevato
-                result["debug"].append("VIX 20-25: contributo -1 (elevato)")
+                result["debug"].append("VIX 20-25: contributo -1 (nervosismo)")
+            elif vix_value <= 30:
+                result["vix_contribution"] = -2  # Alto
+                result["debug"].append("VIX 25-30: contributo -2 (paura)")
             else:
-                result["vix_contribution"] = -2  # Molto elevato
-                result["debug"].append(f"VIX > 25: contributo -2 (paura)")
+                result["vix_contribution"] = -3  # Molto alto
+                result["debug"].append(f"VIX > 30: contributo -3 (panico)")
         else:
             result["debug"].append("VIX: dati non disponibili")
         
@@ -512,16 +519,22 @@ def fetch_risk_sentiment_data() -> dict:
             result["sp500_change_pct"] = round(sp_change_pct, 2)
             result["debug"].append(f"S&P 500: {sp_change_pct:+.2f}%")
             
-            # Calcola contributo S&P
-            if sp_change_pct > 1.0:
-                result["sp500_contribution"] = 1  # Rally forte
-                result["debug"].append("S&P > +1%: contributo +1 (rally)")
-            elif sp_change_pct < -1.0:
-                result["sp500_contribution"] = -1  # Sell-off
-                result["debug"].append("S&P < -1%: contributo -1 (sell-off)")
-            else:
+            # Calcola contributo S&P (soglie più sensibili)
+            if sp_change_pct > 1.5:
+                result["sp500_contribution"] = 2  # Rally molto forte
+                result["debug"].append("S&P > +1.5%: contributo +2 (forte rally)")
+            elif sp_change_pct > 0.5:
+                result["sp500_contribution"] = 1  # Rally
+                result["debug"].append("S&P +0.5% a +1.5%: contributo +1 (rally)")
+            elif sp_change_pct >= -0.5:
                 result["sp500_contribution"] = 0  # Normale
-                result["debug"].append("S&P -1% a +1%: contributo 0 (normale)")
+                result["debug"].append("S&P -0.5% a +0.5%: contributo 0 (normale)")
+            elif sp_change_pct >= -1.5:
+                result["sp500_contribution"] = -1  # Debolezza
+                result["debug"].append("S&P -1.5% a -0.5%: contributo -1 (debolezza)")
+            else:
+                result["sp500_contribution"] = -2  # Sell-off
+                result["debug"].append("S&P < -1.5%: contributo -2 (sell-off)")
         else:
             result["debug"].append("S&P 500: dati non disponibili")
         
@@ -531,15 +544,16 @@ def fetch_risk_sentiment_data() -> dict:
         result["debug"].append(f"Risk Score totale: {risk_score}")
         
         # === DETERMINA REGIME ===
-        if risk_score >= 1:
+        # Soglie più bilanciate
+        if risk_score >= 2:
             result["regime"] = "risk-on"
-            result["interpretation"] = f"📈 RISK-ON (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
-        elif risk_score <= -2:
+            result["interpretation"] = f"📈 RISK-ON: mercati ottimisti (VIX basso, azionario forte)"
+        elif risk_score <= -1:
             result["regime"] = "risk-off"
-            result["interpretation"] = f"📉 RISK-OFF (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
+            result["interpretation"] = f"📉 RISK-OFF: mercati nervosi (VIX elevato o azionario debole)"
         else:
             result["regime"] = "neutral"
-            result["interpretation"] = f"⚪ NEUTRO (VIX: {result['vix']}, S&P: {result['sp500_change_pct']:+.1f}%)"
+            result["interpretation"] = f"⚪ NEUTRO: condizioni di mercato normali"
         
         result["debug"].append(f"Regime: {result['regime'].upper()}")
         
