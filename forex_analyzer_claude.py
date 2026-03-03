@@ -407,16 +407,18 @@ def save_data_timestamp(data_type: str, user_id: str):
 def load_data_timestamps(user_id: str) -> dict:
     """Carica tutti i timestamps dei dati per un utente."""
     timestamps = {}
-    data_types = ["macro", "cb_history", "pmi", "prices", "news"]
+    data_types = ["macro", "cb_history", "pmi", "prices", "news", "regimes", "cot", "risk_sentiment"]
     
     # Prima controlla session_state
     for dt in data_types:
         key = f"timestamp_{dt}"
-        if key in st.session_state:
+        if key in st.session_state and st.session_state[key] is not None:
             timestamps[dt] = st.session_state[key]
     
     # Se mancano timestamps, prova a recuperarli dall'ultima analisi salvata
-    if len(timestamps) < len(data_types):
+    missing_types = [dt for dt in data_types if dt not in timestamps]
+    
+    if missing_types:
         try:
             cached = get_latest_analysis_data(user_id)
             if cached.get("cached_datetime"):
@@ -424,20 +426,27 @@ def load_data_timestamps(user_id: str) -> dict:
                 if ITALY_TZ:
                     cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
                 
-                # Usa il datetime dell'analisi come fallback per i dati mancanti
+                # Mapping tra tipo e chiave nel dict
                 data_keys = {
                     "macro": "macro_data",
                     "cb_history": "cb_history_data", 
                     "pmi": "pmi_data",
                     "prices": "forex_prices",
-                    "news": "news_structured"
+                    "news": "news_structured",
+                    "regimes": "regimes_data",
+                    "cot": "cot_data",
+                    "risk_sentiment": "risk_sentiment_data"
                 }
-                for dt in data_types:
+                
+                for dt in missing_types:
                     data_key = data_keys.get(dt, f"{dt}_data")
-                    if dt not in timestamps and cached.get(data_key):
+                    # Verifica che i dati esistano e non siano vuoti
+                    data_value = cached.get(data_key)
+                    if data_value and (isinstance(data_value, dict) and len(data_value) > 0 or isinstance(data_value, list) and len(data_value) > 0):
                         timestamps[dt] = cached_dt
                         st.session_state[f"timestamp_{dt}"] = cached_dt
-        except:
+        except Exception as e:
+            # Silently fail ma logga per debug
             pass
     
     return timestamps
@@ -6697,15 +6706,33 @@ def main():
                 except:
                     pass
     
-    # Caricamento separato per COT e Risk Sentiment se mancano ma macro_data esiste
+    # Caricamento separato per Regimi, COT e Risk Sentiment se mancano ma macro_data esiste
     # (caso in cui l'utente ha ricaricato la pagina ma non ha questi dati in sessione)
     if st.session_state.get('last_macro_data'):
         temp_cache = None
         
+        # Carica Regimi se mancano
+        if not st.session_state.get('last_regimes_data') and not cached_data:
+            try:
+                temp_cache = get_latest_analysis_data(user_id)
+                if temp_cache and temp_cache.get('regimes_data'):
+                    st.session_state['last_regimes_data'] = temp_cache['regimes_data']
+                    if temp_cache.get('cached_datetime'):
+                        try:
+                            cached_dt = datetime.strptime(temp_cache['cached_datetime'], "%Y-%m-%d_%H-%M-%S")
+                            if ITALY_TZ:
+                                cached_dt = cached_dt.replace(tzinfo=ITALY_TZ)
+                            st.session_state['timestamp_regimes'] = cached_dt
+                        except:
+                            pass
+            except:
+                pass
+        
         # Carica COT se manca
         if not st.session_state.get('last_cot_data') and not cached_data:
             try:
-                temp_cache = get_latest_analysis_data(user_id)
+                if temp_cache is None:
+                    temp_cache = get_latest_analysis_data(user_id)
                 if temp_cache and temp_cache.get('cot_data'):
                     st.session_state['last_cot_data'] = temp_cache['cot_data']
                     if temp_cache.get('cached_datetime'):
@@ -6744,7 +6771,52 @@ def main():
     forex_prices = st.session_state.get('last_forex_prices')
     news_structured = st.session_state.get('last_news_structured', {})
     
-    # Carica timestamps e calcola freshness
+    # === CARICAMENTO ANTICIPATO REGIMI/COT/RISK da Supabase ===
+    # Questo DEVE avvenire PRIMA di load_data_timestamps() per avere i timestamp corretti
+    
+    # Carica Regimi da Supabase se non in session_state
+    if REGIMES_MODULE_LOADED and 'last_regimes_data' not in st.session_state and SUPABASE_ENABLED:
+        try:
+            cached_regimes, cached_ts = get_all_current_regimes(supabase_request)
+            if cached_regimes:
+                st.session_state['last_regimes_data'] = cached_regimes
+                if cached_ts:
+                    if cached_ts.tzinfo is not None and ITALY_TZ:
+                        cached_ts = cached_ts.astimezone(ITALY_TZ)
+                    st.session_state['timestamp_regimes'] = cached_ts
+        except:
+            pass
+    
+    # Carica COT da Supabase se non in session_state
+    if COT_MODULE_LOADED and 'last_cot_data' not in st.session_state and SUPABASE_ENABLED:
+        try:
+            cot_manager = COTDataManager(supabase_request)
+            cached_cot = cot_manager.get_cached_analysis()
+            if cached_cot and cached_cot.get('status') == 'ok':
+                st.session_state['last_cot_data'] = cached_cot
+                # Imposta timestamp dal last_update del COT
+                if cached_cot.get('last_update'):
+                    try:
+                        cot_ts = datetime.strptime(cached_cot['last_update'], "%Y-%m-%d")
+                        if ITALY_TZ:
+                            cot_ts = cot_ts.replace(tzinfo=ITALY_TZ)
+                        st.session_state['timestamp_cot'] = cot_ts
+                    except:
+                        st.session_state['timestamp_cot'] = get_italy_now()
+        except:
+            pass
+    
+    # Risk Sentiment: se non in session_state, carica fresco (dati real-time)
+    if 'last_risk_sentiment' not in st.session_state:
+        try:
+            auto_risk_data = fetch_risk_sentiment_data()
+            if auto_risk_data and auto_risk_data.get('status') == 'ok':
+                st.session_state['last_risk_sentiment'] = auto_risk_data
+                st.session_state['timestamp_risk_sentiment'] = get_italy_now()
+        except:
+            pass
+    
+    # Carica timestamps e calcola freshness (ORA i dati sono già caricati)
     timestamps = load_data_timestamps(user_id)
     all_fresh, freshness_details = get_all_data_freshness(timestamps)
     
@@ -6979,19 +7051,7 @@ def main():
     
     # --- SEZIONE 2: REGIMI ECONOMICI (con PMI integrato) ---
     if REGIMES_MODULE_LOADED:
-        # Carica regimi da Supabase se non presenti in session_state
-        if 'last_regimes_data' not in st.session_state and SUPABASE_ENABLED:
-            try:
-                cached_regimes, cached_ts = get_all_current_regimes(supabase_request)
-                if cached_regimes:
-                    st.session_state['last_regimes_data'] = cached_regimes
-                    if cached_ts:
-                        # Converti a timezone Italy se necessario
-                        if cached_ts.tzinfo is not None and ITALY_TZ:
-                            cached_ts = cached_ts.astimezone(ITALY_TZ)
-                        st.session_state['timestamp_regimes'] = cached_ts
-            except:
-                pass
+        # Nota: il caricamento da Supabase avviene più in alto nel codice
         
         # Calcola freshness regimi
         ts_regime = st.session_state.get('timestamp_regimes')
@@ -7082,29 +7142,7 @@ def main():
     
     # --- SEZIONE 3.5: COT DATA ---
     if COT_MODULE_LOADED:
-        # Carica COT da Supabase se non presente in session_state
-        if 'last_cot_data' not in st.session_state and SUPABASE_ENABLED:
-            try:
-                cot_manager = COTDataManager(supabase_request)
-                cached_cot = cot_manager.get_cached_analysis()
-                if cached_cot and cached_cot.get('status') == 'ok':
-                    st.session_state['last_cot_data'] = cached_cot
-                    # Imposta timestamp dall'ultimo aggiornamento se disponibile
-                    last_update = cached_cot.get('last_update')
-                    if last_update:
-                        try:
-                            from datetime import datetime
-                            if isinstance(last_update, str):
-                                ts = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
-                            else:
-                                ts = last_update
-                            if ITALY_TZ and ts.tzinfo:
-                                ts = ts.astimezone(ITALY_TZ)
-                            st.session_state['timestamp_cot'] = ts
-                        except:
-                            st.session_state['timestamp_cot'] = get_italy_now()
-            except Exception as e:
-                pass  # Silently fail, user can manually refresh
+        # Nota: il caricamento da Supabase avviene più in alto nel codice
         
         cot_data = st.session_state.get('last_cot_data')
         ts_cot = st.session_state.get('timestamp_cot')
@@ -7142,18 +7180,7 @@ def main():
         st.markdown("---")
     
     # --- SEZIONE 3.6: RISK SENTIMENT (VIX + S&P 500) ---
-    # Carica automaticamente Risk Sentiment se non presente in session_state
-    if 'last_risk_sentiment' not in st.session_state:
-        # Prima prova a caricare dall'ultima analisi in cache
-        if not st.session_state.get('last_risk_sentiment'):
-            try:
-                # Recupera automaticamente i dati (sono in tempo reale, non serve cache)
-                auto_risk_data = fetch_risk_sentiment_data()
-                if auto_risk_data and auto_risk_data.get('status') == 'ok':
-                    st.session_state['last_risk_sentiment'] = auto_risk_data
-                    st.session_state['timestamp_risk_sentiment'] = get_italy_now()
-            except:
-                pass  # Silently fail
+    # Nota: il caricamento automatico avviene più in alto nel codice
     
     risk_sentiment_data = st.session_state.get('last_risk_sentiment')
     ts_risk = st.session_state.get('timestamp_risk_sentiment')
