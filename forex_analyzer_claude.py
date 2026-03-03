@@ -1464,6 +1464,61 @@ def get_currency_scores_history(user_id: str, limit: int = 30) -> dict:
     return history
 
 
+def get_pair_differential_history(user_id: str, pair: str, limit: int = 30) -> list:
+    """
+    Estrae lo storico dei differenziali per una coppia specifica dalle analisi salvate.
+    """
+    analyses = get_user_analyses(user_id, limit=limit)
+    history = []
+    
+    for analysis in analyses:
+        dt_str = analysis.get("analysis_datetime") or analysis.get("data", {}).get("analysis_datetime", "")
+        if not dt_str:
+            continue
+        
+        try:
+            if "_" in dt_str:
+                date_part = dt_str.split("_")[0]
+                date_obj = datetime.strptime(date_part, "%Y-%m-%d")
+            else:
+                date_obj = datetime.strptime(dt_str, "%Y-%m-%d")
+            date_display = date_obj.strftime("%d/%m")
+        except:
+            date_display = dt_str[:10]
+            date_obj = None
+        
+        claude_data = analysis.get("claude_analysis") or analysis.get("data", {}).get("claude_analysis", {})
+        pair_analysis = claude_data.get("pair_analysis", {})
+        
+        if pair in pair_analysis:
+            pair_data = pair_analysis[pair]
+            
+            if "differential" in pair_data:
+                differential = pair_data["differential"]
+                score_base = pair_data.get("score_base", 0)
+                score_quote = pair_data.get("score_quote", 0)
+            else:
+                scores = pair_data.get("scores", {})
+                score_base = 0
+                score_quote = 0
+                for param_key, param_scores in scores.items():
+                    if isinstance(param_scores, dict):
+                        score_base += param_scores.get("base", 0)
+                        score_quote += param_scores.get("quote", 0)
+                differential = score_base - score_quote
+            
+            history.append({
+                "date": date_display,
+                "date_obj": date_obj,
+                "datetime": dt_str,
+                "differential": differential,
+                "score_base": score_base,
+                "score_quote": score_quote
+            })
+    
+    return list(reversed(history))
+
+
 def format_datetime_display(datetime_str: str) -> str:
     """Formatta datetime per visualizzazione: 28/12/2025 14:30 (senza secondi)"""
     try:
@@ -6073,6 +6128,84 @@ def display_analysis_matrix(analysis: dict):
             else:
                 st.info("Storico non disponibile. Esegui più analisi per vedere i grafici.")
         
+        # === Expander per vedere dettaglio punteggi singola valuta ===
+        with st.expander("🔍 Dettaglio punteggi per valuta"):
+            currencies_for_detail = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]
+            selected_currency = st.selectbox(
+                "Seleziona valuta:",
+                currencies_for_detail,
+                key="detail_currency_select"
+            )
+            
+            if selected_currency and selected_currency in currency_analysis:
+                curr_data = currency_analysis[selected_currency]
+                curr_scores = curr_data.get("scores", {})
+                total_score = curr_data.get("total_score", 0)
+                summary = curr_data.get("summary", "")
+                
+                # Header con score totale
+                score_emoji = "🟢" if total_score > 0 else "🔴" if total_score < 0 else "⚪"
+                st.markdown(f"### {score_emoji} {selected_currency} - Score Totale: {'+' if total_score > 0 else ''}{total_score}")
+                
+                if summary:
+                    st.info(f"📋 {summary}")
+                
+                # Dati macro se disponibili
+                macro_data_detail = st.session_state.get('last_macro_data', {})
+                if selected_currency in macro_data_detail:
+                    curr_macro = macro_data_detail[selected_currency]
+                    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                    with col_m1:
+                        st.metric("🏦 Tasso BC", f"{curr_macro.get('interest_rate', 'N/A')}%")
+                    with col_m2:
+                        st.metric("📈 Inflazione", f"{curr_macro.get('inflation_rate', 'N/A')}%")
+                    with col_m3:
+                        st.metric("📊 PIL", f"{curr_macro.get('gdp_growth', 'N/A')}%")
+                    with col_m4:
+                        st.metric("👥 Disoccup.", f"{curr_macro.get('unemployment', 'N/A')}%")
+                
+                st.markdown("---")
+                
+                # Mappa nomi parametri con range
+                param_names_detail = {
+                    "tassi_attuali": ("🏦 Tassi Attuali", "[-1/+1]"),
+                    "regime_economico": ("🎯 Regime Economico", "[-2/+2]"),
+                    "aspettative_tassi": ("📈 Aspettative Tassi", "[-1/+1]"),
+                    "inflazione": ("💰 Inflazione", "[-1/+1]"),
+                    "crescita_pil": ("📊 Crescita/PIL", "[-1/+1]"),
+                    "risk_sentiment": ("⚠️ Risk Sentiment", "[-1/+1]"),
+                    "cot_score": ("📊 COT Score", "[-2/+2]"),
+                    "news_bonus": ("📰 News Bonus", "[-1/+1]")
+                }
+                
+                # Tabella punteggi
+                score_rows_detail = []
+                for param_key, (param_label, param_range) in param_names_detail.items():
+                    if param_key in curr_scores:
+                        score_data = curr_scores[param_key]
+                        score_val = score_data.get("score", 0)
+                        motivation = score_data.get("motivation", "")
+                        
+                        if score_val > 0:
+                            score_display = f"🟢 +{score_val}"
+                        elif score_val < 0:
+                            score_display = f"🔴 {score_val}"
+                        else:
+                            score_display = f"⚪ 0"
+                        
+                        score_rows_detail.append({
+                            "Parametro": f"{param_label} {param_range}",
+                            "Score": score_display,
+                            "Motivazione": motivation
+                        })
+                
+                if score_rows_detail:
+                    df_detail = pd.DataFrame(score_rows_detail)
+                    st.dataframe(df_detail, use_container_width=True, hide_index=True)
+                    st.markdown(f"**Totale calcolato:** {'+' if total_score > 0 else ''}{total_score}")
+            else:
+                st.warning("Dati non disponibili per questa valuta.")
+        
         st.markdown("---")
     
     # ===== TOP BULLISH / TOP BEARISH =====
@@ -6455,61 +6588,53 @@ def display_analysis_matrix(analysis: dict):
             
             st.markdown("---")
             
-            # === SCENARI DI PREZZO ===
-            price_scenarios = pair_data.get("price_scenarios", {})
-            current_price = pair_data.get("current_price", "")
-            key_drivers = pair_data.get("key_drivers", [])
+            # === STORICO DIFFERENZIALE COPPIA ===
+            st.markdown("### 📈 Storico Differenziale Coppia")
             
-            # Mostra solo se abbiamo dati validi
-            has_valid_price = current_price and current_price not in ["", "N/A", "None"]
-            has_scenarios = price_scenarios and any(price_scenarios.values())
+            # Recupera storico
+            user_id_for_pair_history = st.session_state.get('user_id', 'default')
+            pair_scores_history = get_pair_differential_history(user_id_for_pair_history, selected_pair, limit=50)
             
-            if has_valid_price or has_scenarios:
-                st.markdown("### 📊 Scenari di Prezzo")
+            if pair_scores_history and len(pair_scores_history) > 1:
+                # Prepara dati per il grafico
+                dates_pair = [h.get("date", "") for h in pair_scores_history]
+                diffs_pair = [h.get("differential", 0) for h in pair_scores_history]
                 
-                # Box prezzo attuale (solo se valido)
-                if has_valid_price:
-                    st.markdown(f"""
-                    <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                        <p style="margin: 0;"><strong>Prezzo attuale:</strong> ~{current_price}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
+                # Grafico con Plotly
+                import plotly.graph_objects as go
                 
-                if price_scenarios:
-                    col_base_range, col_base_strong, col_quote_strong = st.columns(3)
-                    
-                    with col_base_range:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <p style="margin: 0;">🟡 <strong>Base</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_range', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_base_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #d4edda; border-radius: 8px;">
-                            <p style="margin: 0;">🟢 <strong>{base_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('base_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    
-                    with col_quote_strong:
-                        st.markdown(f"""
-                        <div style="text-align: center; padding: 15px; background: #f8d7da; border-radius: 8px;">
-                            <p style="margin: 0;">🔴 <strong>{quote_curr} Forte</strong></p>
-                            <p style="margin: 5px 0 0 0; font-size: 1.1em;">{price_scenarios.get('quote_strong', 'N/A')}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                fig_pair = go.Figure()
                 
-                st.markdown("")
-            
-            # === DRIVER CHIAVE ===
-            if key_drivers:
-                st.markdown("### 🔑 Driver Chiave")
-                for driver in key_drivers:
-                    st.markdown(f"• {driver}")
-                st.markdown("")
+                # Colori basati sul valore
+                colors_pair = ['#28a745' if d > 0 else '#dc3545' if d < 0 else '#6c757d' for d in diffs_pair]
+                
+                fig_pair.add_trace(go.Bar(
+                    x=dates_pair,
+                    y=diffs_pair,
+                    marker_color=colors_pair,
+                    name="Differenziale"
+                ))
+                
+                # Linea zero
+                fig_pair.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+                
+                fig_pair.update_layout(
+                    title=f"Storico Differenziale {selected_pair}",
+                    xaxis_title="Data",
+                    yaxis_title="Differenziale",
+                    height=300,
+                    showlegend=False,
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+                
+                st.plotly_chart(fig_pair, use_container_width=True)
+                
+                # Statistiche
+                avg_diff = sum(diffs_pair) / len(diffs_pair)
+                trend_diff = diffs_pair[-1] - diffs_pair[0] if len(diffs_pair) > 1 else 0
+                st.caption(f"📊 Media: {avg_diff:+.1f} | Min: {min(diffs_pair):+d} | Max: {max(diffs_pair):+d} | Trend: {trend_diff:+d}")
+            else:
+                st.info("Storico non disponibile. Esegui più analisi per vedere il grafico.")
         else:
             # Nessuna coppia selezionata
             st.markdown("### 🔍 Dettaglio Coppia Selezionata")
