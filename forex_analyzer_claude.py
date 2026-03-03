@@ -606,6 +606,80 @@ def fetch_risk_sentiment_data() -> dict:
     return result
 
 
+def calculate_gdp_scores(macro_data: dict) -> dict:
+    """
+    Calcola DETERMINISTICAMENTE il punteggio Crescita/PIL per ogni valuta.
+    
+    Regole fisse:
+    - PIL > 2% E inflazione < 4% → +1 (crescita sostenibile)
+    - PIL > 2% E inflazione >= 4% → 0 (crescita non sostenibile)
+    - PIL 1% - 2% → 0 (crescita moderata)
+    - PIL < 1% → -1 (stagnazione/recessione)
+    
+    Args:
+        macro_data: Dict con dati macro per valuta
+        
+    Returns:
+        Dict con score e motivation per ogni valuta
+    """
+    result = {}
+    
+    for currency in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+        if currency not in macro_data:
+            result[currency] = {
+                "score": 0,
+                "reason": "Dati PIL non disponibili"
+            }
+            continue
+        
+        data = macro_data[currency]
+        
+        # Estrai valori
+        gdp = data.get('gdp_growth')
+        inflation = data.get('inflation_rate')
+        
+        # Converti a float se necessario
+        try:
+            gdp_val = float(gdp) if gdp not in [None, 'N/A', ''] else None
+        except (ValueError, TypeError):
+            gdp_val = None
+            
+        try:
+            infl_val = float(inflation) if inflation not in [None, 'N/A', ''] else None
+        except (ValueError, TypeError):
+            infl_val = None
+        
+        # Calcola score con regole FISSE
+        if gdp_val is None:
+            score = 0
+            reason = "Dati PIL non disponibili"
+        elif gdp_val > 2.0:
+            # PIL alto - verifica sostenibilità con inflazione
+            # Soglia 3.5%: sopra il target 2% ma indica ancora pressione inflazionistica
+            if infl_val is not None and infl_val >= 3.5:
+                score = 0
+                reason = f"PIL {gdp_val:.1f}% alto ma inflazione {infl_val:.1f}% >= 3.5% (non sostenibile)"
+            else:
+                score = 1
+                infl_str = f", inflazione {infl_val:.1f}% < 3.5%" if infl_val is not None else ""
+                reason = f"PIL {gdp_val:.1f}% > 2%{infl_str} (crescita sostenibile)"
+        elif gdp_val >= 1.0:
+            score = 0
+            reason = f"PIL {gdp_val:.1f}% tra 1-2% (crescita moderata)"
+        else:
+            score = -1
+            reason = f"PIL {gdp_val:.1f}% < 1% (stagnazione)"
+        
+        result[currency] = {
+            "score": score,
+            "reason": reason,
+            "gdp_value": gdp_val,
+            "inflation_value": infl_val
+        }
+    
+    return result
+
+
 # ============================================================================
 # FUNZIONI PREZZI FOREX IN TEMPO REALE
 # ============================================================================
@@ -2983,13 +3057,15 @@ Rispondi SOLO con un JSON valido, senza markdown, senza ```json, senza commenti.
 ### 4️⃣ CRESCITA/PIL [-1 a +1]
 **Logica:** Crescita sana attira investimenti e rafforza la valuta.
 
+**IMPORTANTE:** La Crescita/PIL è PRE-CALCOLATA con regole deterministiche.
+USA il punteggio fornito nei dati di input, NON interpretare diversamente!
+
 | PIL YoY | Score | Condizione |
 |---------|-------|------------|
-| > 2% | +1 | Solo se inflazione < 4% (crescita sostenibile) |
+| > 2% | +1 | Solo se inflazione < 3.5% (crescita sostenibile) |
+| > 2% | 0 | Se inflazione >= 3.5% (crescita non sostenibile) |
 | 1% - 2% | 0 | Crescita moderata |
 | < 1% | -1 | Stagnazione o recessione |
-
-⚠️ PIL alto con inflazione alta = 0 (crescita non sostenibile)
 
 ---
 
@@ -4068,6 +4144,31 @@ Punteggi pre-calcolati per risk_sentiment:
 ---
 """
 
+    # Sezione PIL/Crescita PRE-CALCOLATA
+    gdp_section = ""
+    if macro_data:
+        gdp_scores = calculate_gdp_scores(macro_data)
+        gdp_lines = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"]:
+            if curr in gdp_scores:
+                score_data = gdp_scores[curr]
+                score = score_data.get('score', 0)
+                reason = score_data.get('reason', '')
+                gdp_lines.append(f"**{curr}:** Score: {score:+d} → {reason}")
+        
+        if gdp_lines:
+            gdp_section = f"""
+## 📊 CRESCITA/PIL (PRE-CALCOLATO):
+{chr(10).join(gdp_lines)}
+
+⚠️ **USA I PUNTEGGI PRE-CALCOLATI per il parametro crescita_pil!**
+- Regole: PIL > 2% (con infl < 3.5%) = +1 | PIL 1-2% = 0 | PIL < 1% = -1
+- PIL alto + inflazione >= 3.5% = 0 (non sostenibile)
+- Riporta ESATTAMENTE i punteggi forniti sopra, NON interpretare diversamente!
+
+---
+"""
+
     today = get_italy_now()
     
     currencies_list = ", ".join(CURRENCIES.keys())
@@ -4094,6 +4195,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 {economic_events_section}
 {cot_section}
 {risk_section}
+{gdp_section}
 {prices_section}
 {news_section}
 {additional_section}
@@ -4108,6 +4210,7 @@ Devi analizzare OGNI SINGOLA valuta nella lista seguente. NON saltare nessuna va
 6. **analysis_date** = "{today.strftime('%Y-%m-%d')}"
 7. Ogni **summary** deve spiegare la situazione della valuta con DATI NUMERICI
 8. **total_score** = somma degli 8 punteggi parametro (verifica sia corretto!)
+9. **USA I PUNTEGGI PRE-CALCOLATI** per: risk_sentiment, cot_score, crescita_pil - NON interpretare!
 
 Produci l'analisi COMPLETA in formato JSON.
 Restituisci SOLO il JSON valido, senza markdown o testo aggiuntivo.
