@@ -3186,14 +3186,24 @@ USA il punteggio e l'interpretazione forniti direttamente, NON ricalcolare.
 
 | Notizie ultime 24h | Score | Esempi |
 |-------------------|-------|--------|
-| Notizie POSITIVE per la valuta | +1 | Dati economici sopra attese, dichiarazioni BC favorevoli, upgrade rating |
-| Nessuna notizia rilevante O notizie miste | 0 | Dati in linea, nessuna sorpresa, situazione stabile |
-| Notizie NEGATIVE per la valuta | -1 | Dati economici sotto attese, dichiarazioni BC sfavorevoli, tensioni |
+| Notizie POSITIVE per la valuta | +1 | Dati economici SOPRA attese, dichiarazioni BC hawkish inattese, upgrade rating |
+| Nessuna notizia rilevante O notizie miste | **0** | Dati in linea, nessuna sorpresa, situazione stabile |
+| Notizie NEGATIVE per la valuta | -1 | Dati economici SOTTO attese, dichiarazioni BC dovish inattese, downgrade |
 
-**Regole:**
-- NON considerare temi già valutati in altri parametri (tassi, inflazione, PIL)
+**⚠️ REGOLE CRITICHE:**
+- **0 è il default!** Usa 0 se non ci sono vere sorprese
+- **-1 SOLO per notizie NEGATIVE** (dati PEGGIORI delle attese, eventi sfavorevoli)
+- **NON dare -1** se la notizia è "non significativa", "già scontata", "nessuna sorpresa" → questi sono TUTTI casi da **0**
+- NON considerare temi già valutati in altri parametri (tassi, inflazione, PIL, PMI)
 - Valuta SOLO l'impatto potenziale sul movimento di OGGI
-- Nel dubbio → 0
+- **Nel dubbio → 0**
+
+**Esempi concreti:**
+- "PMI forte ma già riflesso nei dati" → **0** (non -1!)
+- "Nessuna notizia rilevante" → **0**
+- "Dati in linea con le attese" → **0**
+- "CPI sopra attese, sorpresa inflazione" → **+1**
+- "NFP molto sotto attese, mercato deluso" → **-1**
 
 ---
 
